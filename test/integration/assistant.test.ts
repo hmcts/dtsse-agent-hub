@@ -26,10 +26,10 @@ import { CONFLUENCE_EXPORT_TIMEOUT_MS } from "../../src/assistant/confluence.ts"
 import {
   createConversation,
   findConversation,
-  hasLocalConversation,
   listConversations,
   pinConversation,
-  sidebarConversations
+  sidebarConversations,
+  sidebarKinds
 } from "../../src/assistant/conversation-store.ts";
 import { ITEMS_CREATE_REFUSED, ITEMS_EXPORT_REFUSED } from "../../src/assistant/documents.ts";
 import { readExportDefaults, saveExportDefaults } from "../../src/assistant/export-default-store.ts";
@@ -934,7 +934,7 @@ describe("conversations", () => {
     expect(await actions.deleteConversation({ conversationId: id })).toEqual({ ok: false, error: "no such conversation" });
     expect((await openAssistant(VIEWER)).conversations).toEqual([]);
     expect(await listConversations(prisma, ALICE.oid)).toEqual([]);
-    expect(await hasLocalConversation(prisma, ALICE.oid)).toBe(false);
+    expect((await sidebarKinds(prisma, ALICE.oid)).local).toBe(false);
     expect(await searchConversations(prisma, ALICE.oid, "claim")).toEqual([]);
     expect(await accessToConversation(prisma, BOB.oid, id)).toBeUndefined();
     expect(await conversationsSharedWith(prisma, BOB.oid)).toEqual([]);
@@ -956,7 +956,7 @@ describe("conversations", () => {
 
     expect(fresh).not.toBe(removed);
     expect((await listConversations(prisma, ALICE.oid)).map((chat) => chat.id)).toEqual([fresh]);
-    expect(await hasLocalConversation(prisma, ALICE.oid)).toBe(true);
+    expect((await sidebarKinds(prisma, ALICE.oid)).local).toBe(true);
   });
 
   /**

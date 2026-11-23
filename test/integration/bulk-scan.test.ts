@@ -8,9 +8,10 @@ import * as downloadRoute from "../../src/app/api/ui/assistant/bulk-scan/[id]/do
 import * as simulateRoute from "../../src/app/api/ui/assistant/bulk-scan/[id]/simulate/route.ts";
 import * as versionsRoute from "../../src/app/api/ui/assistant/bulk-scan/[id]/versions/route.ts";
 import * as uploadRoute from "../../src/app/api/ui/assistant/bulk-scan/route.ts";
+import { sidebarKinds } from "../../src/assistant/conversation-store.ts";
 import { sidebarGroups, sidebarMatches } from "../../src/assistant/views.ts";
 import { MAX_SPEC_BYTES } from "../../src/bulk-scan/spec.ts";
-import { hasSpecs, listSpecs, readSpec, searchSpecs, sidebarSpecs } from "../../src/bulk-scan/spec-store.ts";
+import { listSpecs, readSpec, searchSpecs, sidebarSpecs } from "../../src/bulk-scan/spec-store.ts";
 import { decodeEvent, HUB_CHANNEL, type NotifiedEvent } from "../../src/realtime/events.ts";
 import { bulkScanEditor, bulkScanSpecs } from "../../src/web/data.ts";
 import { ALICE, BOB } from "./assistant-pod.ts";
@@ -330,6 +331,7 @@ describe("who can reach a spec", () => {
 
     expect(await actions.deleteBulkScanSpec(formOf({ id: "not-a-uuid" }))).toMatchObject({ ok: false });
     expect(await actions.deleteBulkScanSpec(formOf({ id }))).toMatchObject({ ok: true });
+    expect(revalidated).toEqual([]);
     expect([await prisma.bulkScanSpec.count(), await prisma.bulkScanSpecVersion.count()]).toEqual([0, 0]);
     expect(await readSpec(prisma, own(ALICE), "not-a-uuid")).toBeUndefined();
   });
@@ -430,7 +432,7 @@ describe("the forms in the sidebar", () => {
     await prisma.bulkScanSpec.create({ data: { ownerOid: ALICE.oid, name: "Empty" } });
 
     expect(await listSpecs(prisma, own(ALICE))).toEqual([]);
-    expect(await hasSpecs(prisma, ALICE.oid)).toBe(false);
+    expect((await sidebarKinds(prisma, ALICE.oid)).form).toBe(false);
   });
 
   it("should return at most the limit, most recently saved first, when more forms match", async () => {
@@ -455,6 +457,16 @@ describe("the forms in the sidebar", () => {
     }
 
     expect((await sidebarSpecs(prisma, ALICE.oid, 2)).map((row) => row.name)).toEqual(["Third", "Second"]);
+  });
+
+  it("should return no more than the search limit when more forms match", async () => {
+    for (let n = 0; n < 51; n++) {
+      await prisma.bulkScanSpec.create({
+        data: { ownerOid: ALICE.oid, name: `Claim ${n}`, versions: { create: { version: 1, spec: SPEC, savedByOid: ALICE.oid } } }
+      });
+    }
+
+    expect(await sidebarMatches(prisma, ALICE.oid, "claim")).toHaveLength(50);
   });
 
   it("should find a form by its name and nobody else's when searching", async () => {

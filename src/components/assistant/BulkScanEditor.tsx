@@ -128,7 +128,7 @@ export function BulkScanEditor({
             )}
           </p>
         </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 @min-[960px]:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,2fr)]">
+        <div className="grid grid-cols-1 gap-3 @min-[640px]:grid-cols-2 @min-[960px]:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,2fr)]">
           <Labelled label="Form name">
             <input value={spec.form.name} className={INPUT} onChange={(e) => change(patchHeader(spec, { name: e.target.value }))} />
           </Labelled>

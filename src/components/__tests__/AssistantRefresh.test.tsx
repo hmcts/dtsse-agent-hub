@@ -100,14 +100,25 @@ describe("AssistantRefresh", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("should not refresh when a Bulk Scan form changed and its editor is the page", async () => {
+  const EVENTS = ["assistant_conversation", "virtual_agent", "agent_skills", "feedback", "bulk_scan_spec"];
+
+  it.each(EVENTS)("should not refresh for %s when a Bulk Scan form's editor is the page", async (type) => {
     route.pathname = "/assistant/bulk-scan/f1";
     render(<AssistantRefresh />);
 
-    hubHandlers.get("bulk_scan_spec")?.({});
+    hubHandlers.get(type)?.({});
     await settle();
 
     expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it.each(EVENTS)("should refresh for %s when the page is the Assistant's", async (type) => {
+    render(<AssistantRefresh />);
+
+    hubHandlers.get(type)?.({});
+    await settle();
+
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   it("should refresh when a Bulk Scan form changed and the page is the Bulk Scan list", async () => {

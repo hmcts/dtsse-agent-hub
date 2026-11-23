@@ -100,30 +100,25 @@ async function listed(
 }
 
 /**
- * Whether any of the owner's conversations is a session on their own computer.
+ * Which kinds of item the owner's sidebar would list, other than feedback projects, in one read: a session on their own
+ * computer (`local`), a chat on a pod (`pod`) and a Bulk Scan form (`form`).
  *
- * A fact about the whole list rather than about any one row, and so its own read: one of the kinds `showsMarks` counts
- * to decide whether any row is marked. Asked of every one of their conversations rather than of the page the sidebar
- * loaded, which is capped and so could miss the only local chat they have.
+ * Facts about the whole list rather than about any one row: the kinds `showsMarks` counts to decide whether any row is
+ * marked. Asked of every one of their conversations and forms rather than of the page the sidebar loaded, which is
+ * capped and so could miss the only one of a kind they have. One read because the search asks it on every keystroke.
  *
  * Only a chat the list would show counts (`first_content_at`): one left out for having nothing in it would otherwise put a
- * mark against every row for a reason the person cannot see.
- *
- * No `virtual_agent` filter, unlike `listConversations`: these rows have no related virtual agent to be deleted.
+ * mark against every row for a reason the person cannot see. A pod's chat counts unless its virtual agent is deleted,
+ * and a local chat has no virtual agent to filter on. A form counts once it has a version, as `listSpecs` lists it.
  */
-export async function hasLocalConversation(db: Database, ownerOid: string): Promise<boolean> {
-  return (
-    (await db.assistantConversation.findFirst({ where: { ownerOid, virtualAgentId: null, firstContentAt: { not: null } }, select: { id: true } })) !== null
-  );
-}
-
-/** Whether any of the owner's conversations the list would show runs on a pod: `hasLocalConversation`'s other half. */
-export async function hasPodConversation(db: Database, ownerOid: string): Promise<boolean> {
-  const row = await db.assistantConversation.findFirst({
-    where: { ownerOid, firstContentAt: { not: null }, virtualAgent: { desired: { not: "deleted" } } },
-    select: { id: true }
-  });
-  return row !== null;
+export async function sidebarKinds(db: Database, ownerOid: string): Promise<{ local: boolean; pod: boolean; form: boolean }> {
+  const [kinds] = await db.$queryRaw<{ local: boolean; pod: boolean; form: boolean }[]>`
+    SELECT EXISTS (SELECT 1 FROM assistant_conversation WHERE owner_oid = ${ownerOid} AND virtual_agent_id IS NULL AND first_content_at IS NOT NULL) AS local,
+           EXISTS (SELECT 1 FROM assistant_conversation c JOIN virtual_agent v ON v.id = c.virtual_agent_id
+                    WHERE c.owner_oid = ${ownerOid} AND c.first_content_at IS NOT NULL AND v.desired <> 'deleted') AS pod,
+           EXISTS (SELECT 1 FROM bulk_scan_spec s WHERE s.owner_oid = ${ownerOid} AND EXISTS (SELECT 1 FROM bulk_scan_spec_version WHERE spec_id = s.id)) AS form
+  `;
+  return kinds as { local: boolean; pod: boolean; form: boolean };
 }
 
 /**

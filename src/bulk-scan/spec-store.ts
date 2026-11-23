@@ -33,7 +33,7 @@ export interface SpecSummary {
   signedOff: boolean;
 }
 
-/** The owner's specs, newest first, each as its latest version: what the sidebar lists, with no spec JSON read. */
+/** The owner's specs, newest first, each as its latest version: what the list page shows, with no spec JSON read. */
 export async function listSpecs(db: Database, target: SpecTarget): Promise<SpecSummary[]> {
   allow(target);
   const rows = await db.bulkScanSpec.findMany({
@@ -52,11 +52,6 @@ export async function listSpecs(db: Database, target: SpecTarget): Promise<SpecS
       ? [{ id: row.id, name: row.name, version: latest.version, savedAt: latest.createdAt.toISOString(), signedOff: latest.signedOffAt !== null }]
       : [];
   });
-}
-
-/** Whether the owner has any spec `listSpecs` lists, which is whether their sidebar has a form to mark. */
-export async function hasSpecs(db: Database, ownerOid: string): Promise<boolean> {
-  return (await db.bulkScanSpec.findFirst({ where: { ownerOid, versions: { some: {} } }, select: { id: true } })) !== null;
 }
 
 /** One spec as the sidebar lists it, at its latest version. */

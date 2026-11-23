@@ -35,7 +35,7 @@ export async function signOffSpec(form: FormData): Promise<ActionResult<{ confir
   });
 }
 
-/** Deletes one of the person's own specs with all its versions. */
+/** Deletes one of the person's own specs with all its versions. The list reads again on the `bulk_scan_spec` event it sends. */
 export async function deleteBulkScanSpec(form: FormData): Promise<ActionResult<{ confirmation: string }>> {
   return await runAction<{ confirmation: string }>("delete spec", async () => {
     if (!virtualAgentsEnabled()) {
@@ -45,7 +45,6 @@ export async function deleteBulkScanSpec(form: FormData): Promise<ActionResult<{
     if (!(await deleteSpec(prisma, { actorOid: viewer.oid, ownerOid: viewer.oid }, text(form.get("id"))))) {
       return { ok: false, error: "that is not one of your form specs" };
     }
-    revalidate();
     return { ok: true, confirmation: "The form spec is deleted" };
   });
 }
