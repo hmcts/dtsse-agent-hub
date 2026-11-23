@@ -1,4 +1,3 @@
-export * from "./ccd-propose.ts";
 export * from "./cells.ts";
 export * from "./code-keys.ts";
 export * from "./codegen/case-data.ts";

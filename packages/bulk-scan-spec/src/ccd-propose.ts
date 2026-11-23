@@ -11,13 +11,13 @@ export interface ProposedCcd {
 }
 
 /** The case fields of one CCD case type's definition. */
-export interface CcdDefinition {
+interface CcdDefinition {
   /** The CaseTypeID the rows carry; absent when they are blank, as in a build made without the case type set. */
   caseType?: string;
   fields: string[];
 }
 
-export interface CcdRow {
+interface CcdRow {
   ID?: unknown;
   FieldType?: unknown;
   CaseTypeID?: unknown;
@@ -64,8 +64,9 @@ function rowsIn(path: string): unknown {
 
 /** The definition at a path: a CaseField.json, or a directory holding CaseField.json or a CaseField folder of JSON files. */
 export function loadCcdDefinition(path: string, caseType?: string): CcdDefinition {
-  const file = statSync(path).isDirectory() ? join(path, "CaseField.json") : path;
-  if (!statSync(path).isDirectory() || existsSync(file)) {
+  const isDirectory = statSync(path).isDirectory();
+  const file = isDirectory ? join(path, "CaseField.json") : path;
+  if (!isDirectory || existsSync(file)) {
     return ccdDefinitionOf(rowsIn(file), caseType);
   }
   const folder = join(path, "CaseField");

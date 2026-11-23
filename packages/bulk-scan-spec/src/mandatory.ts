@@ -1,4 +1,5 @@
 import type { Choice, DraftField } from "./pdf-draft.ts";
+import { isYesNoPair } from "./pdf-draft.ts";
 import type { Field, Operand, Review } from "./schema.ts";
 
 /** What the form says about whether a field must be filled in. */
@@ -11,8 +12,11 @@ export interface MandatoryDecision {
 /** The form saying a tick box has to be ticked. */
 const MUST_TICK = /\bmust\s+(?:be\s+)?tick(?:ed)?\b/i;
 
+/** A note saying the field applies only after a Yes or a No answer. */
+const IF_ANSWER = /\(if (yes|no)\)/i;
+
 /** A bracketed note such as "(optional)", "(if known)" or "(if you have one)" in a field's own words. */
-const OPTIONAL_NOTE = /\((?:optional|if [a-z ]+)\)/i;
+const OPTIONAL_NOTE = /\((?:optional|if (?!yes\)|no\))[a-z ]+)\)/i;
 
 interface Condition {
   label: string;
@@ -39,7 +43,7 @@ function targetOf(drafts: DraftField[], from: number, choice: Choice): number | 
 
 /** Whether the options share one key, a Yes and No pair, whose answer is the literal Yes or No its emits list. */
 function isPair(question: DraftField, choice: Choice): boolean {
-  return question.choices?.some((c) => c.slot === choice.slot && c.ticked !== choice.ticked) === true;
+  return isYesNoPair(question) && question.choices?.some((c) => c.slot === choice.slot) === true;
 }
 
 /** The test that `choice` is (or, when not `picked`, is not) the answer: the literal value for a Yes and No pair, else whether its key is ticked. */
@@ -121,6 +125,28 @@ export function decideMandatory(drafts: DraftField[], keys: string[][]): Mandato
       };
     }
     const conditions: Condition[] = [];
+    const review: Review[] = [];
+    const answer = [d.field.label, d.question].map((t) => IF_ANSWER.exec(t)?.[1]?.toLowerCase()).find((a) => a !== undefined);
+    if (answer) {
+      const before = drafts.findLastIndex((p, i) => i < index && isYesNoPair(p));
+      const asked = drafts[before];
+      const key = keys[before]?.[0];
+      if (asked && key) {
+        const value = answer === "yes" ? "Yes" : "No";
+        conditions.push({
+          label: `${quote(asked.field.label)} is answered ${value}`,
+          when: { [key]: value },
+          reason: `its own words say "(if ${answer})", after the Yes and No question ${asked.field.id ?? quote(asked.field.label)}`,
+          confidence: "medium"
+        });
+      } else {
+        review.push({
+          about: "mandatory",
+          reason: `mandatory, but a person must check it: its own words say "(if ${answer})" and no Yes and No question comes before it`,
+          confidence: "low"
+        });
+      }
+    }
     for (const at of routing.filter((r) => r < index)) {
       const result = routedBy(drafts, keys, at, index);
       if (result && "unresolved" in result) {
@@ -130,12 +156,12 @@ export function decideMandatory(drafts: DraftField[], keys: string[][]): Mandato
       }
     }
     if (conditions.length === 0) {
-      return { mandatory: "mandatory", review: [] };
+      return { mandatory: "mandatory", review };
     }
     return {
       mandatory: "conditional",
       required: { label: conditions.map((c) => c.label).join(" and "), when: Object.assign({}, ...conditions.map((c) => c.when)) as Record<string, Operand> },
-      review: [...conditions.map((c): Review => ({ about: "mandatory", reason: `required ${c.label}: ${c.reason}`, confidence: c.confidence }))]
+      review: [...review, ...conditions.map((c): Review => ({ about: "mandatory", reason: `required ${c.label}: ${c.reason}`, confidence: c.confidence }))]
     };
   });
   // A route that cannot be followed is the routing question's to report, once, not every later field's.

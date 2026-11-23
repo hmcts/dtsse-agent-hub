@@ -59,7 +59,7 @@ describe("draftFields", () => {
     expect(fields.map((d) => d.field.id)).toEqual([undefined, "2"]);
   });
 
-  it("should keep a route's words without the comma that led into them", async () => {
+  it("should keep a route's words without the comma when the label has one before go to", async () => {
     const [group] = await draftOf({
       texts: [
         { text: "1.1 What is your main language?", x: 28, y: 710 },
