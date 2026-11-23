@@ -16,16 +16,35 @@ export function isHandoffTarget(value: unknown): value is HandoffTarget {
   return typeof value === "string" && (HANDOFF_TARGETS as readonly string[]).includes(value);
 }
 
-/** The code pattern a form's case type calls for: its own for fis, sscs and probate, and the config-generator pattern for every other service. */
+/** The targets whose code is Java in a package the person names. */
+export const JAVA_TARGETS: readonly string[] = ["nfdiv", "probate"];
+export const DEFAULT_JAVA_PACKAGE = "com.example.bulkscan";
+
+/**
+ * The products whose bulk scan goes through fis-bulk-scan-api: the orchestrator's `privatelaw` service
+ * (case type PRLAPPS, the prl product) transforms there, and its form transformations also write the FIS edge-case
+ * case types A58, A59, A60 and C51, which the fis product defines. The adoption product's own case type, ADOPTION, is
+ * not served by it.
+ */
+const FIS_BULK_SCAN_PRODUCTS: readonly string[] = ["fis", "prl"];
+
+/** The code pattern a form's product calls for: fis for those served by fis-bulk-scan-api, its own for sscs and probate, and the config-generator pattern for every other service. */
 export function defaultHandoffTarget(header: Pick<FormSpec["form"], "ccdProduct">): HandoffTarget {
   const { ccdProduct } = header;
-  return ccdProduct === "fis" || ccdProduct === "sscs" || ccdProduct === "probate" ? ccdProduct : "nfdiv";
+  if (ccdProduct !== undefined && FIS_BULK_SCAN_PRODUCTS.includes(ccdProduct)) {
+    return "fis";
+  }
+  return ccdProduct === "sscs" || ccdProduct === "probate" ? ccdProduct : "nfdiv";
 }
 
 /** Whether version `version` has been signed off. A saved version that has not been is not one. */
 export function isSignedOff(versions: readonly Pick<VersionEntry, "version" | "signedOffAt">[], version: number): boolean {
   return versions.some((v) => v.version === version && v.signedOffAt !== null);
 }
+
+/** The longest a form's name or type is written into the prompt. */
+const MAX_NAMED = 100;
+export const clip = (text: string): string => [...text.trim()].slice(0, MAX_NAMED).join("");
 
 export const NO_FORM_TYPE = "Set the form type (document_sub_type) in Form details first.";
 
@@ -44,20 +63,31 @@ export interface HandoffNames {
 
 const LISTED_FIELDS = 8;
 
-/** The new case fields as the prompt lists them: the first few by id and type, then how many more. */
-function fieldList(spec: FormSpec): { count: number; listed: string } {
-  const fields = newCcdFields(spec);
-  const shown = fields.slice(0, LISTED_FIELDS).map((f) => `${f.id} (${f.type})`);
-  const more = fields.length - shown.length;
-  return { count: fields.length, listed: more > 0 ? `${shown.join(", ")} and ${more} more` : shown.join(", ") };
+/** The ids of `items` as the prompt lists them: the first few with their types, then how many more. */
+function listed(items: readonly { id: string; type: string }[]): string {
+  const shown = items.slice(0, LISTED_FIELDS).map((f) => `${f.id} (${f.type})`);
+  const more = items.length - shown.length;
+  return more > 0 ? `${shown.join(", ")} and ${more} more` : shown.join(", ");
 }
 
+const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * Where the PR goes. `ccdRepo` is the repository that holds the case type's CCD definition: the service itself for a
+ * config-generator product, but for a JSON product a definition-only repository, whose service is elsewhere.
+ */
 function serviceLine(header: FormSpec["form"]): string {
+  const caseType = header.ccdCaseTypeId ? `the CCD case type ${header.ccdCaseTypeId}` : "the form's case type";
+  const product = header.ccdProduct ? ` (product ${header.ccdProduct})` : "";
+  if (header.ccdRepo && header.ccdConfig === "config-generator") {
+    return `${caseType.charAt(0).toUpperCase()}${caseType.slice(1)}${product} is defined in ${header.ccdRepo}, a config-generator service, so that repo is the service repo.`;
+  }
+  const find = `Find the service repo that handles this product's bulk-scan callbacks, from the product's repos in apps/${header.ccdProduct ?? "<product>"}/AGENTS.md and the service-config in apps/bulk-scan/bulk-scan-orchestrator, and open the PR there.`;
   if (header.ccdRepo) {
-    return `The service repo is ${header.ccdRepo}${header.ccdCaseTypeId ? `, which holds the CCD case type ${header.ccdCaseTypeId}` : ""}.`;
+    return `The CCD definition for ${caseType}${product} is in ${header.ccdRepo}, which holds the definition and may not be the service. ${find}`;
   }
   if (header.ccdCaseTypeId) {
-    return `The form maps into the CCD case type ${header.ccdCaseTypeId}. Find the service repo that defines it in the workspace.`;
+    return `The form maps into ${caseType}${product}. Find the repo that defines it in the workspace. ${find}`;
   }
   return "No case type was picked for this form, so find the service it belongs to in the workspace from the form's name and the spec, and ask me if more than one fits.";
 }
@@ -66,22 +96,29 @@ function serviceLine(header: FormSpec["form"]): string {
 export function handoffPrompt(input: { spec: FormSpec; version: number; target: HandoffTarget; javaPackage: string; names: HandoffNames }): string {
   const { spec, version, target, javaPackage, names } = input;
   const header = spec.form;
-  const fields = fieldList(spec);
-  const javaTarget = target === "nfdiv" || target === "probate";
-  const snippet = header.ccdConfig === "config-generator" && newCcdFields(spec).some((f) => !f.id.includes("."));
+  const added = newCcdFields(spec);
+  const fields = added.filter((f) => !f.id.includes("."));
+  const members = added.filter((f) => f.id.includes("."));
+  const snippet = header.ccdConfig === "config-generator" && fields.length > 0;
+  const newFields = [
+    fields.length > 0
+      ? `Adds the ${plural(fields.length, "new CCD case field", "new CCD case fields")} under \`fields\` in ${names.newFields ?? "new-ccd-fields.json"}: ${listed(fields)}.${snippet ? " new-case-data-fields.java.txt in the zip has them as CaseData declarations." : ""}`
+      : null,
+    members.length > 0
+      ? `Adds the ${plural(members.length, "new member", "new members")} of existing complex types under \`complexMembers\` in ${names.newFields ?? "new-ccd-fields.json"}, to the type of the parent field: ${listed(members)}.`
+      : null
+  ].filter((step) => step !== null);
   const steps = [
-    `Registers form type ${header.formType} with the service's validate-ocr and transformation endpoints, following the repo's existing bulk-scan code. If the repo has none, say so in the PR and add the endpoints new.`,
-    `Adds the generated validator and transformer: the ${target} code in ${names.code}${javaTarget ? `, written in the Java package ${javaPackage}, which moves to the service's own base package` : ""}.`,
-    fields.count > 0
-      ? `Adds the ${fields.count} new CCD case ${fields.count === 1 ? "field" : "fields"} listed in ${names.newFields ?? "new-ccd-fields.json"}: ${fields.listed}.${snippet ? " new-case-data-fields.java.txt in the zip has them as CaseData declarations." : ""}`
-      : "Adds no case fields: every field the form maps to already exists.",
+    `Registers form type ${clip(header.formType)} with the service's validate-ocr and transformation endpoints, following the repo's existing bulk-scan code. If the repo has none, say so in the PR and add the endpoints new.`,
+    `Adds the generated validator and transformer: the ${target} code in ${names.code}${JAVA_TARGETS.includes(target) ? `, written in the Java package ${javaPackage}, which moves to the service's own base package` : ""}.`,
+    ...(newFields.length > 0 ? newFields : ["Adds no case fields: every field the form maps to already exists."]),
     "Crafts the exception-record case type definition for the service. That is not generated: write it to fit the service.",
     "Adds the generated envelopes (envelopes/ in the zip) as test fixtures."
   ];
   return [
-    `Hand over the Bulk Scan form "${header.name || header.formType}" (form type ${header.formType}), signed off as version ${version}. Its generated code and its spec are attached.`,
+    `Hand over the Bulk Scan form "${clip(header.name) || clip(header.formType)}" (form type ${clip(header.formType)}), signed off as version ${version}. Its generated code and its spec are attached.`,
     serviceLine(header),
-    "In that repo, open a draft PR that:",
+    "In the service repo, open a draft PR that:",
     ...steps.map((step, i) => `${i + 1}. ${step}`),
     `Then open the orchestrator's surname mapping, ${names.orchestrator} in the zip, as a separate draft PR in apps/bulk-scan/bulk-scan-orchestrator.`,
     `The generated code marks what it could not decide as TODO(sheet …). Resolve each from ${names.spec} and ${names.sheet}, or leave a clear note about it in the PR.`

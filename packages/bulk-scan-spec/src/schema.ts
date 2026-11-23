@@ -1,6 +1,9 @@
 import { z } from "zod";
 
 /** How a service configures CCD, as the workspace's case type list says. */
+/** A repository's path in the workspace: two to four segments, such as `apps/sptribs/sptribs-case-api`. */
+export const REPO_PATH = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,59}(\/[A-Za-z0-9][A-Za-z0-9_.-]{0,59}){1,3}$/;
+
 export const CCD_CONFIGS = ["config-generator", "json", "hybrid"] as const;
 export type CcdConfig = (typeof CCD_CONFIGS)[number];
 
@@ -205,7 +208,7 @@ export const formHeaderSchema = z.object({
   ccdProduct: z.string().optional(),
   ccdConfig: z.enum(CCD_CONFIGS).optional(),
   /** The workspace path of the repository that holds the picked case type, such as `apps/sptribs/sptribs-case-api`. */
-  ccdRepo: z.string().optional(),
+  ccdRepo: z.string().regex(REPO_PATH).optional().catch(undefined),
   /** The ids of the picked case type's fields, to check a typed id against. */
   ccdFieldIds: z.array(z.string()).optional(),
   /** What the form was started from, which decides whether a case type's match may propose fields for rows with no id: a sheet's unmapped rows are deliberate. */

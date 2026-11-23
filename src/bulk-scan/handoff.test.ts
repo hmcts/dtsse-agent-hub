@@ -30,8 +30,10 @@ const prompt = (spec: FormSpec, over: Partial<Parameters<typeof handoffPrompt>[0
 describe("the target a hand-over starts on", () => {
   it.each([
     ["fis", "fis"],
+    ["prl", "fis"],
     ["sscs", "sscs"],
     ["probate", "probate"],
+    ["adoption", "nfdiv"],
     ["sptribs", "nfdiv"],
     ["nfdiv", "nfdiv"],
     [undefined, "nfdiv"]
@@ -56,19 +58,33 @@ describe("whether a version is signed off", () => {
 });
 
 describe("the hand-over prompt", () => {
-  it("should name the form, its version and the service repo the case type was picked from", () => {
+  it("should name the form and version, and say the picked repo is the service for a config-generator product", () => {
     const text = prompt(
       specOf({ ccdCaseTypeId: "CriminalInjuriesCompensation", ccdProduct: "sptribs", ccdRepo: "apps/sptribs/sptribs-case-api", ccdConfig: "config-generator" })
     );
 
     expect(text).toContain('Hand over the Bulk Scan form "T210 Application" (form type T210), signed off as version 3.');
-    expect(text).toContain("The service repo is apps/sptribs/sptribs-case-api, which holds the CCD case type CriminalInjuriesCompensation.");
-    expect(text).toContain("open a draft PR");
+    expect(text).toContain(
+      "The CCD case type CriminalInjuriesCompensation (product sptribs) is defined in apps/sptribs/sptribs-case-api, a config-generator service, so that repo is the service repo."
+    );
+    expect(text).toContain("In the service repo, open a draft PR");
+    expect(text).not.toContain("Find the service repo");
+  });
+
+  it("should say the repo holds only the definition and ask the chat to find the service for a JSON product", () => {
+    const text = prompt(specOf({ ccdCaseTypeId: "CIVIL", ccdProduct: "civil", ccdRepo: "apps/civil/civil-ccd-definition", ccdConfig: "json" }));
+
+    expect(text).toContain(
+      "The CCD definition for the CCD case type CIVIL (product civil) is in apps/civil/civil-ccd-definition, which holds the definition and may not be the service."
+    );
+    expect(text).toContain(
+      "Find the service repo that handles this product's bulk-scan callbacks, from the product's repos in apps/civil/AGENTS.md and the service-config in apps/bulk-scan/bulk-scan-orchestrator"
+    );
   });
 
   it("should ask the chat to find the repo when the case type was typed and its repo is not known", () => {
     expect(prompt(specOf({ ccdCaseTypeId: "NFD" }))).toContain(
-      "The form maps into the CCD case type NFD. Find the service repo that defines it in the workspace."
+      "The form maps into the CCD case type NFD. Find the repo that defines it in the workspace. Find the service repo"
     );
   });
 
@@ -84,8 +100,30 @@ describe("the hand-over prompt", () => {
       ])
     );
 
-    expect(text).toContain("Adds the 2 new CCD case fields listed in new-ccd-fields.json: applicantName (Text), hearingDate (Date).");
+    expect(text).toContain("Adds the 2 new CCD case fields under `fields` in new-ccd-fields.json: applicantName (Text), hearingDate (Date).");
     expect(text).toContain("new-case-data-fields.java.txt in the zip");
+  });
+
+  it("should name complex members apart from fields, as new-ccd-fields.json does, and give the snippet only for fields", () => {
+    const text = prompt(
+      specOf({ ccdConfig: "config-generator" }, [
+        { id: "applicantName", type: "Text" },
+        { id: "address.County", type: "Text" }
+      ])
+    );
+
+    expect(text).toContain("Adds the 1 new CCD case field under `fields` in new-ccd-fields.json: applicantName (Text).");
+    expect(text).toContain(
+      "Adds the 1 new member of existing complex types under `complexMembers` in new-ccd-fields.json, to the type of the parent field: address.County (Text)."
+    );
+    expect(text).not.toContain("2 new CCD case fields");
+  });
+
+  it("should clip a very long form name and type where they go into the prompt", () => {
+    const text = prompt(specOf({ name: "N".repeat(500), formType: "T".repeat(500) }));
+
+    expect(text).toContain(`"${"N".repeat(100)}" (form type ${"T".repeat(100)})`);
+    expect(text).not.toContain("N".repeat(101));
   });
 
   it("should say a form with no new fields adds none", () => {

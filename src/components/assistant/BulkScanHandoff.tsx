@@ -2,15 +2,12 @@
 
 import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
-import { defaultHandoffTarget, HANDOFF_TARGETS, NO_FORM_TYPE, NOT_SIGNED_OFF } from "@/bulk-scan/handoff";
+import { DEFAULT_JAVA_PACKAGE, defaultHandoffTarget, HANDOFF_TARGETS, JAVA_TARGETS, NO_FORM_TYPE, NOT_SIGNED_OFF } from "@/bulk-scan/handoff";
 import { FIELD, PRIMARY } from "@/components/assistant/WelshParts";
 import type { ActionResult } from "@/web/action";
 import { actionThrew } from "@/web/action-fault";
 
 export type HandToAssistantAction = (form: FormData) => Promise<ActionResult<{ id: string }>>;
-
-const JAVA_TARGETS: readonly string[] = ["nfdiv", "probate"];
-const DEFAULT_PACKAGE = "com.example.bulkscan";
 
 /**
  * Starts a new Assistant conversation for the signed-off version being viewed, with its generated code, spec and
@@ -37,7 +34,7 @@ export function BulkScanHandoff({
   const typeReason = useId();
   const typed = formType.trim() !== "";
   const [target, setTarget] = useState<string>(defaultHandoffTarget({ ccdProduct }));
-  const [javaPackage, setJavaPackage] = useState(DEFAULT_PACKAGE);
+  const [javaPackage, setJavaPackage] = useState(DEFAULT_JAVA_PACKAGE);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,7 +43,9 @@ export function BulkScanHandoff({
     form.set("id", specId);
     form.set("version", String(version));
     form.set("target", target);
-    form.set("package", javaPackage);
+    if (JAVA_TARGETS.includes(target)) {
+      form.set("package", javaPackage);
+    }
     setBusy(true);
     setError(null);
     try {

@@ -501,6 +501,16 @@ describe("bulk scan hand-over to the Assistant", () => {
     expect([sent.get("target"), sent.get("package")]).toEqual(["probate", "uk.gov.hmcts.probate"]);
   });
 
+  it("should send no package for a target that is not Java", async () => {
+    const user = userEvent.setup();
+    const handToAssistant = hand({ ccdProduct: "prl" });
+
+    await user.click(button());
+
+    const sent = handToAssistant.mock.calls[0]?.[0] as FormData;
+    expect([sent.get("target"), sent.has("package")]).toEqual(["fis", false]);
+  });
+
   it("should be disabled, and say why, when the version is saved but not signed off", async () => {
     const user = userEvent.setup();
     const handToAssistant = hand({ signedOff: false });

@@ -32,10 +32,10 @@ import { requestWake, stopAnswer } from "@/assistant/session-store";
 import { attachUploads, storeUploadBytes, uploadNames } from "@/assistant/upload-store";
 import { attachedBody, MAX_ATTACHMENTS_PER_MESSAGE } from "@/assistant/uploads";
 import { needsWake } from "@/assistant/wake";
-import { handoffPrompt, isHandoffTarget, isSignedOff, NO_FORM_TYPE, NOT_SIGNED_OFF } from "@/bulk-scan/handoff";
+import { clip, handoffPrompt, isHandoffTarget, isSignedOff, JAVA_TARGETS, NO_FORM_TYPE, NOT_SIGNED_OFF } from "@/bulk-scan/handoff";
 import { handoffFiles } from "@/bulk-scan/handoff-files";
 import { loadSpec } from "@/bulk-scan/load";
-import { DEFAULT_JAVA_PACKAGE, versionOf } from "@/bulk-scan/spec";
+import { DEFAULT_JAVA_PACKAGE, type Download, versionOf } from "@/bulk-scan/spec";
 import type { ThreadMessage } from "@/messages/direct-thread";
 import { MAX_BODY } from "@/messages/limits";
 import { prisma } from "@/store/prisma";
@@ -126,7 +126,14 @@ function uploadIdsOf(raw: unknown): string[] {
   return Array.isArray(raw) ? raw.filter((id): id is string => typeof id === "string") : [];
 }
 
-async function send(oid: string, conversation: ConversationRow, typed: string, uploadIds: readonly string[] = []): Promise<ThreadMessage> {
+/** `generated` are files the hub made, stored on the message in its transaction rather than claimed from the composer. */
+async function send(
+  oid: string,
+  conversation: ConversationRow,
+  typed: string,
+  uploadIds: readonly string[] = [],
+  generated: readonly Download[] = []
+): Promise<ThreadMessage> {
   // Read before the insert, because a message of files and no words still needs a body: see `attachedBody`. The
   // claim inside the transaction below is what actually decides whether these files may be sent.
   const names = uploadIds.length === 0 ? [] : await uploadNames(prisma, oid, conversation.id, uploadIds);
@@ -149,6 +156,16 @@ async function send(oid: string, conversation: ConversationRow, typed: string, u
     // not finished uploading, or is already on another message refuses the whole send, and no message is written.
     // The first message in a copy of someone else's chat also takes the copied turns, once.
     alongside: async (tx, messageId) => {
+      for (const file of generated) {
+        await storeUploadBytes(tx, {
+          conversationId: conversation.id,
+          ownerOid: oid,
+          messageId,
+          fileName: file.fileName,
+          mediaType: file.contentType,
+          bytes: file.bytes
+        });
+      }
       await attachUploads(tx, { viewerOid: oid, conversationId: conversation.id, messageId, uploadIds });
       await attachForkContext(tx, { conversationId: conversation.id, ownerOid: oid, messageId });
     }
@@ -211,23 +228,23 @@ export async function handToAssistant(form: FormData): Promise<ActionResult<{ id
     if (spec.form.formType.trim() === "") {
       return { ok: false, error: NO_FORM_TYPE };
     }
-    const javaPackage = text(form.get("package")) || DEFAULT_JAVA_PACKAGE;
+    const javaPackage = JAVA_TARGETS.includes(target) ? text(form.get("package")) || DEFAULT_JAVA_PACKAGE : DEFAULT_JAVA_PACKAGE;
     const { files, names } = await handoffFiles(spec, target, javaPackage);
-    const prompt = handoffPrompt({ spec, version, target, javaPackage, names });
-    const conversation = await createConversation(prisma, viewer.oid, { product: "bulk-scan", title: `Hand over ${spec.form.name || spec.form.formType}` });
-    const uploadIds: string[] = [];
-    for (const file of files) {
-      uploadIds.push(
-        await storeUploadBytes(prisma, {
-          conversationId: conversation.id,
-          ownerOid: viewer.oid,
-          fileName: file.fileName,
-          mediaType: file.contentType,
-          bytes: file.bytes
-        })
-      );
+    const prompt = checkBody(handoffPrompt({ spec, version, target, javaPackage, names }), files.length);
+    if (typeof prompt !== "string") {
+      return prompt;
     }
-    await send(viewer.oid, conversation, prompt, uploadIds);
+    const conversation = await createConversation(prisma, viewer.oid, {
+      product: "bulk-scan",
+      title: `Hand over ${clip(spec.form.name) || clip(spec.form.formType)}`
+    });
+    // The files are stored in the message's own transaction, so a refused send leaves no unsent upload to be offered back.
+    try {
+      await send(viewer.oid, conversation, prompt, [], files);
+    } catch (error) {
+      await remove(prisma, viewer.oid, conversation.id);
+      throw error;
+    }
     revalidatePath("/assistant");
     return { ok: true, id: conversation.id };
   });

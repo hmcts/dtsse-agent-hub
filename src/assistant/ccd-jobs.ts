@@ -1,4 +1,4 @@
-import { CCD_CONFIGS } from "@hmcts-cft/bulk-scan-spec/schema";
+import { CCD_CONFIGS, REPO_PATH } from "@hmcts-cft/bulk-scan-spec/schema";
 import { z } from "zod";
 import { boundedArray } from "../agent-api/bounded-array.ts";
 import { definePodJobKind } from "./pod-jobs.ts";
@@ -31,8 +31,7 @@ export const CCD_JOB_ERRORS = [
 
 export const CASE_TYPE_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/;
 export const PRODUCT = /^[a-z][a-z0-9-]{0,39}$/;
-/** A repository's path in the workspace: two to four segments, such as `apps/sptribs/sptribs-case-api`. */
-export const REPO_PATH = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,59}(\/[A-Za-z0-9][A-Za-z0-9_.-]{0,59}){1,3}$/;
+export { REPO_PATH };
 
 export const CCD_CASE_TYPES = definePodJobKind({
   kind: "ccd.case-types",

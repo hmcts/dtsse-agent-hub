@@ -32,6 +32,7 @@ import { CCD_FIELD_ROWS } from "../assistant/ccd-jobs.ts";
 import { isPdf } from "../assistant/docmosis.ts";
 import { isXlsx } from "../assistant/welsh.ts";
 import { type CaseTypeChoice, withCaseType, withCaseTypeHeader } from "./case-type.ts";
+import { DEFAULT_JAVA_PACKAGE } from "./handoff.ts";
 import { zipFiles } from "./zip.ts";
 
 /**
@@ -284,7 +285,7 @@ export function simulate(spec: FormSpec, input: { scenario?: unknown; data?: unk
 }
 
 export const JAVA_PACKAGE = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/;
-export const DEFAULT_JAVA_PACKAGE = "com.example.bulkscan";
+export { DEFAULT_JAVA_PACKAGE };
 
 export function isTarget(value: unknown): value is Target {
   return typeof value === "string" && (TARGETS as readonly string[]).includes(value);

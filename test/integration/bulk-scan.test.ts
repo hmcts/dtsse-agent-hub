@@ -18,6 +18,23 @@ import { connect, insertUser, prisma, resetDatabase } from "./database.ts";
 import { jsonOf } from "./routes.ts";
 
 vi.mock("next/headers", async () => (await import("./web-session.ts")).nextHeadersMock());
+const send = vi.hoisted(() => ({ failAfterStoring: false }));
+vi.mock("../../src/assistant/send.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/assistant/send.ts")>();
+  return {
+    ...actual,
+    sendToConversation: (...[prisma, senderOid, conversation, message]: Parameters<typeof actual.sendToConversation>) =>
+      actual.sendToConversation(prisma, senderOid, conversation, {
+        ...message,
+        alongside: async (tx, messageId) => {
+          await message.alongside?.(tx, messageId);
+          if (send.failAfterStoring) {
+            throw new Error("the send failed after its files were stored");
+          }
+        }
+      })
+  };
+});
 vi.mock("next/cache", async () => (await import("./web-session.ts")).nextCacheMock());
 
 const { actAs, revalidated } = await import("./web-session.ts");
@@ -441,7 +458,7 @@ describe("handing a version to the Assistant", () => {
     const conversation = await prisma.assistantConversation.findUniqueOrThrow({ where: { id: conversationId }, select: { ownerOid: true, product: true } });
     expect(conversation).toEqual({ ownerOid: ALICE.oid, product: "bulk-scan" });
     const message = await prisma.message.findFirstOrThrow({ select: { id: true, body: true } });
-    expect(message.body).toContain("The service repo is apps/sptribs/sptribs-case-api, which holds the CCD case type CIC.");
+    expect(message.body).toContain("is defined in apps/sptribs/sptribs-case-api, a config-generator service");
     const uploads = await prisma.assistantUpload.findMany({
       where: { conversationId },
       orderBy: { createdAt: "asc" },
@@ -463,6 +480,26 @@ describe("handing a version to the Assistant", () => {
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining("Sign off this version first") });
     expect(await prisma.assistantConversation.count()).toBe(0);
     expect(await prisma.assistantUpload.count()).toBe(0);
+  });
+
+  it("should leave no conversation, message or file behind when the send fails after the files were stored", async () => {
+    const id = await spec();
+    await actions.signOffSpec(formOf({ id, version: "1" }));
+    send.failAfterStoring = true;
+    try {
+      expect(await handed(id)).toMatchObject({ ok: false });
+    } finally {
+      send.failAfterStoring = false;
+    }
+
+    expect([await prisma.assistantConversation.count(), await prisma.assistantUpload.count(), await prisma.message.count()]).toEqual([0, 0, 0]);
+  });
+
+  it("should ignore the package for a target that is not Java", async () => {
+    const id = await spec();
+    await actions.signOffSpec(formOf({ id, version: "1" }));
+
+    expect(await handed(id, { target: "fis", package: "Not A Package" })).toMatchObject({ ok: true });
   });
 
   it("should refuse a signed-off version with no form type, and create nothing", async () => {
