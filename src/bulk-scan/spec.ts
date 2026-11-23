@@ -32,7 +32,6 @@ import { CCD_FIELD_ROWS } from "../assistant/ccd-jobs.ts";
 import { isPdf } from "../assistant/docmosis.ts";
 import { isXlsx } from "../assistant/welsh.ts";
 import { type CaseTypeChoice, withCaseType, withCaseTypeHeader } from "./case-type.ts";
-import { DEFAULT_JAVA_PACKAGE } from "./handoff.ts";
 import { zipFiles } from "./zip.ts";
 
 /**
@@ -285,7 +284,6 @@ export function simulate(spec: FormSpec, input: { scenario?: unknown; data?: unk
 }
 
 export const JAVA_PACKAGE = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/;
-export { DEFAULT_JAVA_PACKAGE };
 
 export function isTarget(value: unknown): value is Target {
   return typeof value === "string" && (TARGETS as readonly string[]).includes(value);
@@ -321,19 +319,28 @@ export function specJsonDownload(spec: FormSpec): Download {
   return { fileName: `${stem(spec)}-spec.json`, contentType: "application/json", bytes: new TextEncoder().encode(`${JSON.stringify(spec, null, 2)}\n`) };
 }
 
-/** The new case fields' list, which the code zip also carries; empty when the form needs none. */
-export function newFieldsDownload(spec: FormSpec): Download | undefined {
-  const file = newCcdFieldFiles(spec).find((f) => f.path === "new-ccd-fields.json");
+/** The new case fields' list as the code zip carries it, from `newCcdFieldFiles`; absent when the form needs none. */
+export function newFieldsDownload(fieldFiles: readonly OutputFile[]): Download | undefined {
+  const file = fieldFiles.find((f) => f.path === "new-ccd-fields.json");
   return file ? { fileName: "new-ccd-fields.json", contentType: "application/json", bytes: new TextEncoder().encode(file.content) } : undefined;
 }
 
-/** Everything one codegen target writes for the form, and the form's new case fields; `extra` is written beside them. A form without a usable form type is refused with the engine's own words. */
-export function codeDownload(spec: FormSpec, target: Target, javaPackage: string, extra: (spec: FormSpec) => OutputFile[] = () => []): Download {
+/**
+ * Everything one codegen target writes for the form, the form's new case fields, and `extra` beside them. A form without
+ * a usable form type is refused with the engine's own words.
+ */
+export function codeDownload(
+  spec: FormSpec,
+  target: Target,
+  javaPackage: string,
+  extra: readonly OutputFile[] = [],
+  fieldFiles: readonly OutputFile[] = newCcdFieldFiles(spec)
+): Download {
   if (!JAVA_PACKAGE.test(javaPackage)) {
     throw new HttpError(400, "the Java package is lower-case words joined by dots, such as uk.gov.hmcts.divorce.bulkscan");
   }
   try {
-    const files = [...generateTarget(target, spec, { basePackage: javaPackage }), ...newCcdFieldFiles(spec), ...extra(spec)];
+    const files = [...generateTarget(target, spec, { basePackage: javaPackage }), ...fieldFiles, ...extra];
     return {
       fileName: `${stem(spec)}-${target}.zip`,
       contentType: "application/zip",

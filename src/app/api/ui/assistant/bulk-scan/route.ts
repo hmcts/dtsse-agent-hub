@@ -1,7 +1,7 @@
-import { CCD_CONFIGS } from "@hmcts-cft/bulk-scan-spec/schema";
+import { CCD_CONFIGS, REPO_PATH } from "@hmcts-cft/bulk-scan-spec/schema";
 import type { NextRequest } from "next/server";
 import { errorResponse, json } from "@/agent-api/http";
-import { MAX_FIELDS_BYTES, PRODUCT, REPO_PATH } from "@/assistant/ccd-jobs";
+import { MAX_FIELDS_BYTES, PRODUCT } from "@/assistant/ccd-jobs";
 import { readBytes } from "@/assistant/upload-body";
 import { describeBytes } from "@/assistant/uploads";
 import { MAX_BULK_SCAN_FILE_BYTES, MAX_CASE_TYPE_ID, MAX_UPLOAD_BODY_BYTES } from "@/bulk-scan/limits";

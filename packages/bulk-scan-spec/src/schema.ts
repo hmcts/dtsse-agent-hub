@@ -1,9 +1,9 @@
 import { z } from "zod";
 
-/** How a service configures CCD, as the workspace's case type list says. */
 /** A repository's path in the workspace: two to four segments, such as `apps/sptribs/sptribs-case-api`. */
 export const REPO_PATH = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,59}(\/[A-Za-z0-9][A-Za-z0-9_.-]{0,59}){1,3}$/;
 
+/** How a service configures CCD, as the workspace's case type list says. */
 export const CCD_CONFIGS = ["config-generator", "json", "hybrid"] as const;
 export type CcdConfig = (typeof CCD_CONFIGS)[number];
 

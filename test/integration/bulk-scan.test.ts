@@ -18,13 +18,25 @@ import { connect, insertUser, prisma, resetDatabase } from "./database.ts";
 import { jsonOf } from "./routes.ts";
 
 vi.mock("next/headers", async () => (await import("./web-session.ts")).nextHeadersMock());
-const send = vi.hoisted(() => ({ failAfterStoring: false }));
+const send = vi.hoisted(() => ({ failAfterStoring: false, failAfterCommit: false, cleanupFails: false }));
+vi.mock("../../src/assistant/conversation-store.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/assistant/conversation-store.ts")>();
+  return {
+    ...actual,
+    deleteConversation: async (...args: Parameters<typeof actual.deleteConversation>) => {
+      if (send.cleanupFails) {
+        throw new Error("the cleanup failed");
+      }
+      return await actual.deleteConversation(...args);
+    }
+  };
+});
 vi.mock("../../src/assistant/send.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/assistant/send.ts")>();
   return {
     ...actual,
-    sendToConversation: (...[prisma, senderOid, conversation, message]: Parameters<typeof actual.sendToConversation>) =>
-      actual.sendToConversation(prisma, senderOid, conversation, {
+    sendToConversation: async (...[prisma, senderOid, conversation, message]: Parameters<typeof actual.sendToConversation>) => {
+      const sent = await actual.sendToConversation(prisma, senderOid, conversation, {
         ...message,
         alongside: async (tx, messageId) => {
           await message.alongside?.(tx, messageId);
@@ -32,7 +44,12 @@ vi.mock("../../src/assistant/send.ts", async (importOriginal) => {
             throw new Error("the send failed after its files were stored");
           }
         }
-      })
+      });
+      if (send.failAfterCommit) {
+        throw new Error("the send failed after its message committed");
+      }
+      return sent;
+    }
   };
 });
 vi.mock("next/cache", async () => (await import("./web-session.ts")).nextCacheMock());
@@ -493,6 +510,38 @@ describe("handing a version to the Assistant", () => {
     }
 
     expect([await prisma.assistantConversation.count(), await prisma.assistantUpload.count(), await prisma.message.count()]).toEqual([0, 0, 0]);
+  });
+
+  it("should keep the conversation, its message and its files, and report the error, when the send fails after its message committed", async () => {
+    const id = await spec();
+    await actions.signOffSpec(formOf({ id, version: "1" }));
+    send.failAfterCommit = true;
+    try {
+      expect(await handed(id)).toMatchObject({ ok: false });
+    } finally {
+      send.failAfterCommit = false;
+    }
+
+    expect([await prisma.assistantConversation.count(), await prisma.assistantUpload.count(), await prisma.message.count()]).toEqual([1, 4, 1]);
+  });
+
+  it("should report the send's own error, and log the cleanup's, when removing the conversation fails too", async () => {
+    const id = await spec();
+    await actions.signOffSpec(formOf({ id, version: "1" }));
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    send.failAfterStoring = true;
+    send.cleanupFails = true;
+    try {
+      const result = await handed(id);
+
+      expect(result).toMatchObject({ ok: false });
+      expect(log.mock.calls.map((call) => String(call[0])).join("\n")).toContain("the hand-over's conversation could not be removed");
+      expect(log.mock.calls.map((call) => String(call[0])).join("\n")).toContain("the send failed after its files were stored");
+    } finally {
+      send.failAfterStoring = false;
+      send.cleanupFails = false;
+      log.mockRestore();
+    }
   });
 
   it("should ignore the package for a target that is not Java", async () => {

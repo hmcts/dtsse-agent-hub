@@ -32,10 +32,10 @@ import { requestWake, stopAnswer } from "@/assistant/session-store";
 import { attachUploads, storeUploadBytes, uploadNames } from "@/assistant/upload-store";
 import { attachedBody, MAX_ATTACHMENTS_PER_MESSAGE } from "@/assistant/uploads";
 import { needsWake } from "@/assistant/wake";
-import { clip, handoffPrompt, isHandoffTarget, isSignedOff, JAVA_TARGETS, NO_FORM_TYPE, NOT_SIGNED_OFF } from "@/bulk-scan/handoff";
+import { clip, DEFAULT_JAVA_PACKAGE, handoffPrompt, isHandoffTarget, isSignedOff, JAVA_TARGETS, NO_FORM_TYPE, NOT_SIGNED_OFF } from "@/bulk-scan/handoff";
 import { handoffFiles } from "@/bulk-scan/handoff-files";
 import { loadSpec } from "@/bulk-scan/load";
-import { DEFAULT_JAVA_PACKAGE, type Download, versionOf } from "@/bulk-scan/spec";
+import { type Download, versionOf } from "@/bulk-scan/spec";
 import type { ThreadMessage } from "@/messages/direct-thread";
 import { MAX_BODY } from "@/messages/limits";
 import { prisma } from "@/store/prisma";
@@ -198,11 +198,27 @@ export async function startConversation(input: { product: unknown; body: unknown
 }
 
 /**
+ * Removes the conversation a hand-over made when its send failed, unless the message committed: the files are stored in
+ * the message's transaction, so any upload says it did. A cleanup that fails is logged, so the send's own error is the
+ * one the caller reports.
+ */
+async function removeUnsent(oid: string, conversationId: string): Promise<void> {
+  try {
+    if ((await prisma.assistantUpload.count({ where: { conversationId } })) === 0) {
+      await remove(prisma, oid, conversationId);
+    }
+  } catch (cleanup) {
+    console.error(`the hand-over's conversation could not be removed: ${cleanup instanceof Error ? (cleanup.stack ?? cleanup.message) : String(cleanup)}`);
+  }
+}
+
+/**
  * Hands a signed-off Bulk Scan form to the Assistant: a new conversation whose first message asks for the service's pull
  * request and carries the form's generated code, spec and transformation sheet. Only the owner's own signed-off version
  * goes: `loadSpec` reports anyone else's form as missing, and a version that is saved but not signed off is refused.
- * The files are stored before the message, and the message claims them in its own transaction, so a refused send leaves
- * no half-attached message; the empty conversation it leaves is the one `sweepUploads` removes.
+ * The files are stored in the message's own transaction, so a refused send leaves neither a message nor a file. A
+ * conversation whose send failed before its message committed is removed; one whose message committed is kept, with the
+ * error reported, because the person's Assistant already has the hand-over.
  */
 export async function handToAssistant(form: FormData): Promise<ActionResult<{ id: string }>> {
   return await runAction<{ id: string }>("hand to assistant", async () => {
@@ -229,8 +245,8 @@ export async function handToAssistant(form: FormData): Promise<ActionResult<{ id
       return { ok: false, error: NO_FORM_TYPE };
     }
     const javaPackage = JAVA_TARGETS.includes(target) ? text(form.get("package")) || DEFAULT_JAVA_PACKAGE : DEFAULT_JAVA_PACKAGE;
-    const { files, names } = await handoffFiles(spec, target, javaPackage);
-    const prompt = checkBody(handoffPrompt({ spec, version, target, javaPackage, names }), files.length);
+    const { files, names, newFields } = await handoffFiles(spec, target, javaPackage);
+    const prompt = checkBody(handoffPrompt({ spec, version, target, javaPackage, names, newFields }), files.length);
     if (typeof prompt !== "string") {
       return prompt;
     }
@@ -238,11 +254,10 @@ export async function handToAssistant(form: FormData): Promise<ActionResult<{ id
       product: "bulk-scan",
       title: `Hand over ${clip(spec.form.name) || clip(spec.form.formType)}`
     });
-    // The files are stored in the message's own transaction, so a refused send leaves no unsent upload to be offered back.
     try {
       await send(viewer.oid, conversation, prompt, [], files);
     } catch (error) {
-      await remove(prisma, viewer.oid, conversation.id);
+      await removeUnsent(viewer.oid, conversation.id);
       throw error;
     }
     revalidatePath("/assistant");

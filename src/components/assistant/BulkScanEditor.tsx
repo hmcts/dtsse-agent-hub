@@ -183,6 +183,7 @@ export function BulkScanEditor({
             version={view.version}
             signedOff={isSignedOff(view.versions, view.version)}
             formType={view.spec.form.formType}
+            ccdCaseTypeId={view.spec.form.ccdCaseTypeId}
             ccdProduct={view.spec.form.ccdProduct}
             handToAssistant={handToAssistant}
           />

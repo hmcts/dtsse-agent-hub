@@ -1,4 +1,5 @@
 import { type FormSpec, formSpecSchema } from "@hmcts-cft/bulk-scan-spec";
+import { newCcdFields } from "@hmcts-cft/bulk-scan-spec/ccd-match";
 import { describe, expect, it } from "vitest";
 import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_UPLOAD_BYTES } from "../assistant/uploads.ts";
 import { defaultHandoffTarget, type HandoffNames, handoffPrompt, handoffRefusal, isHandoffTarget, isSignedOff } from "./handoff.ts";
@@ -25,20 +26,25 @@ function specOf(form: object, newFields: { id: string; type: string }[] = []): F
 }
 
 const prompt = (spec: FormSpec, over: Partial<Parameters<typeof handoffPrompt>[0]> = {}) =>
-  handoffPrompt({ spec, version: 3, target: "nfdiv", javaPackage: "com.example.bulkscan", names: NAMES, ...over });
+  handoffPrompt({ spec, version: 3, target: "nfdiv", javaPackage: "com.example.bulkscan", names: NAMES, newFields: newCcdFields(spec), ...over });
 
 describe("the target a hand-over starts on", () => {
   it.each([
-    ["fis", "fis"],
-    ["prl", "fis"],
-    ["sscs", "sscs"],
-    ["probate", "probate"],
-    ["adoption", "nfdiv"],
-    ["sptribs", "nfdiv"],
-    ["nfdiv", "nfdiv"],
-    [undefined, "nfdiv"]
-  ])("should start %s on the %s pattern", (product, target) => {
-    expect(defaultHandoffTarget({ ccdProduct: product })).toBe(target);
+    ["PRLAPPS", "prl", "fis"],
+    ["PRLAPPS", "fis", "fis"],
+    ["A58", "adoption", "fis"],
+    ["A59", "fis", "fis"],
+    ["A60", "fis", "fis"],
+    ["C51", "fis", "fis"],
+    ["ADOPTION", "adoption", "nfdiv"],
+    ["CIVIL", "civil", "nfdiv"],
+    ["CriminalInjuriesCompensation", "sptribs", "nfdiv"],
+    ["SSCS", "sscs", "sscs"],
+    ["Probate", "probate", "probate"],
+    [undefined, "fis", "nfdiv"],
+    [undefined, undefined, "nfdiv"]
+  ])("should start case type %s of product %s on the %s pattern", (ccdCaseTypeId, ccdProduct, target) => {
+    expect(defaultHandoffTarget({ ccdCaseTypeId, ccdProduct })).toBe(target);
   });
 
   it("should offer only the four service patterns", () => {
@@ -69,6 +75,22 @@ describe("the hand-over prompt", () => {
     );
     expect(text).toContain("In the service repo, open a draft PR");
     expect(text).not.toContain("Find the service repo");
+  });
+
+  it.each([
+    ["PRLAPPS", "prl", "apps/prl/prl-ccd-definitions"],
+    ["A58", "adoption", "apps/adoption/adoption-cos-api"]
+  ])("should name fis-bulk-scan-api as the service for case type %s whatever product and repo define it", (ccdCaseTypeId, ccdProduct, ccdRepo) => {
+    const text = prompt(specOf({ ccdCaseTypeId, ccdProduct, ccdRepo, ccdConfig: ccdProduct === "adoption" ? "config-generator" : "json" }));
+
+    expect(text).toContain(
+      `The CCD case type ${ccdCaseTypeId} (product ${ccdProduct}) is transformed by apps/fis/fis-bulk-scan-api, which holds the config-driven transformations, so that is the service repo. The CCD definition is in ${ccdRepo}.`
+    );
+    expect(text).not.toContain("Find the service repo");
+  });
+
+  it("should ask for the JURISDICTION placeholder in the envelopes to be replaced before they are fixtures", () => {
+    expect(prompt(specOf({}))).toContain("after replacing the JURISDICTION placeholder in them with the service's bulk-scan jurisdiction");
   });
 
   it("should say the repo holds only the definition and ask the chat to find the service for a JSON product", () => {
@@ -151,7 +173,7 @@ describe("the hand-over prompt", () => {
       "Registers form type T210 with the service's validate-ocr and transformation endpoints, following the repo's existing bulk-scan code. If the repo has none, say so"
     );
     expect(text).toContain("Crafts the exception-record case type definition for the service. That is not generated");
-    expect(text).toContain("Adds the generated envelopes (envelopes/ in the zip) as test fixtures.");
+    expect(text).toContain("Adds the generated envelopes (envelopes/ in the zip) as test fixtures, after");
     expect(text).toContain("apps/bulk-scan/bulk-scan-orchestrator");
     expect(text).toContain("Resolve each from T210-spec.json and T210-transformation.xlsx, or leave a clear note about it in the PR.");
   });

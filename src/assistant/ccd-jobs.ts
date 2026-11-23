@@ -31,7 +31,6 @@ export const CCD_JOB_ERRORS = [
 
 export const CASE_TYPE_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/;
 export const PRODUCT = /^[a-z][a-z0-9-]{0,39}$/;
-export { REPO_PATH };
 
 export const CCD_CASE_TYPES = definePodJobKind({
   kind: "ccd.case-types",

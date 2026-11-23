@@ -19,6 +19,7 @@ export function BulkScanHandoff({
   version,
   signedOff,
   formType,
+  ccdCaseTypeId,
   ccdProduct,
   handToAssistant
 }: Readonly<{
@@ -26,6 +27,7 @@ export function BulkScanHandoff({
   version: number;
   signedOff: boolean;
   formType: string;
+  ccdCaseTypeId: string | undefined;
   ccdProduct: string | undefined;
   handToAssistant: HandToAssistantAction;
 }>) {
@@ -33,7 +35,7 @@ export function BulkScanHandoff({
   const reason = useId();
   const typeReason = useId();
   const typed = formType.trim() !== "";
-  const [target, setTarget] = useState<string>(defaultHandoffTarget({ ccdProduct }));
+  const [target, setTarget] = useState<string>(defaultHandoffTarget({ ccdCaseTypeId, ccdProduct }));
   const [javaPackage, setJavaPackage] = useState(DEFAULT_JAVA_PACKAGE);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

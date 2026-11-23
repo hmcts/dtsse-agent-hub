@@ -469,7 +469,18 @@ describe("typing into the editor", () => {
 describe("bulk scan hand-over to the Assistant", () => {
   const hand = (over: Partial<Parameters<typeof BulkScanHandoff>[0]> = {}) => {
     const handToAssistant = vi.fn().mockResolvedValue({ ok: true, id: "c9" });
-    render(<BulkScanHandoff specId="s1" version={2} signedOff formType="T1" ccdProduct={undefined} handToAssistant={handToAssistant} {...over} />);
+    render(
+      <BulkScanHandoff
+        specId="s1"
+        version={2}
+        signedOff
+        formType="T1"
+        ccdCaseTypeId={undefined}
+        ccdProduct={undefined}
+        handToAssistant={handToAssistant}
+        {...over}
+      />
+    );
     return handToAssistant;
   };
   const button = () => screen.getByRole("button", { name: /Hand to the Assistant|Handing over/ }) as HTMLButtonElement;
@@ -487,7 +498,7 @@ describe("bulk scan hand-over to the Assistant", () => {
 
   it("should start on the pattern of the case type's product and let the person change it", async () => {
     const user = userEvent.setup();
-    const handToAssistant = hand({ ccdProduct: "fis" });
+    const handToAssistant = hand({ ccdCaseTypeId: "C51", ccdProduct: "fis" });
     const select = screen.getByLabelText("Code pattern") as HTMLSelectElement;
 
     expect(select.value).toBe("fis");
@@ -503,7 +514,7 @@ describe("bulk scan hand-over to the Assistant", () => {
 
   it("should send no package for a target that is not Java", async () => {
     const user = userEvent.setup();
-    const handToAssistant = hand({ ccdProduct: "prl" });
+    const handToAssistant = hand({ ccdCaseTypeId: "PRLAPPS", ccdProduct: "prl" });
 
     await user.click(button());
 
