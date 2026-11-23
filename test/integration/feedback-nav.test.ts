@@ -4,6 +4,7 @@ import { markProjectSeen, navProjects, pinProject, projectsLastActive, searchPro
 import { completeRecording, startRecording } from "../../src/feedback/recording-store.ts";
 import { archiveProject, createProject, revokeLink } from "../../src/feedback/store.ts";
 import { createThread, patchThread, replyToThread } from "../../src/feedback/thread-store.ts";
+import { feedbackProjectName } from "../../src/web/feedback-data.ts";
 import { insertUser, person, prisma, resetDatabase } from "./database.ts";
 
 /**
@@ -245,5 +246,15 @@ describe("searchProjects", () => {
 
     expect(await searchProjects(prisma, BOB.oid, ["%"], 50)).toEqual([]);
     expect(await searchProjects(prisma, BOB.oid, [], 50)).toEqual([]);
+  });
+});
+
+describe("a project's tab title", () => {
+  it("should name the project for its owner and team, and nothing for someone with no part in it", async () => {
+    const created = await project("Claims prototype");
+
+    expect(await feedbackProjectName({ ...ALICE, tid: "dev" }, created.id)).toBe("Claims prototype");
+    expect(await feedbackProjectName({ ...BOB, tid: "dev" }, created.id)).toBe("Claims prototype");
+    expect(await feedbackProjectName({ ...CAROL, tid: "dev" }, created.id)).toBeUndefined();
   });
 });
