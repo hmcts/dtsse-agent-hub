@@ -329,7 +329,14 @@ function rank(subject: Subject, pool: Prepared[]): Scored[] {
     .sort((a, b) => b.score - a.score || byCode(a.field.id, b.field.id));
 }
 
-function proposedType(subject: Subject, types: Set<string>): string {
+/** The CCD FieldType a new field for this row would be given, as the matcher gives it when it proposes one. */
+export function proposedTypeOf(field: Field, types: Set<string> = new Set()): string {
+  const label = firstLine(field.label);
+  const address = field.inputType === "text" && ADDRESS_START.test(label) && !NOT_ADDRESS.test(label);
+  return proposedType({ label, shape: address ? "address" : shapeOf(field), ...(field.maxLength ? { maxLength: field.maxLength } : {}) }, types);
+}
+
+function proposedType(subject: Pick<Subject, "label" | "shape" | "maxLength">, types: Set<string>): string {
   const label = subject.label.toLowerCase();
   switch (subject.shape) {
     case "date":
@@ -450,13 +457,9 @@ export function matchCcd(spec: FormSpec, fields: CcdField[], options: MatchOptio
     const { subject, kept, ranked } = d;
     const group = subject.members.length > 1 ? `g${subject.members[0]}` : undefined;
     if (kept.length > 0) {
-      const first = ownDecision(subject, kept[0] as number, group);
-      for (const m of subject.members) {
-        if (kept.includes(m)) {
-          out.set(m, ownDecision(subject, m, group));
-        } else if (!options.onlyMapped) {
-          out.set(m, first);
-        }
+      // A row of the group with no id of its own is left as it is: the ids and who set them belong to the rows that have them.
+      for (const m of kept) {
+        out.set(m, ownDecision(subject, m, group));
       }
       return;
     }

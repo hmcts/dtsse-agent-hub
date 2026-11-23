@@ -2,6 +2,7 @@
 
 import type { Field } from "@hmcts-cft/bulk-scan-spec";
 import { NEW_FIELD_TYPES } from "@/bulk-scan/case-type";
+import { CommitInput } from "@/components/assistant/BulkScanParts";
 import { FIELD } from "@/components/assistant/WelshParts";
 
 const BADGE = {
@@ -58,12 +59,7 @@ export function BulkScanCcdStatus({
       ) : null}
       {match.status === "new" && added ? (
         <>
-          <input
-            aria-label={`New case field id for ${name}`}
-            className={`${FIELD} w-full min-w-0`}
-            value={added.id}
-            onChange={(event) => onEditNew({ id: event.target.value })}
-          />
+          <CommitInput label={`New case field id for ${name}`} value={added.id} keepValue onCommit={(id) => onEditNew({ id })} />
           <select
             aria-label={`New case field type for ${name}`}
             className={`${FIELD} w-full min-w-0`}

@@ -85,7 +85,7 @@ export async function importUpload(fileName: string, bytes: Uint8Array, caseType
       throw new HttpError(422, `${result.needsReview.reason}, so no field could be read from it. Ask your assistant to read its pages and draft the spec`);
     }
     const forms = picked ? result.bundle.forms.map((spec) => withCaseTypeHeader(spec, choiceOf(picked), picked.fields)) : result.bundle.forms;
-    return { kind: "pdf", forms };
+    return { kind: "pdf", forms: withSource(forms, "pdf") };
   }
   if (!isXlsx(bytes)) {
     throw new HttpError(400, "choose a form PDF, an Exela SIP or a transformation sheet (.xlsx)");
@@ -99,18 +99,18 @@ export async function importUpload(fileName: string, bytes: Uint8Array, caseType
     if (forms.length === 0) {
       throw new HttpError(422, "that SIP has no filled-in form tab");
     }
-    return openable({ kind: "sip", forms: withPicked(withTypedCaseType(forms, caseType), picked) });
+    return openable({ kind: "sip", forms: withPicked(withSource(withTypedCaseType(forms, caseType), "sip"), picked) });
   }
   const { spec } = readSheet(() => importTransformSheet(selectSheet(workbook, undefined)));
   if (spec.sections.every((s) => s.fields.length === 0)) {
     throw new HttpError(422, "no field rows were found in the first sheet: is it a transformation sheet?");
   }
-  return openable({ kind: "transformation sheet", forms: withPicked(withTypedCaseType([spec], caseType), picked) });
+  return openable({ kind: "transformation sheet", forms: withPicked(withSource(withTypedCaseType([spec], caseType), "sheet"), picked) });
 }
 
 /** The forms with the case type the person picked: its header, and each row that carries an id checked against its fields. */
 function withPicked(forms: FormSpec[], picked: UploadedCaseType | undefined): FormSpec[] {
-  return picked ? forms.map((f) => withCaseType(f, choiceOf(picked), picked.fields, { onlyMapped: true })) : forms;
+  return picked ? forms.map((f) => withCaseType(f, choiceOf(picked), picked.fields)) : forms;
 }
 
 const choiceOf = (picked: UploadedCaseType): CaseTypeChoice => ({
@@ -120,6 +120,10 @@ const choiceOf = (picked: UploadedCaseType): CaseTypeChoice => ({
 });
 
 /** The forms with the CCD case type the person typed as their header's, when one was typed. */
+function withSource(forms: FormSpec[], source: "pdf" | "sip" | "sheet"): FormSpec[] {
+  return forms.map((f) => ({ ...f, form: { ...f.form, source } }));
+}
+
 function withTypedCaseType(forms: FormSpec[], caseType: string | undefined): FormSpec[] {
   return caseType ? forms.map((f) => ({ ...f, form: { ...f.form, ccdCaseTypeId: caseType } })) : forms;
 }

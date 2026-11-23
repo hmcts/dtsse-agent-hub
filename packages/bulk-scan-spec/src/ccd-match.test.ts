@@ -210,6 +210,18 @@ describe("rows that share a decision", () => {
   });
 });
 
+describe("a group with rows that have no ids of their own", () => {
+  it("should share the group's decision only, copying neither the ids nor who chose them, when some of its rows have none", () => {
+    const rows2 = rowsOf(
+      matchCcd(spec([field("First line of address", { id: "2.2", ccd: ["applicantAddress"] }), field("Town or city")]), CASE_TYPE, { keepSet: true })
+    );
+
+    expect(rows2[0]?.ccdMatch?.chosenBy).toBe("form");
+    expect(rows2[1]?.ccd).toEqual([]);
+    expect(rows2[1]?.ccdMatch?.chosenBy).toBeUndefined();
+  });
+});
+
 describe("a proposed id", () => {
   it.each([
     ["Applicant's full name", "applicantFullName"],

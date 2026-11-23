@@ -125,9 +125,9 @@ describe("uploads", () => {
     expect((await refusal(importUpload("x.xlsx", bytes))).message).toContain("could not be read");
   });
 
-  it("should take the forms a PDF's draft holds", async () => {
+  it("should take the forms a PDF's draft holds, marked as from a PDF, when it is imported", async () => {
     pdf.result = { bundle: { forms: [SPEC] }, checklist: [] };
-    expect((await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"))).forms).toEqual([SPEC]);
+    expect((await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"))).forms).toEqual([{ ...SPEC, form: { ...SPEC.form, source: "pdf" } }]);
   });
 
   it("should name the case type in a PDF's form header when one is typed", async () => {
@@ -168,6 +168,14 @@ describe("uploads", () => {
     expect(form?.sections[0]?.fields[0]).toMatchObject({ ccd: ["applicantFirstName"], ccdMatch: { status: "existing" } });
     expect(form?.sections[0]?.fields[1]?.ccdMatch).toBeUndefined();
     expect(form?.form.ccdFieldIds).toEqual(["applicantFirstName"]);
+  });
+
+  it("should record where each form came from when it is imported", async () => {
+    pdf.result = { bundle: { forms: [SPEC] }, checklist: [] };
+
+    expect((await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"))).forms[0]?.form.source).toBe("pdf");
+    expect((await importUpload("t.xlsx", await bytesOf(generateTransformWorkbook(SPEC)))).forms[0]?.form.source).toBe("sheet");
+    expect((await importUpload("sip.xlsx", await bytesOf(generateSipWorkbook({ forms: [SPEC] })))).forms[0]?.form.source).toBe("sip");
   });
 
   it("should set the case type on a spreadsheet's forms when one is typed", async () => {

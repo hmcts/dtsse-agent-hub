@@ -114,6 +114,21 @@ describe("withoutCaseType", () => {
   });
 });
 
+describe("a form that came from a sheet", () => {
+  const sheet = (source: "sip" | "sheet" | "pdf") => {
+    const base = spec(field("First name", { ccd: ["applicantFirstName"] }), field("Place of birth"));
+    return { ...base, form: { ...base.form, source } };
+  };
+
+  it.each(["sip", "sheet"] as const)("should leave the rows the %s left unmapped without a proposal when a case type is picked", (source) => {
+    expect(rows(withCaseType(sheet(source), CHOICE, FIELDS))[1]?.ccdMatch).toBeUndefined();
+  });
+
+  it("should propose for a row with no id when the form came from a PDF", () => {
+    expect(rows(withCaseType(sheet("pdf"), CHOICE, FIELDS))[1]?.ccdMatch?.status).toBe("new");
+  });
+});
+
 describe("the case type's field ids", () => {
   it("should be kept compactly in the header, and checked against when an id is typed", () => {
     const matched = withCaseType(spec(field("Place of birth")), CHOICE, [...FIELDS, { id: "realField", label: "", type: "Text" }]);
@@ -211,6 +226,17 @@ describe("deciding an unsure row", () => {
     const edited = editNewField(matched, 0, 1, { type: "TextArea" });
 
     expect(rows(edited).map((f) => f.ccdMatch?.newField?.type)).toEqual(["AddressUK", "TextArea", "AddressUK"]);
+  });
+
+  it("should give a typed id the type the row suggests and keep its group when the case type does not list it", () => {
+    const address = withCaseType(spec(field("First line of address", { id: "2.2" }), field("Town or city")), CHOICE, [{ id: "zzz", label: "", type: "Text" }]);
+    const date = withCaseType(spec(field("Date moved in", { inputType: "date" })), CHOICE, [{ id: "zzz", label: "", type: "Text" }]);
+
+    const typedAddress = rows(patchField(address, 0, 0, { ccd: ["homeAddress"] }));
+    const typedDate = rows(patchField(date, 0, 0, { ccd: ["movedIn"] }));
+
+    expect(typedAddress[0]?.ccdMatch).toMatchObject({ status: "new", newField: { id: "homeAddress", type: "AddressUK" }, group: expect.any(String) });
+    expect(typedDate[0]?.ccdMatch?.newField?.type).toBe("Date");
   });
 
   it("should apply a choice to every row of an address when they share one decision", () => {

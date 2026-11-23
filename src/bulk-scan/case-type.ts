@@ -17,7 +17,7 @@ export interface CaseTypeChoice {
 }
 
 export interface CaseTypeOptions {
-  /** Map only the rows that carry an id, as a sheet's rows are: the others stay unmapped, with no proposal. */
+  /** Map only the rows that carry an id; by default, whether the form came from a SIP or a sheet, whose unmapped rows are deliberate. */
   onlyMapped?: boolean;
 }
 
@@ -47,7 +47,10 @@ function withoutCcdReviews(spec: FormSpec): FormSpec {
 
 /** The spec set to a case type, and matched against its fields. The ids a person set or chose, and those that came with the form, stay; only their status is refreshed. */
 export function withCaseType(spec: FormSpec, choice: CaseTypeChoice, fields: CcdField[], options: CaseTypeOptions = {}): FormSpec {
-  return matchCcd(withoutCcdReviews(withCaseTypeHeader(spec, choice, fields)), fields, { keepSet: true, ...(options.onlyMapped ? { onlyMapped: true } : {}) });
+  return matchCcd(withoutCcdReviews(withCaseTypeHeader(spec, choice, fields)), fields, {
+    keepSet: true,
+    onlyMapped: options.onlyMapped ?? (spec.form.source === "sip" || spec.form.source === "sheet")
+  });
 }
 
 /** The spec with no case type: its fields lose their status and the ids the matcher proposed, and keep the ids a person set or chose and those that came with the form. */

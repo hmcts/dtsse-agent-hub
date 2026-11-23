@@ -15,6 +15,7 @@ export function BulkScanUpload({ podConversationId = null }: Readonly<{ podConve
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<File | null>(null);
   const [picked, setPicked] = useState<PickedCaseType | null>(null);
+  const [loadingFields, setLoadingFields] = useState(false);
 
   async function upload(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -79,11 +80,13 @@ export function BulkScanUpload({ podConversationId = null }: Readonly<{ podConve
           selected={picked === null ? null : { product: picked.product, caseType: picked.caseType }}
           onPicked={setPicked}
           onCleared={() => setPicked(null)}
+          onFetching={setLoadingFields}
           disabled={busy}
         />
-        <button type="submit" disabled={busy} className="w-fit rounded-lg border border-asst-line px-3 py-1.5 text-[13px] font-medium">
+        <button type="submit" disabled={busy || loadingFields} className="w-fit rounded-lg border border-asst-line px-3 py-1.5 text-[13px] font-medium">
           Start the form
         </button>
+        {loadingFields ? <p className="text-[13px] text-asst-muted">Waiting for the case type's fields, so the form can be matched against them.</p> : null}
       </form>
       {busy ? <p className="text-[13px] text-asst-muted">Reading it…</p> : null}
       {error === null ? null : (

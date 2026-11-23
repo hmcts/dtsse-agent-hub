@@ -223,6 +223,22 @@ function Row({ initial }: Readonly<{ initial: FormSpec }>) {
   );
 }
 
+describe("the new field's id input", () => {
+  it("should hand the id up only when the person leaves the box or presses Enter, so a partial id cannot change the row", async () => {
+    const onEditNew = vi.fn();
+    const field = { ccdMatch: { status: "new", newField: { id: "x", type: "Text" } }, ccd: ["x"] } as never;
+    render(<BulkScanCcdStatus field={field} name="Email" onChooseCandidate={vi.fn()} onChooseNew={vi.fn()} onEditNew={onEditNew} />);
+
+    const input = screen.getByLabelText("New case field id for Email");
+    await userEvent.clear(input);
+    await userEvent.type(input, "applicantEm");
+    expect(onEditNew).not.toHaveBeenCalled();
+    await userEvent.type(input, "ail{Enter}");
+
+    expect(onEditNew).toHaveBeenCalledWith({ id: "applicantEmail" });
+  });
+});
+
 describe("the CCD status of a row", () => {
   const unsure = {
     ccd: [],
@@ -291,6 +307,22 @@ describe("the upload with a case type picked", () => {
     expect(body.get("product")).toBe("sptribs");
     expect(body.get("config")).toBe("config-generator");
     expect(JSON.parse(String(body.get("fields")))).toEqual(ROWS);
+  });
+
+  it("should keep the form from starting while the case type's fields are loading, and say why", async () => {
+    fetchMock.mockImplementation(podJobs());
+    answers[1] = { kind: "ccd.case-type-fields", answer: { status: "pending" } };
+    render(<BulkScanUpload podConversationId="c1" />);
+
+    await openPicker();
+    await userEvent.selectOptions(select(), "sptribs/CriminalInjuriesCompensation");
+
+    expect((screen.getByRole("button", { name: "Start the form" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/Waiting for the case type's fields/)).toBeTruthy();
+    for (const id of Object.keys(pending)) {
+      pending[id] = { status: "done", kind: "ccd.case-type-fields", result: { fields: ROWS, total: 2, omitted: 0 } };
+    }
+    await waitFor(() => expect((screen.getByRole("button", { name: "Start the form" }) as HTMLButtonElement).disabled).toBe(false), { timeout: 5000 });
   });
 
   it("should let the form start with no case type when none is picked, and offer no definition upload", async () => {

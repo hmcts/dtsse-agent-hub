@@ -18,6 +18,10 @@ const context = (): PodJobContext =>
 const answering = (stdout: string, code = 0, stderr = "") => ({ run: vi.fn(async () => ({ code, stdout, stderr })), exists: () => true });
 
 describe("the CCD pod-job handlers", () => {
+  it("should run one generation at a time when jobs ask for fields, so two Gradle builds never share a clone", () => {
+    expect(ccdCaseTypeFields.concurrency).toBe(1);
+  });
+
   it("should be registered with budgets inside the hub's times when the handlers are listed", () => {
     expect(POD_JOB_HANDLERS).toEqual(expect.arrayContaining([ccdCaseTypes, ccdCaseTypeFields]));
     expect(ccdCaseTypes.budgetMs).toBeLessThan(60_000);

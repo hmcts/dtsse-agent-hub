@@ -13,8 +13,9 @@ export const MAX_LISTED_CASE_TYPES = 500;
 /** The most case fields one answer carries. */
 export const MAX_CASE_TYPE_FIELDS = 20_000;
 /**
- * What the pod's answer may hold of the fields, in JSON bytes, so that the same text still fits the upload the form
- * makes with it (1 MiB) and the hub's own cap on a result (1 MiB, `MAX_POD_JOB_RESULT_BYTES`).
+ * What the pod's answer may hold of the fields, in JSON bytes. It is under the hub's cap on a result (1 MiB,
+ * `MAX_POD_JOB_RESULT_BYTES`), and the upload carries the same JSON beside a form of up to 5 MiB: the route allows it
+ * this many bytes and 64 KiB of framing, which keeps the whole body under the proxy's 6 MiB.
  */
 export const MAX_FIELDS_BYTES = 900_000;
 

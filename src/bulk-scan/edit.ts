@@ -1,4 +1,5 @@
 import type { Assignment, CcdMatch, Emit, Field, FormSpec, Operand, Rule, Scalar, Section } from "@hmcts-cft/bulk-scan-spec";
+import { proposedTypeOf } from "@hmcts-cft/bulk-scan-spec/ccd-match";
 import { emitsOf, valueSets } from "@hmcts-cft/bulk-scan-spec/emits";
 import { renderCasePath, renderLogic } from "@hmcts-cft/bulk-scan-spec/logic";
 import { readsKeys } from "@hmcts-cft/bulk-scan-spec/model";
@@ -51,9 +52,17 @@ function withTypedCcd(field: Field, known: Set<string>, caseTypePicked: boolean)
   }
   const lacking = field.ccd.find((typed) => !known.has(typed) && !(match.candidates ?? []).some((c) => c.id === typed));
   if (lacking === undefined) {
-    return { ...field, ccdMatch: { status: "existing", chosenBy: "person" } };
+    return { ...field, ccdMatch: { status: "existing", chosenBy: "person", ...(match.group ? { group: match.group } : {}) } };
   }
-  return { ...field, ccdMatch: { status: "new", newField: { id: lacking, type: match.newField?.type ?? "Text" }, chosenBy: "person" } };
+  return {
+    ...field,
+    ccdMatch: {
+      status: "new",
+      newField: { id: lacking, type: match.newField?.type ?? proposedTypeOf(field) },
+      chosenBy: "person",
+      ...(match.group ? { group: match.group } : {})
+    }
+  };
 }
 
 /** The spec with one field replaced by what `change` makes of it. */
