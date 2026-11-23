@@ -34,7 +34,7 @@ async function chatOf(who: Person, features: string[] | null = CLAIMS): Promise<
 const jobOf = (asked: unknown) => (asked as { job_id: string }).job_id;
 
 describe("asking for a case type's fields", () => {
-  it("should send the pod the job and keep an answer at the size the pod cuts to, whole", async () => {
+  it("should send the pod the job and keep the answer whole when it is at the size the pod cuts to", async () => {
     const { assistant, conversation } = await chatOf(ALICE);
     const asked = await requestPodJob(prisma, ALICE.oid, conversation, { kind: "ccd.case-type-fields", args: { case_type: "NFD", product: "nfdiv" } });
     const id = jobOf(asked);
@@ -50,7 +50,7 @@ describe("asking for a case type's fields", () => {
     expect(((read?.result ?? {}) as { fields?: unknown[] }).fields).toHaveLength(rows.length);
   });
 
-  it("should refuse an answer whose fields are not the job's shape, keeping the job pending", async () => {
+  it("should refuse an answer and keep the job pending when its fields are not the job's shape", async () => {
     const { assistant, conversation } = await chatOf(ALICE);
     const id = jobOf(await requestPodJob(prisma, ALICE.oid, conversation, { kind: "ccd.case-type-fields", args: { case_type: "NFD" } }));
     const job = await answerablePodJob(prisma, assistant, id);
@@ -70,14 +70,14 @@ describe("asking for a case type's fields", () => {
     expect(await prisma.assistantPodJob.count()).toBe(0);
   });
 
-  it("should refuse anyone but the chat's owner", async () => {
+  it("should refuse anyone but the chat's owner when they ask", async () => {
     const { conversation } = await chatOf(ALICE);
     await chatOf(BOB);
 
     await expect(requestPodJob(prisma, BOB.oid, conversation, { kind: "ccd.case-types", args: {} })).rejects.toMatchObject({ status: 404 });
   });
 
-  it("should refuse a case type id that could be read as an option", async () => {
+  it("should refuse a case type id when it could be read as an option", async () => {
     const { conversation } = await chatOf(ALICE);
 
     await expect(requestPodJob(prisma, ALICE.oid, conversation, { kind: "ccd.case-type-fields", args: { case_type: "--product" } })).rejects.toMatchObject({
@@ -87,7 +87,7 @@ describe("asking for a case type's fields", () => {
 });
 
 describe("the chat the builder runs its jobs in", () => {
-  it("should be the person's most recently active chat on their assistant", async () => {
+  it("should be the person's most recently active chat when they have several on their assistant", async () => {
     const { assistant, conversation } = await chatOf(ALICE);
     const newer = await prisma.assistantConversation.create({
       data: { ownerOid: ALICE.oid, virtualAgentId: assistant, lastActiveAt: new Date(Date.now() + 60_000) },
@@ -99,7 +99,7 @@ describe("the chat the builder runs its jobs in", () => {
     expect(newer.id).not.toBe(conversation);
   });
 
-  it("should be none for a person with no assistant, or no chat on it, and never another person's", async () => {
+  it("should be none when the person has no assistant or no chat on it, and never another person's", async () => {
     await chatOf(BOB);
     expect(await podConversationId(prisma, ALICE.oid)).toBeNull();
 
@@ -107,7 +107,7 @@ describe("the chat the builder runs its jobs in", () => {
     expect(await podConversationId(prisma, ALICE.oid)).toBeNull();
   });
 
-  it("should leave out a local session's chat, which has no pod", async () => {
+  it("should leave out a local session's chat when it has no pod", async () => {
     await withMainSession(ALICE);
     await prisma.assistantConversation.create({ data: { ownerOid: ALICE.oid, virtualAgentId: null } });
 

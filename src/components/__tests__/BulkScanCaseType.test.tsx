@@ -77,7 +77,7 @@ async function openPicker(): Promise<void> {
 const select = () => screen.getByLabelText("Service and CCD case type (optional)") as HTMLSelectElement;
 
 describe("the case type picker", () => {
-  it("should ask for nothing until the person opens it, and once for the page", async () => {
+  it("should ask for nothing until the person opens it, and once for the page, when it is rendered", async () => {
     fetchMock.mockImplementation(podJobs());
     render(<BulkScanCaseTypePicker conversationId="c1" selected={null} onPicked={vi.fn()} onCleared={vi.fn()} />);
 
@@ -91,7 +91,7 @@ describe("the case type picker", () => {
   });
 
   it.each(["script_missing", "tool_missing", "not_cloned", "unknown_case_type"])(
-    "should offer no Try again for %s, which would fail the same way",
+    "should offer no Try again when the failure is %s, which would fail the same way",
     async (error) => {
       fetchMock.mockImplementation(podJobs());
       answers[0] = { kind: "ccd.case-types", answer: { status: "failed", kind: "x", error, detail: "it will not work" } };
@@ -104,7 +104,7 @@ describe("the case type picker", () => {
     }
   );
 
-  it("should say why the fields could not be read and read them again on Try again", async () => {
+  it("should read the fields again when Try again is pressed after a failure that says why", async () => {
     fetchMock.mockImplementation(podJobs());
     answers[1] = {
       kind: "ccd.case-type-fields",
@@ -122,7 +122,7 @@ describe("the case type picker", () => {
     await waitFor(() => expect(onPicked).toHaveBeenCalled());
   });
 
-  it("should list the workspace's case types by service and fetch the fields of the one chosen", async () => {
+  it("should list the workspace's case types by service and fetch the fields when one is chosen", async () => {
     fetchMock.mockImplementation(podJobs());
     const onPicked = vi.fn();
     render(<BulkScanCaseTypePicker conversationId="c1" selected={null} onPicked={onPicked} onCleared={vi.fn()} />);
@@ -236,19 +236,19 @@ describe("the CCD status of a row", () => {
     }
   };
 
-  it("should show nothing for a row with no case type match", () => {
+  it("should show nothing when a row has no case type match", () => {
     render(<Row initial={spec({})} />);
 
     expect(screen.queryByText(/Existing|New|Unsure/)).toBeNull();
   });
 
-  it("should badge an existing row", () => {
+  it("should badge the row when it is existing", () => {
     render(<Row initial={spec({ ccd: ["cicCaseEmail"], ccdMatch: { status: "existing" } })} />);
 
     expect(screen.getByText("Existing")).toBeTruthy();
   });
 
-  it("should offer an unsure row's candidates and make the one chosen existing", async () => {
+  it("should make the candidate chosen existing when an unsure row offers candidates", async () => {
     render(<Row initial={spec(unsure)} />);
 
     expect(screen.getByText("Unsure")).toBeTruthy();
@@ -258,7 +258,7 @@ describe("the CCD status of a row", () => {
     expect(screen.queryByLabelText("Case field for Email address")).toBeNull();
   });
 
-  it("should make an unsure row new with the proposed id, which is then typed over and given another type", async () => {
+  it("should type over the proposed id and give another type when an unsure row is made new", async () => {
     render(<Row initial={spec(unsure)} />);
 
     await userEvent.selectOptions(screen.getByLabelText("Case field for Email address"), "Add cicCaseEmailAddress as a new field");
@@ -275,7 +275,7 @@ describe("the CCD status of a row", () => {
 });
 
 describe("the upload with a case type picked", () => {
-  it("should send the fields the pod found with the form", async () => {
+  it("should send the fields the pod found with the form when a case type is picked", async () => {
     fetchMock.mockImplementation(podJobs());
     render(<BulkScanUpload podConversationId="c1" />);
 
@@ -293,7 +293,7 @@ describe("the upload with a case type picked", () => {
     expect(JSON.parse(String(body.get("fields")))).toEqual(ROWS);
   });
 
-  it("should offer no definition upload and let the form start with no case type", async () => {
+  it("should let the form start with no case type when none is picked, and offer no definition upload", async () => {
     fetchMock.mockImplementation(podJobs({ status: "unsupported" }));
     render(<BulkScanUpload podConversationId="c1" />);
 
@@ -322,7 +322,7 @@ describe("the editor's case type", () => {
       simulatorProblem: "off"
     }) as never;
 
-  it("should match the rows against the case type chosen, keep the ids already set, and count what is new and unsure", async () => {
+  it("should match the rows, keep the ids already set and count what is new and unsure when a case type is chosen", async () => {
     fetchMock.mockImplementation(podJobs());
     render(<BulkScanEditor view={view({ ccd: [] })} signOff={vi.fn()} podConversationId="c1" />);
 
@@ -351,6 +351,21 @@ describe("the editor's case type", () => {
     expect((screen.getByLabelText("Label of 1.1") as HTMLInputElement).value).toBe("Email address (edited)");
   });
 
+  it("should keep the typed case type field off when the fields are being fetched", async () => {
+    fetchMock.mockImplementation(podJobs());
+    answers[1] = { kind: "ccd.case-type-fields", answer: { status: "pending" } };
+    render(<BulkScanEditor view={view({ id: "1.1", ccd: [] })} signOff={vi.fn()} podConversationId="c1" />);
+
+    await openPicker();
+    await userEvent.selectOptions(select(), "sptribs/CriminalInjuriesCompensation");
+
+    expect((screen.getByLabelText("Case type (CCD case type id)") as HTMLInputElement).disabled).toBe(true);
+    for (const id of Object.keys(pending)) {
+      pending[id] = { status: "done", kind: "ccd.case-type-fields", result: { fields: ROWS, total: 2, omitted: 0 } };
+    }
+    await waitFor(() => expect((screen.getByLabelText("Case type (CCD case type id)") as HTMLInputElement).disabled).toBe(false), { timeout: 5000 });
+  });
+
   it("should set the case type from the typed field when the person has no chat to read their workspace in", async () => {
     render(<BulkScanEditor view={view({ id: "1.1", ccd: [] })} signOff={vi.fn()} podConversationId={null} />);
 
@@ -373,7 +388,7 @@ describe("the editor's case type", () => {
     expect((screen.getByLabelText("Case type (CCD case type id)") as HTMLInputElement).value).toBe("CriminalInjuriesCompensationX");
   });
 
-  it("should refresh the status of a CCD id the person set without changing it", async () => {
+  it("should refresh the status of a CCD id without changing it when the person set it", async () => {
     fetchMock.mockImplementation(podJobs());
     render(<BulkScanEditor view={view({ ccd: ["cicCaseEmail"] })} signOff={vi.fn()} podConversationId="c1" />);
 

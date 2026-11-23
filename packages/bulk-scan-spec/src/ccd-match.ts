@@ -266,35 +266,64 @@ interface Scored {
   fits: boolean;
 }
 
-function score(subject: Subject, ccd: CcdField, prefix: Set<string>, lead: string): number {
-  const idWords = new Set([...tokens(ccd.id)].filter((w) => !prefix.has(w)));
-  const labelWords = tokens(ccd.label);
-  const hintWords = tokens(ccd.hint ?? "");
+/** A case field's words and parties, worked out once for a match rather than once for each form field. */
+interface Prepared {
+  field: CcdField;
+  idWords: Set<string>;
+  labelWords: Set<string>;
+  hintWords: Set<string>;
+  parties: Set<string>;
+  inStyle: boolean;
+}
+
+function prepare(fields: CcdField[], prefix: Set<string>, lead: string): Prepared[] {
+  return fields.map((field) => {
+    const idWords = new Set([...tokens(field.id)].filter((w) => !prefix.has(w)));
+    const labelWords = tokens(field.label);
+    return {
+      field,
+      idWords,
+      labelWords,
+      hintWords: tokens(field.hint ?? ""),
+      parties: partiesOf(idWords.size > 0 && partiesOf(idWords).size > 0 ? idWords : labelWords),
+      inStyle: lead !== "" && field.id.startsWith(lead)
+    };
+  });
+}
+
+function score(subject: Subject, candidate: Prepared): number {
+  const { idWords, labelWords, hintWords } = candidate;
   // The id leads and the label or hint only confirms it: labels repeat across a case type (every phone field is "Phone number").
   const byId = dice(subject.own, idWords);
   const byText = Math.max(dice(subject.own, labelWords), 0.8 * dice(subject.own, hintWords));
   let base = Math.max(byId, (byId + byText) / 2);
-  const shared = [...subject.own].filter((w) => idWords.has(w) || labelWords.has(w) || hintWords.has(w));
-  if (shared.length === 1 && WEAK.has(shared[0] as string)) {
-    base *= 0.5;
-  }
-  const candidateParties = partiesOf(idWords.size > 0 && partiesOf(idWords).size > 0 ? idWords : labelWords);
-  let factor = 1;
-  if (subject.parties.size > 0) {
-    if (candidateParties.size === 0) {
-      factor = 0.95;
-    } else {
-      factor = [...candidateParties].some((p) => subject.parties.has(p)) ? 1.25 : 0.7;
+  let shared: string | undefined;
+  let sharedCount = 0;
+  for (const w of subject.own) {
+    if (idWords.has(w) || labelWords.has(w) || hintWords.has(w)) {
+      shared = w;
+      sharedCount++;
     }
   }
-  return Math.min(1, base * factor * (lead && ccd.id.startsWith(lead) ? 1.05 : 1));
+  if (sharedCount === 1 && WEAK.has(shared as string)) {
+    base *= 0.5;
+  }
+  let factor = 1;
+  if (subject.parties.size > 0) {
+    if (candidate.parties.size === 0) {
+      factor = 0.95;
+    } else {
+      factor = [...candidate.parties].some((p) => subject.parties.has(p)) ? 1.25 : 0.7;
+    }
+  }
+  return Math.min(1, base * factor * (candidate.inStyle ? 1.05 : 1));
 }
 
-function rank(subject: Subject, pool: CcdField[], prefix: Set<string>, lead: string): Scored[] {
+function rank(subject: Subject, pool: Prepared[]): Scored[] {
   return pool
-    .map((field) => {
-      const fits = compatible(subject.shape, field);
-      return { field, fits, score: score(subject, field, prefix, lead) * (fits ? 1 : INCOMPATIBLE) };
+    .map((candidate) => {
+      const fits = compatible(subject.shape, candidate.field);
+      return { field: candidate.field, fits, score: score(subject, candidate) * (fits ? 1 : INCOMPATIBLE) };
     })
     .filter((s) => s.score >= SUGGEST * INCOMPATIBLE)
     .sort((a, b) => b.score - a.score || byCode(a.field.id, b.field.id));
@@ -371,6 +400,7 @@ export function matchCcd(spec: FormSpec, fields: CcdField[], options: MatchOptio
   const refs: Ref[] = spec.sections.flatMap((section, s) => section.fields.map((field, f) => ({ s, f, field })));
   const titles = spec.sections.map((s) => s.title);
   const subjects = subjectsOf(refs, titles);
+  const prepared = prepare(top, prefixWords, lead);
   // The matcher's own earlier proposals are proposed again, so only ids that stay and the case type's own are taken.
   const taken = new Set<string>([...known, ...refs.flatMap((r) => (options.keepSet && isKept(r.field) ? r.field.ccd : []))]);
   const out = new Map<number, { ccd: string[]; match: CcdMatch }>();
@@ -382,7 +412,7 @@ export function matchCcd(spec: FormSpec, fields: CcdField[], options: MatchOptio
     if (options.onlyMapped && kept.length === 0) {
       return [];
     }
-    return [{ subject, kept, ranked: kept.length > 0 ? [] : rank(subject, top, prefixWords, lead) }];
+    return [{ subject, kept, ranked: kept.length > 0 ? [] : rank(subject, prepared) }];
   });
 
   const claimed = new Map<string, number>();

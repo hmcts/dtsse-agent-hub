@@ -137,7 +137,7 @@ describe("uploads", () => {
     expect(pdf.input).not.toHaveProperty("ccdFields");
   });
 
-  it("should match against the fields the person's pod fetched, and record the product and how it configures CCD", async () => {
+  it("should record the product and configuration and match the fields when the person's pod fetched them", async () => {
     pdf.result = { bundle: { forms: [SPEC] }, checklist: [] };
     const fields = parseCcdFields([{ ID: "cicCaseFullName", Label: "Full name", FieldType: "Text" }]);
 
@@ -152,12 +152,12 @@ describe("uploads", () => {
     expect(forms[0]?.form).toMatchObject({ ccdProduct: "sptribs", ccdConfig: "config-generator" });
   });
 
-  it("should refuse fields that are not what the CCD job answers", () => {
+  it("should refuse the fields when they are not what the CCD job answers", () => {
     expect(() => parseCcdFields([{ ID: "a" }])).toThrow("not in the shape");
     expect(() => parseCcdFields("x")).toThrow("not in the shape");
   });
 
-  it("should match a spreadsheet's rows against the case type picked, keeping the ids the sheet has, and record the product and configuration", async () => {
+  it("should keep the ids the sheet has and record the product and configuration when a case type is picked for a spreadsheet", async () => {
     const fields = parseCcdFields([{ ID: "applicantFirstName", Label: "First name", FieldType: "Text" }]);
     const picked = { caseType: "NFD", product: "nfdiv", config: "config-generator" as const, fields };
 
@@ -190,7 +190,7 @@ describe("uploads", () => {
 });
 
 describe("checkSpec on a new case field", () => {
-  it("should refuse a new case field with no id, on its row", () => {
+  it("should refuse a new case field on its row when it has no id", () => {
     const bad = formSpecSchema.parse({
       form: { name: "F", formType: "F" },
       sections: [{ id: "1", title: "S", fields: [{ label: "A", keys: ["a"], ccd: [""], ccdMatch: { status: "new", newField: { id: "", type: "Text" } } }] }]

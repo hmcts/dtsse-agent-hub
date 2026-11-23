@@ -36,7 +36,7 @@ describe("cli on a bundle with several forms", () => {
 });
 
 describe("cli codegen for every target", () => {
-  it("should write the new case fields once, not once per target", () => {
+  it("should write the new case fields once, not once per target, when every target is asked for", () => {
     const dir = mkdtempSync(join(tmpdir(), "cli-new-"));
     const spec = join(dir, "spec.json");
     writeFileSync(

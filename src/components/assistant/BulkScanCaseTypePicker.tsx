@@ -1,6 +1,8 @@
 "use client";
 
 import type { CcdRow } from "@hmcts-cft/bulk-scan-spec/ccd-match";
+import { byCode } from "@hmcts-cft/bulk-scan-spec/compare";
+import type { CcdConfig } from "@hmcts-cft/bulk-scan-spec/schema";
 import { useEffect, useId, useRef, useState } from "react";
 import { type PodJobWords, runPodJob } from "@/components/assistant/podJobRun";
 import { FIELD } from "@/components/assistant/WelshParts";
@@ -10,7 +12,7 @@ export interface ListedCaseType {
   product: string;
   service: string;
   case_type: string;
-  config: "config-generator" | "json" | "hybrid" | null;
+  config: CcdConfig | null;
 }
 
 /** A case type the person picked, with the fields their pod found for it. `omitted` is how many fields were left out to fit the answer. */
@@ -43,7 +45,6 @@ const FINAL_CODES: readonly string[] = ["script_missing", "tool_missing", "not_c
 const retryable = (outcome: { status?: string; code?: string }): boolean =>
   outcome.status !== "unsupported" && outcome.status !== "no_pod" && outcome.status !== "assistant_gone" && !FINAL_CODES.includes(outcome.code ?? "");
 
-const byCode = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 const keyOf = (type: Pick<ListedCaseType, "product" | "case_type">): string => `${type.product}/${type.case_type}`;
 
 /**
@@ -56,12 +57,15 @@ export function BulkScanCaseTypePicker({
   selected,
   onPicked,
   onCleared,
+  onFetching,
   disabled = false
 }: Readonly<{
   conversationId: string | null;
   selected: { product: string; caseType: string } | null;
   onPicked: (picked: PickedCaseType) => void;
   onCleared: () => void;
+  /** Told when the fields of a chosen case type start and stop being fetched, so what is typed meanwhile is not overwritten by them. */
+  onFetching?: (fetching: boolean) => void;
   disabled?: boolean;
 }>) {
   const id = useId();
@@ -76,6 +80,10 @@ export function BulkScanCaseTypePicker({
   const control = useRef<AbortController | null>(null);
 
   const listing = useRef<AbortController | null>(null);
+  const fetchingRef = useRef(onFetching);
+  fetchingRef.current = onFetching;
+  const isFetching = fetching !== null;
+  useEffect(() => fetchingRef.current?.(isFetching), [isFetching]);
 
   /** Asks the pod for the case types: when the person first opens the picker, and again on Try again. Never on page load, which would wake a stopped pod for a page that is only looked at. */
   function loadList(): void {

@@ -1,4 +1,4 @@
-import type { Assignment, Emit, Field, FormSpec, Operand, Rule, Scalar, Section } from "@hmcts-cft/bulk-scan-spec";
+import type { Assignment, CcdMatch, Emit, Field, FormSpec, Operand, Rule, Scalar, Section } from "@hmcts-cft/bulk-scan-spec";
 import { emitsOf, valueSets } from "@hmcts-cft/bulk-scan-spec/emits";
 import { renderCasePath, renderLogic } from "@hmcts-cft/bulk-scan-spec/logic";
 import { readsKeys } from "@hmcts-cft/bulk-scan-spec/model";
@@ -37,8 +37,9 @@ function existingIds(spec: FormSpec): Set<string> {
  * picked the form cannot tell, so it is one only if the row listed it as a candidate or another row already matches it. Any
  * other is a field to add, with the id typed as its proposal.
  */
-function withTypedCcd(field: Field, known: Set<string>): Field {
-  const match = field.ccdMatch;
+function withTypedCcd(field: Field, known: Set<string>, caseTypePicked: boolean): Field {
+  // A row with no status (a sheet's unmapped row, one the matcher skipped) is checked only when a case type can say.
+  const match: CcdMatch | undefined = field.ccdMatch ?? (caseTypePicked ? { status: "new" } : undefined);
   if (!match) {
     return field;
   }
@@ -147,7 +148,7 @@ export function patchField(spec: FormSpec, sectionIndex: number, fieldIndex: num
       delete next.required;
     }
     if (patch.ccd !== undefined) {
-      next = withTypedCcd(next, existingIds(spec));
+      next = withTypedCcd(next, existingIds(spec), spec.form.ccdFieldIds !== undefined);
     }
     return next;
   });

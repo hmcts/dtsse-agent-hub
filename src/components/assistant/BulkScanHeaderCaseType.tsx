@@ -12,8 +12,14 @@ import { BulkScanCaseTypePicker } from "@/components/assistant/BulkScanCaseTypeP
 export function BulkScanHeaderCaseType({
   spec,
   conversationId,
-  onSpec
-}: Readonly<{ spec: FormSpec; conversationId: string | null; onSpec: (update: (current: FormSpec) => FormSpec) => void }>) {
+  onSpec,
+  onFetching
+}: Readonly<{
+  spec: FormSpec;
+  conversationId: string | null;
+  onSpec: (update: (current: FormSpec) => FormSpec) => void;
+  onFetching?: (fetching: boolean) => void;
+}>) {
   const { ccdCaseTypeId, ccdProduct } = spec.form;
   const counts = ccdCounts(spec);
   const matched = spec.sections.some((s) => s.fields.some((f) => f.ccdMatch));
@@ -26,6 +32,7 @@ export function BulkScanHeaderCaseType({
           onSpec((current) => withCaseType(current, { product: picked.product, caseType: picked.caseType, config: picked.config }, ccdFieldsOf(picked.rows)))
         }
         onCleared={() => onSpec(withoutCaseType)}
+        {...(onFetching ? { onFetching } : {})}
       />
       {matched ? (
         <p role="status" className="text-[13px] text-asst-body">

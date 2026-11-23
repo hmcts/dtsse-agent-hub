@@ -26,6 +26,7 @@ export function BulkScanEditor({
   const router = useRouter();
   const [spec, setSpec] = useState<FormSpec>(view.spec);
   const [dirty, setDirty] = useState(false);
+  const [fetchingCaseType, setFetchingCaseType] = useState(false);
   const [saving, setSaving] = useState(false);
   const [problems, setProblems] = useState<ReturnType<typeof issuesByField>>({ fields: new Map(), form: [] });
   const [error, setError] = useState<string | null>(null);
@@ -83,7 +84,7 @@ export function BulkScanEditor({
             className="w-56"
           />
           <HeaderField label="PO box" value={spec.form.poBox ?? ""} onChange={(poBox) => change(patchHeader(spec, { poBox }))} className="w-40" />
-          <BulkScanHeaderCaseType spec={spec} conversationId={podConversationId} onSpec={change} />
+          <BulkScanHeaderCaseType spec={spec} conversationId={podConversationId} onSpec={change} onFetching={setFetchingCaseType} />
           <HeaderField
             label="Case type (CCD case type id)"
             value={spec.form.ccdCaseTypeId ?? ""}
@@ -91,6 +92,7 @@ export function BulkScanEditor({
               change((current) => patchHeader(current.form.ccdProduct === undefined ? current : withoutCaseType(current), { ccdCaseTypeId: caseType }))
             }
             className="w-64"
+            disabled={fetchingCaseType}
           />
         </div>
       </section>
@@ -161,11 +163,17 @@ export function BulkScanEditor({
   );
 }
 
-function HeaderField({ label, value, onChange, className }: Readonly<{ label: string; value: string; onChange: (value: string) => void; className: string }>) {
+function HeaderField({
+  label,
+  value,
+  onChange,
+  className,
+  disabled = false
+}: Readonly<{ label: string; value: string; onChange: (value: string) => void; className: string; disabled?: boolean }>) {
   return (
     <label className={`flex flex-col gap-1 ${className}`}>
       {label}
-      <input value={value} className={FIELD} onChange={(event) => onChange(event.target.value)} />
+      <input value={value} disabled={disabled} className={FIELD} onChange={(event) => onChange(event.target.value)} />
     </label>
   );
 }

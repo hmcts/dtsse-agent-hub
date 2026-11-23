@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+/** How a service configures CCD, as the workspace's case type list says. */
+export const CCD_CONFIGS = ["config-generator", "json", "hybrid"] as const;
+export type CcdConfig = (typeof CCD_CONFIGS)[number];
+
 export const OUTCOMES = ["success", "warning", "exception"] as const;
 export const outcomeSchema = z.enum(OUTCOMES);
 export type Outcome = z.infer<typeof outcomeSchema>;
@@ -197,7 +201,7 @@ export const formHeaderSchema = z.object({
   ccdEventId: z.string().optional(),
   /** The workspace product that defines the case type, and how it configures CCD; the picker sets both. */
   ccdProduct: z.string().optional(),
-  ccdConfig: z.enum(["config-generator", "json", "hybrid"]).optional(),
+  ccdConfig: z.enum(CCD_CONFIGS).optional(),
   /** The ids of the picked case type's fields, to check a typed id against. */
   ccdFieldIds: z.array(z.string()).optional(),
   /** OCR keys holding party surnames, which the orchestrator matches against existing cases. */

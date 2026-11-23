@@ -355,7 +355,7 @@ describe("starting a spec from a case type picked in the workspace", () => {
     return await uploadRoute.POST(as("alice", "/api/ui/assistant/bulk-scan", { method: "POST", body: form }));
   }
 
-  it("should match the form against the fields the pod found and keep the product and configuration in the header", async () => {
+  it("should match the form and keep the product and configuration in the header when the pod found the fields", async () => {
     const response = await pdfUpload([{ ID: "applicant1FirstName", Label: "First name", FieldType: "Text" }]);
     expect(response.status).toBe(201);
 
@@ -369,7 +369,7 @@ describe("starting a spec from a case type picked in the workspace", () => {
     expect(first).toMatchObject({ ccd: ["applicant1FirstName"], ccdMatch: { status: "existing" } });
   });
 
-  it("should count the bytes of the fields, not the characters, against the limit", async () => {
+  it("should count the bytes of the fields, not the characters, against the limit when labels are multi-byte", async () => {
     const rows = Array.from({ length: 2300 }, (_, i) => ({ ID: `field${i}`, Label: "é".repeat(200), FieldType: "Text" }));
     const json = JSON.stringify(rows);
     expect(json.length).toBeLessThan(964_000);
@@ -378,7 +378,7 @@ describe("starting a spec from a case type picked in the workspace", () => {
     expect((await pdfUpload(rows)).status).toBe(400);
   });
 
-  it("should refuse fields that are not what the CCD job answers, and fields with no case type named", async () => {
+  it("should refuse the fields when they are not what the CCD job answers or no case type is named", async () => {
     const bad = await pdfUpload([{ ID: "a" }]);
     const unnamed = await pdfUpload([{ ID: "a", FieldType: "Text" }], { caseType: "" });
 

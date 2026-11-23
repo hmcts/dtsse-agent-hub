@@ -1,5 +1,6 @@
-import type { Field, FormSpec } from "@hmcts-cft/bulk-scan-spec";
+import type { CcdConfig, Field, FormSpec } from "@hmcts-cft/bulk-scan-spec";
 import { type CcdField, matchCcd, newCcdFields } from "@hmcts-cft/bulk-scan-spec/ccd-match";
+import { byCode } from "@hmcts-cft/bulk-scan-spec/compare";
 
 export { NEW_FIELD_TYPES } from "@hmcts-cft/bulk-scan-spec/ccd-match";
 
@@ -12,7 +13,7 @@ export { NEW_FIELD_TYPES } from "@hmcts-cft/bulk-scan-spec/ccd-match";
 export interface CaseTypeChoice {
   product: string;
   caseType: string;
-  config?: "config-generator" | "json" | "hybrid" | null;
+  config?: CcdConfig | null;
 }
 
 export interface CaseTypeOptions {
@@ -29,8 +30,6 @@ export function withCaseTypeHeader(spec: FormSpec, choice: CaseTypeChoice, field
     form: { ...form, ccdCaseTypeId: choice.caseType, ccdProduct: choice.product, ccdFieldIds, ...(choice.config ? { ccdConfig: choice.config } : {}) }
   };
 }
-
-const byCode = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /** The fields without the review entries about CCD ids, which an earlier case type's match left. */
 function withoutCcdReviews(spec: FormSpec): FormSpec {
@@ -107,6 +106,13 @@ export function editNewField(spec: FormSpec, sectionIndex: number, fieldIndex: n
       return field;
     }
     const next = { id: patch.id ?? current.id, type: patch.type ?? current.type };
+    if (spec.form.ccdFieldIds?.includes(next.id)) {
+      return {
+        ...field,
+        ccd: [next.id],
+        ccdMatch: { status: "existing", chosenBy: "person", ...(field.ccdMatch.group ? { group: field.ccdMatch.group } : {}) }
+      };
+    }
     return { ...field, ccd: [next.id], ccdMatch: { ...field.ccdMatch, newField: next, chosenBy: "person" } };
   });
 }

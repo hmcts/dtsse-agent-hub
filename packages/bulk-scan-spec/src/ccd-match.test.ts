@@ -39,7 +39,7 @@ describe("compatible", () => {
     expect(compatible(shape, { type })).toBe(fits);
   });
 
-  it("should accept a Yes/No radio list for a yes or no answer", () => {
+  it("should accept a Yes/No radio list for a yes or no answer when its type parameter is YesNo", () => {
     expect(compatible("yesno", { type: "FixedRadioList", typeParameter: "YesNo" })).toBe(true);
   });
 });
@@ -51,7 +51,7 @@ describe("matchCcd", () => {
     expect(row?.ccdMatch?.status).toBe("existing");
   });
 
-  it("should not match a date input to a text field that has the same words", () => {
+  it("should not match a date input to a text field when the text field has the same words", () => {
     const [row] = rowsOf(matchCcd(spec([field("Date of birth", { inputType: "date" })]), CASE_TYPE));
     expect(row?.ccd).toEqual(["applicantDateOfBirth"]);
   });
@@ -78,7 +78,7 @@ describe("matchCcd", () => {
     expect(row?.ccdMatch?.candidates?.[0]?.id ?? row?.ccd[0]).toBe("hrgDt");
   });
 
-  it("should treat Yes and No checkboxes as a YesOrNo field", () => {
+  it("should treat the checkboxes as a YesOrNo field when their options are Yes and No", () => {
     const yesNo = field("Is the applicant represented?", {
       inputType: "checkbox",
       keys: ["yes", "no"],
@@ -94,7 +94,7 @@ describe("matchCcd", () => {
     expect(rowsOf(matchCcd(spec([yesNo]), CASE_TYPE))[0]?.ccd).toEqual(["isRepresented"]);
   });
 
-  it("should treat an XoR group of choices as a list field", () => {
+  it("should treat the group as a list field when its options are choices", () => {
     const choice = field("Application type", {
       inputType: "checkbox",
       keys: ["divorce", "dissolution"],
@@ -110,7 +110,7 @@ describe("matchCcd", () => {
     expect(rowsOf(matchCcd(spec([choice]), CASE_TYPE))[0]?.ccd).toEqual(["applicationType"]);
   });
 
-  it("should treat the address lines under an address question as one address field", () => {
+  it("should treat the lines as one address field when they follow an address question", () => {
     const rows = rowsOf(
       matchCcd(spec([field("First line of address", { id: "2.2" }), field("Town or city"), field("Postcode"), field("Phone number", { id: "2.3" })]), CASE_TYPE)
     );
@@ -118,7 +118,7 @@ describe("matchCcd", () => {
     expect(rows[3]?.ccd).not.toEqual(["applicantAddress"]);
   });
 
-  it("should treat a day, month and year box as one date field", () => {
+  it("should treat the boxes as one date field when they are day, month and year in a row", () => {
     const rows = rowsOf(matchCcd(spec([field("Date of birth Day"), field("Month"), field("Year")]), CASE_TYPE));
     expect(rows.map((r) => r.ccd[0])).toEqual(["applicantDateOfBirth", "applicantDateOfBirth", "applicantDateOfBirth"]);
   });
@@ -129,7 +129,7 @@ describe("matchCcd", () => {
     expect(row?.ccd).toEqual(["nationalInsuranceNumber"]);
   });
 
-  it("should propose the FieldType from the input type", () => {
+  it("should propose the FieldType from the input type when no case field fits", () => {
     const types = rowsOf(
       matchCcd(
         spec([field("Date moved in", { inputType: "date" }), field("Why did you move?", { maxLength: 500 }), field("Do you rent?", { inputType: "checkbox" })]),
@@ -162,14 +162,14 @@ describe("matchCcd", () => {
     expect(rows.filter((r) => r.ccd.includes("applicantFirstName"))).toHaveLength(1);
   });
 
-  it("should leave label and QR rows alone", () => {
+  it("should leave the row alone when it is a QR code", () => {
     const rows = rowsOf(matchCcd(spec([fieldSchema.parse({ role: "qr", label: "QR code", inputType: "qr" })]), CASE_TYPE));
     expect(rows[0]?.ccdMatch).toBeUndefined();
   });
 });
 
 describe("ids that came with the form", () => {
-  it("should mark an id the form already had as the form's, so it is kept across case types", () => {
+  it("should mark an id as the form's when the form already had it, so it is kept across case types", () => {
     const [row] = rowsOf(matchCcd(spec([field("Anything", { ccd: ["applicantEmail"] })]), CASE_TYPE, { keepSet: true }));
 
     expect(row?.ccdMatch).toMatchObject({ status: "existing", chosenBy: "form" });
@@ -191,7 +191,7 @@ describe("rows that share a decision", () => {
     expect(rows3.map((r) => r.ccdMatch?.status)).toEqual(["new", "new", "new"]);
   });
 
-  it("should give the rows of one subject the same group, and rows of another a different one", () => {
+  it("should give the rows of one subject the same group when they are decided together", () => {
     const rows3 = rowsOf(matchCcd(spec([field("First line of address", { id: "1" }), field("Town or city"), field("Phone number", { id: "2" })]), CASE_TYPE));
 
     expect(rows3[0]?.ccdMatch?.group).toBeDefined();
@@ -226,7 +226,7 @@ describe("a proposed id", () => {
 });
 
 describe("a date in three boxes", () => {
-  it("should not be joined across sections or over a row that is not a field", () => {
+  it("should not join the boxes when they cross sections or sit over a row that is not a field", () => {
     const day = field("Date of birth Day");
     const month = field("Month");
     const year = field("Year");
@@ -245,7 +245,7 @@ describe("a date in three boxes", () => {
 });
 
 describe("matching again", () => {
-  it("should propose the same id for a new field each time, not one numbered after its own earlier proposal", () => {
+  it("should propose the same id for a new field when matching again, not one numbered after its own earlier proposal", () => {
     const first = matchCcd(spec([field("National insurance number")]), CASE_TYPE);
     const again = matchCcd(first, CASE_TYPE, { keepSet: true });
 
@@ -253,7 +253,7 @@ describe("matching again", () => {
     expect(rowsOf(again)[0]?.ccd).toEqual(["nationalInsuranceNumber"]);
   });
 
-  it("should still avoid an id another row keeps or the case type has", () => {
+  it("should avoid an id when another row keeps it or the case type has it", () => {
     const rows2 = rowsOf(
       matchCcd(spec([field("Email address 2", { ccd: ["emailAddress"] }), field("Email address")]), [ccd("zzz", "Text")], { keepSet: true })
     );
@@ -275,14 +275,14 @@ describe("new case fields", () => {
     CASE_TYPE
   );
 
-  it("should list each new field once with its id, FieldType and label", () => {
+  it("should list each new field once with its id, FieldType and label when several rows share it", () => {
     expect(newCcdFields(matched).map((f) => [f.id, f.type, f.label])).toEqual([
       ["nationalInsuranceNumber", "Text", "National insurance number"],
       ["incidentLocation", "Text", "Incident location"]
     ]);
   });
 
-  it("should write the list and, for a config-generator service, a CaseData snippet", () => {
+  it("should write the list and a CaseData snippet when the service is config-generator", () => {
     const files = newCcdFieldFiles(matched);
     expect(files.map((f) => f.path)).toEqual(["new-ccd-fields.json", "new-case-data-fields.java.txt"]);
     expect(JSON.parse(files[0]?.content as string)).toMatchObject({ caseType: "T", fields: [{ id: "nationalInsuranceNumber" }, { id: "incidentLocation" }] });
@@ -291,7 +291,7 @@ describe("new case fields", () => {
     );
   });
 
-  it("should list a complex member separately and write no field for it", () => {
+  it("should list a complex member separately and write no field for it when the id has a dot", () => {
     const withMember = matchCcd(
       spec(
         [
@@ -326,7 +326,7 @@ describe("new case fields", () => {
     expect(json.map((f) => f.path)).toEqual(["new-ccd-fields.json"]);
   });
 
-  it("should declare every type a new field is offered", () => {
+  it("should declare every type when a new field is offered it", () => {
     for (const type of NEW_FIELD_TYPES) {
       const text = caseDataSnippet([{ id: "someField", type, label: "Some field" }]);
       expect(text, type).toContain("private ");
@@ -334,7 +334,7 @@ describe("new case fields", () => {
     }
   });
 
-  it("should write list fields as the enum the services declare, with the type parameter", () => {
+  it("should write list fields as the enum the services declare when the type is a list", () => {
     const text = caseDataSnippet([
       { id: "kind", type: "FixedList", label: "Kind" },
       { id: "recipients", type: "MultiSelectList", label: "Recipients" },
@@ -347,7 +347,7 @@ describe("new case fields", () => {
     expect(text).toContain("private LocalDateTime movedAt;");
   });
 
-  it("should give a date and a list field their Java types and overrides", () => {
+  it("should give a date and a list field their Java types and overrides when the snippet is written", () => {
     const text = caseDataSnippet([
       { id: "movedIn", type: "Date", label: "Moved in" },
       { id: "kind", type: "FixedRadioList", label: "Kind" }

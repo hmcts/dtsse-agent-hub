@@ -18,7 +18,7 @@ const context = (): PodJobContext =>
 const answering = (stdout: string, code = 0, stderr = "") => ({ run: vi.fn(async () => ({ code, stdout, stderr })), exists: () => true });
 
 describe("the CCD pod-job handlers", () => {
-  it("should be registered with budgets inside the hub's times for them", () => {
+  it("should be registered with budgets inside the hub's times when the handlers are listed", () => {
     expect(POD_JOB_HANDLERS).toEqual(expect.arrayContaining([ccdCaseTypes, ccdCaseTypeFields]));
     expect(ccdCaseTypes.budgetMs).toBeLessThan(60_000);
     expect(ccdCaseTypeFields.budgetMs).toBeLessThan(180_000);
@@ -26,7 +26,7 @@ describe("the CCD pod-job handlers", () => {
 });
 
 describe("listCaseTypes", () => {
-  it("should answer the case types the script lists, in the hub's shape", async () => {
+  it("should answer the case types the script lists, in the hub's shape, when it prints a list", async () => {
     const deps = answering(
       JSON.stringify([{ product: "sptribs", service: "sptribs", caseType: "CriminalInjuriesCompensation", repo: "apps/x", ccdConfig: "config-generator" }])
     );
@@ -37,7 +37,7 @@ describe("listCaseTypes", () => {
     expect(deps.run).toHaveBeenCalledWith("/ws/scripts/ccd-case-types", ["list"], expect.objectContaining({ timeoutMs: 40_000 }));
   });
 
-  it("should leave out a row whose case type or product is not one the hub accepts", async () => {
+  it("should leave out a row when its case type or product is not one the hub accepts", async () => {
     const deps = answering(
       JSON.stringify([
         { product: "Bad", caseType: "A" },
@@ -46,7 +46,7 @@ describe("listCaseTypes", () => {
       ])
     );
 
-    expect(await listCaseTypes({}, context(), deps)).toEqual({ case_types: [{ product: "ok", service: "ok", case_type: "Good", config: null }] });
+    expect(await listCaseTypes({}, context(), deps)).toEqual({ case_types: [{ product: "ok", service: "ok", case_type: "Good", config: "other" }] });
   });
 
   it("should answer script_missing when the workspace has no such script", async () => {
@@ -56,7 +56,7 @@ describe("listCaseTypes", () => {
     });
   });
 
-  it("should refuse arguments it cannot run", async () => {
+  it("should refuse arguments it cannot run when the list is asked for with any", async () => {
     await expect(listCaseTypes({ product: "x" }, context(), answering("[]"))).rejects.toThrow("not ones this client can run");
   });
 
@@ -67,7 +67,7 @@ describe("listCaseTypes", () => {
 });
 
 describe("caseTypeFields", () => {
-  it("should pass the case type and product as their own arguments", async () => {
+  it("should pass the case type and product as their own arguments when fields are asked for", async () => {
     const deps = answering("[]");
 
     await caseTypeFields({ case_type: "NFD", product: "nfdiv" }, context(), deps);
@@ -80,13 +80,13 @@ describe("caseTypeFields", () => {
   });
 
   it.each([{ case_type: "--product" }, { case_type: "A", product: "Bad" }, { case_type: "A", other: 1 }, {}, null])(
-    "should refuse arguments it cannot run: %j",
+    "should refuse arguments it cannot run when they are: %j",
     async (args) => {
       await expect(caseTypeFields(args, context(), answering("[]"))).rejects.toThrow("not ones this client can run");
     }
   );
 
-  it("should drop label rows and absent values and keep what matching reads", async () => {
+  it("should drop label rows and absent values and keep what matching reads when the script answers", async () => {
     const rows = [
       { ID: "H", Label: "### Heading", FieldType: "Label", FieldTypeParameter: null, HintText: null },
       { ID: "a", Label: "A", FieldType: "Text", FieldTypeParameter: null, HintText: "hint" }
@@ -113,7 +113,7 @@ describe("caseTypeFields", () => {
 describe("fitFields", () => {
   const big = (id: string, extra = 150) => ({ ID: id, Label: "L".repeat(extra), FieldType: "Text" });
 
-  it("should clip text to the hub's limits", () => {
+  it("should clip text to the hub's limits when it is longer", () => {
     const [row] = fitFields([{ ID: "a", Label: "x".repeat(500), FieldType: "Text", HintText: "y".repeat(500) }]).fields;
     expect(row?.Label).toHaveLength(200);
     expect(row?.HintText).toHaveLength(200);
@@ -140,7 +140,7 @@ describe("fitFields", () => {
 });
 
 describe("scriptFailure", () => {
-  it("should report the script's own words for exit 127, not that the script is missing", () => {
+  it("should report the script's own words when it exits 127, not that the script is missing", () => {
     const failure = scriptFailure("/ws/scripts/ccd-case-types: line 40: gradlew: command not found", 127);
 
     expect(failure.code).toBe("failed");
@@ -157,7 +157,7 @@ describe("scriptFailure", () => {
     expect(failure.detail).toContain(tool);
   });
 
-  it("should still cut long words", () => {
+  it("should cut long words when the script says a lot", () => {
     expect(scriptFailure("x".repeat(1000), 1).detail).toHaveLength(280);
   });
 });

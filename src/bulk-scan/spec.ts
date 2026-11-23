@@ -1,4 +1,5 @@
 import {
+  type CcdConfig,
   type CcdField,
   caseDataFor,
   type Data,
@@ -27,7 +28,7 @@ import {
 import { ccdFieldsOf } from "@hmcts-cft/bulk-scan-spec/ccd-match";
 import { z } from "zod";
 import { HttpError } from "../agent-api/http.ts";
-import { CCD_FIELD_ROWS, type CcdConfig } from "../assistant/ccd-jobs.ts";
+import { CCD_FIELD_ROWS } from "../assistant/ccd-jobs.ts";
 import { isPdf } from "../assistant/docmosis.ts";
 import { isXlsx } from "../assistant/welsh.ts";
 import { type CaseTypeChoice, withCaseType, withCaseTypeHeader } from "./case-type.ts";
