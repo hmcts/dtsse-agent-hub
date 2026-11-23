@@ -66,7 +66,7 @@ describe("patching a spec", () => {
     expect(spec.sections[0]?.fields[1]?.label).toBe("");
   });
 
-  it("should drop an id, regex, minimum or maximum length that is emptied", () => {
+  it("should drop an id, regex, minimum or maximum length when it is emptied", () => {
     const next = patchField(patchField(spec, 0, 0, { minLength: 2 }), 0, 0, { id: "", regex: "", maxLength: undefined, minLength: undefined });
     expect(next.sections[0]?.fields[0]).not.toHaveProperty("minLength");
     expect(next.sections[0]?.fields[0]).not.toHaveProperty("id");

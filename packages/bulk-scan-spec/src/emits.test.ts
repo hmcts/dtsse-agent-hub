@@ -65,7 +65,7 @@ describe("parseEmits with a name and no value", () => {
 });
 
 describe("defaultEmits for a one-key tick box in a group of two", () => {
-  it("should list true and false, as for any tick box, unless the field lists its own Yes and No emits", () => {
+  it("should list true and false when the field lists no emits of its own, as for any tick box", () => {
     const base = { role: "field", label: "", inputType: "checkbox", mandatory: "mandatory", ccd: [], rules: [], todo: [], keys: ["q"] } as const;
     const group = { kind: "xor", size: 2, options: [{ key: "q" }] } as const;
     expect(defaultEmits(fieldSchema.parse({ ...base, group })).map((e) => e.value)).toEqual(["true", "false"]);

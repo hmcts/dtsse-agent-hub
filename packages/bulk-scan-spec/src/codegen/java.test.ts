@@ -332,7 +332,7 @@ describe("minimum length", () => {
     expect(usR8(fixed)).toEqual(["ref"]);
   });
 
-  it("should give a valid sample at least the minimum long", () => {
+  it("should give a valid sample at least the minimum long when the key has a minimum length", () => {
     expect(validData(minimal()).code?.length).toBeGreaterThanOrEqual(3);
   });
 });
