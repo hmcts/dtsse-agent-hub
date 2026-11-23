@@ -3,7 +3,6 @@
 import type { FormSpec } from "@hmcts-cft/bulk-scan-spec";
 import { useRouter } from "next/navigation";
 import { type KeyboardEvent, useRef, useState } from "react";
-import { withoutCaseType } from "@/bulk-scan/case-type";
 import { issuesByField, patchHeader } from "@/bulk-scan/edit";
 import type { BulkScanEditorView } from "@/bulk-scan/editor-view";
 import { identitiesOf, reconcileIdentities, reviewTotal } from "@/bulk-scan/outline";
@@ -41,7 +40,6 @@ export function BulkScanEditor({
   const router = useRouter();
   const [spec, setSpec] = useState<FormSpec>(view.spec);
   const [dirty, setDirty] = useState(false);
-  const [fetchingCaseType, setFetchingCaseType] = useState(false);
   const [saving, setSaving] = useState(false);
   const [problems, setProblems] = useState<ReturnType<typeof issuesByField>>({ fields: new Map(), form: [] });
   const [error, setError] = useState<string | null>(null);
@@ -140,19 +138,7 @@ export function BulkScanEditor({
           <Labelled label="PO box">
             <input value={spec.form.poBox ?? ""} className={INPUT} onChange={(e) => change(patchHeader(spec, { poBox: e.target.value }))} />
           </Labelled>
-          <Labelled label="Case type (CCD case type id)">
-            <input
-              value={spec.form.ccdCaseTypeId ?? ""}
-              disabled={fetchingCaseType}
-              className={INPUT}
-              onChange={(e) =>
-                change((current) => patchHeader(current.form.ccdProduct === undefined ? current : withoutCaseType(current), { ccdCaseTypeId: e.target.value }))
-              }
-            />
-          </Labelled>
-          <div className="sm:col-span-2 xl:col-span-4">
-            <BulkScanHeaderCaseType spec={spec} conversationId={podConversationId} onSpec={change} onFetching={setFetchingCaseType} />
-          </div>
+          <BulkScanHeaderCaseType spec={spec} conversationId={podConversationId} onSpec={change} />
         </div>
       </section>
 

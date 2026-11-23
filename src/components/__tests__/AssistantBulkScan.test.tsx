@@ -325,7 +325,7 @@ describe("bulk scan editor", () => {
     fireEvent.change(screen.getByLabelText("Label"), { target: { value: "Full name" } });
     fireEvent.change(screen.getByLabelText("Max length"), { target: { value: "40" } });
     fireEvent.change(screen.getByLabelText("Min length"), { target: { value: "5" } });
-    fireEvent.change(screen.getByLabelText("Case type (CCD case type id)"), { target: { value: "CriminalInjuriesCompensation" } });
+    fireEvent.change(screen.getByLabelText("Or type a case type id"), { target: { value: "CriminalInjuriesCompensation" } });
     await user.click(screen.getByRole("button", { name: "Add a key" }));
     await user.type(screen.getByLabelText("Key 2"), "other{Enter}");
     fireEvent.change(screen.getByLabelText("CCD ids"), { target: { value: "ccdName" } });

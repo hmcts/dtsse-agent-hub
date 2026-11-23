@@ -74,7 +74,7 @@ async function openPicker(): Promise<void> {
   await waitFor(() => expect(select().querySelectorAll("option").length).toBeGreaterThan(1));
 }
 
-const select = () => screen.getByLabelText("Service and CCD case type (optional)") as HTMLSelectElement;
+const select = () => screen.getByLabelText("Case type") as HTMLSelectElement;
 
 describe("the case type picker", () => {
   it("should ask for nothing until the person opens it, and once for the page, when it is rendered", async () => {
@@ -128,7 +128,7 @@ describe("the case type picker", () => {
     render(<BulkScanCaseTypePicker conversationId="c1" selected={null} onPicked={onPicked} onCleared={vi.fn()} />);
 
     await openPicker();
-    expect([...select().querySelectorAll("optgroup")].map((g) => g.label)).toEqual(["nfdiv", "sptribs"]);
+    expect([...select().querySelectorAll("option")].map((o) => o.textContent)).toEqual(["No case type", "nfdiv: NFD", "sptribs: CriminalInjuriesCompensation"]);
     await userEvent.selectOptions(select(), "sptribs/CriminalInjuriesCompensation");
 
     await waitFor(() => expect(onPicked).toHaveBeenCalled());
@@ -352,41 +352,84 @@ describe("the editor's case type", () => {
     expect((screen.getByLabelText("Label") as HTMLTextAreaElement).value).toBe("Email address (edited)");
   });
 
+  /** A form whose case type is one the workspace's list lacks, so a typed id is offered. */
+  const unlisted = (over: object = {}) => {
+    const v = view({ id: "1.1", ccd: [], ...over }) as { spec: FormSpec };
+    return { ...v, spec: { ...v.spec, form: { ...v.spec.form, ccdCaseTypeId: "Gone", ccdProduct: "other" } } } as never;
+  };
+  const typed = () => screen.getByLabelText("Or type a case type id") as HTMLInputElement;
+
   it("should keep the typed case type field off when the fields are being fetched", async () => {
     fetchMock.mockImplementation(podJobs());
     answers[1] = { kind: "ccd.case-type-fields", answer: { status: "pending" } };
-    render(<BulkScanEditor view={view({ id: "1.1", ccd: [] })} signOff={vi.fn()} podConversationId="c1" />);
+    render(<BulkScanEditor view={unlisted()} signOff={vi.fn()} podConversationId="c1" />);
 
     await openPicker();
     await userEvent.selectOptions(select(), "sptribs/CriminalInjuriesCompensation");
 
-    expect((screen.getByLabelText("Case type (CCD case type id)") as HTMLInputElement).disabled).toBe(true);
+    expect(typed().disabled).toBe(true);
     for (const id of Object.keys(pending)) {
       pending[id] = { status: "done", kind: "ccd.case-type-fields", result: { fields: ROWS, total: 2, omitted: 0 } };
     }
-    await waitFor(() => expect((screen.getByLabelText("Case type (CCD case type id)") as HTMLInputElement).disabled).toBe(false), { timeout: 5000 });
+    await waitFor(() => expect(screen.queryByLabelText("Or type a case type id")).toBeNull(), { timeout: 5000 });
   });
 
-  it("should set the case type from the typed field when the person has no chat to read their workspace in", async () => {
+  it("should offer a typed case type id, with the reason, when the person has no chat to read their workspace in", async () => {
     render(<BulkScanEditor view={view({ id: "1.1", ccd: [] })} signOff={vi.fn()} podConversationId={null} />);
 
-    await userEvent.type(screen.getByLabelText("Case type (CCD case type id)"), "CIC");
+    await userEvent.type(typed(), "CIC");
 
-    expect((screen.getByLabelText("Case type (CCD case type id)") as HTMLInputElement).value).toBe("CIC");
+    expect(typed().value).toBe("CIC");
+    expect(screen.getByText(/not available to list your workspace's case types/)).toBeTruthy();
   });
 
-  it("should drop the picked case type's product and badges when a different one is typed", async () => {
+  it("should offer a typed case type id when the list cannot be read", async () => {
+    fetchMock.mockImplementation(podJobs());
+    answers[0] = { kind: "ccd.case-types", answer: { status: "failed", kind: "x", error: "script_missing", detail: "no tool" } };
+    render(<BulkScanEditor view={view({ id: "1.1", ccd: [] })} signOff={vi.fn()} podConversationId="c1" />);
+
+    expect(screen.queryByLabelText("Or type a case type id")).toBeNull();
+    await userEvent.click(select());
+
+    expect(await screen.findByLabelText("Or type a case type id")).toBeTruthy();
+    expect(screen.getByText(/could not be listed/)).toBeTruthy();
+  });
+
+  it("should offer a typed case type id when the form's case type is not in the list", async () => {
+    fetchMock.mockImplementation(podJobs());
+    render(<BulkScanEditor view={unlisted()} signOff={vi.fn()} podConversationId="c1" />);
+
+    await openPicker();
+
+    expect(typed()).toBeTruthy();
+    expect(screen.getByText(/is not in your workspace's list/)).toBeTruthy();
+  });
+
+  it("should show the one picker, with its counts, and no typed id when the form's case type is in the list", async () => {
     fetchMock.mockImplementation(podJobs());
     render(<BulkScanEditor view={view({ id: "1.1", ccd: [] })} signOff={vi.fn()} podConversationId="c1" />);
 
+    expect(screen.queryByText(/to add/)).toBeNull();
     await openPicker();
     await userEvent.selectOptions(select(), "sptribs/CriminalInjuriesCompensation");
-    expect(await screen.findByText("Unsure")).toBeTruthy();
-    await userEvent.type(screen.getByLabelText("Case type (CCD case type id)"), "X");
+
+    expect(await screen.findByText(/new case fields to add/)).toBeTruthy();
+    expect(screen.queryByLabelText("Or type a case type id")).toBeNull();
+    expect(select().selectedOptions[0]?.textContent).toBe("sptribs: CriminalInjuriesCompensation");
+  });
+
+  it("should drop the picked case type's product and badges when a different id is typed", async () => {
+    fetchMock.mockImplementation(podJobs());
+    const unsure = { ccdMatch: { status: "unsure", candidates: [], newField: { id: "x", type: "Text" } } };
+    render(<BulkScanEditor view={unlisted(unsure)} signOff={vi.fn()} podConversationId="c1" />);
+
+    await openPicker();
+    expect(screen.getByText("Unsure")).toBeTruthy();
+    await userEvent.type(typed(), "X");
 
     expect(screen.queryByText("Unsure")).toBeNull();
     expect(select().value).toBe("");
-    expect((screen.getByLabelText("Case type (CCD case type id)") as HTMLInputElement).value).toBe("CriminalInjuriesCompensationX");
+    expect(typed().value).toBe("GoneX");
   });
 
   it("should refresh the status of a CCD id without changing it when the person set it", async () => {

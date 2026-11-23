@@ -30,6 +30,12 @@ const WORDS: PodJobWords = {
   noPod: "This chat runs on your own computer, so the CFT Workspace cannot read your workspace for it. You can carry on without a case type.",
   assistantGone: "Your assistant has been replaced. You can carry on without a case type."
 };
+/** What the picker's list has come to: not asked for yet or being read, read, or not readable (no assistant to ask, or the ask failed). */
+export interface ListedCaseTypes {
+  state: "none" | "idle" | "loading" | "ready" | "failed";
+  types: ListedCaseType[];
+}
+
 export const WAKING_WORDS = "Your assistant is starting. This takes a minute or two, then this carries on by itself.";
 export const NO_CHAT = "Start a chat in the CFT Workspace first, so your assistant is running, and this list is read from your workspace.";
 
@@ -45,6 +51,7 @@ const FINAL_CODES: readonly string[] = ["script_missing", "tool_missing", "not_c
 const retryable = (outcome: { status?: string; code?: string }): boolean =>
   outcome.status !== "unsupported" && outcome.status !== "no_pod" && outcome.status !== "assistant_gone" && !FINAL_CODES.includes(outcome.code ?? "");
 
+const NONE: ListedCaseType[] = [];
 const keyOf = (type: Pick<ListedCaseType, "product" | "case_type">): string => `${type.product}/${type.case_type}`;
 
 /**
@@ -58,6 +65,7 @@ export function BulkScanCaseTypePicker({
   onPicked,
   onCleared,
   onFetching,
+  onList,
   disabled = false
 }: Readonly<{
   conversationId: string | null;
@@ -66,6 +74,8 @@ export function BulkScanCaseTypePicker({
   onCleared: () => void;
   /** Told when the fields of a chosen case type start and stop being fetched, so what is typed meanwhile is not overwritten by them. */
   onFetching?: (fetching: boolean) => void;
+  /** Told what the list of case types has come to, so the form can offer a typed id where the list cannot be read or lacks the case type. */
+  onList?: (list: ListedCaseTypes) => void;
   disabled?: boolean;
 }>) {
   const id = useId();
@@ -82,6 +92,11 @@ export function BulkScanCaseTypePicker({
   const listing = useRef<AbortController | null>(null);
   const fetchingRef = useRef(onFetching);
   fetchingRef.current = onFetching;
+  const listedRef = useRef(onList);
+  listedRef.current = onList;
+  const listState = list.state;
+  const listedTypes = list.state === "ready" ? list.types : NONE;
+  useEffect(() => listedRef.current?.({ state: listState, types: listedTypes }), [listState, listedTypes]);
   const isFetching = fetching !== null;
   useEffect(() => fetchingRef.current?.(isFetching), [isFetching]);
 
@@ -166,14 +181,13 @@ export function BulkScanCaseTypePicker({
   }
 
   const types = list.state === "ready" ? list.types : [];
-  const services = [...new Set(types.map((t) => t.service))].sort(byCode);
   const current = fetching ?? (selected === null ? "" : `${selected.product}/${selected.caseType}`);
   const known = types.some((t) => keyOf(t) === current);
 
   return (
     <div className="flex flex-col gap-1.5">
       <label htmlFor={id} className="text-[13px] text-asst-muted">
-        Service and CCD case type (optional)
+        Case type
       </label>
       <select
         id={id}
@@ -185,19 +199,14 @@ export function BulkScanCaseTypePicker({
         onChange={(event) => void choose(event.target.value)}
       >
         <option value="">{list.state === "loading" ? "Reading your workspace…" : "No case type"}</option>
-        {current !== "" && !known ? <option value={current}>{current.split("/")[1]}</option> : null}
-        {services.map((service) => (
-          <optgroup key={service} label={service}>
-            {types
-              .filter((t) => t.service === service)
-              .sort((a, b) => byCode(a.case_type, b.case_type))
-              .map((t) => (
-                <option key={keyOf(t)} value={keyOf(t)}>
-                  {t.case_type}
-                </option>
-              ))}
-          </optgroup>
-        ))}
+        {current !== "" && !known ? <option value={current}>{current.replace("/", ": ")}</option> : null}
+        {[...types]
+          .sort((a, b) => byCode(`${a.service}: ${a.case_type}`, `${b.service}: ${b.case_type}`))
+          .map((t) => (
+            <option key={keyOf(t)} value={keyOf(t)}>
+              {`${t.service}: ${t.case_type}`}
+            </option>
+          ))}
       </select>
       <p aria-live="polite" className="text-[13px] text-asst-muted">
         {list.state === "none"
