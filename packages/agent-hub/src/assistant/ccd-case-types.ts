@@ -19,6 +19,7 @@ const MAX_CASE_TYPES = 500;
 
 const CASE_TYPE_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/;
 const PRODUCT_RE = /^[a-z][a-z0-9-]{0,39}$/;
+const REPO_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,59}(\/[A-Za-z0-9][A-Za-z0-9_.-]{0,59}){1,3}$/;
 
 export const SCRIPT_MISSING =
   "Your workspace has no CCD case type tool yet. Update your workspace (the cft-workspace checkout in your assistant), then try again.";
@@ -149,7 +150,8 @@ export async function listCaseTypes(args: unknown, context: PodJobContext, deps:
     }
     // The hub knows the configurations and reads one it does not know as none.
     const config = text(row.ccdConfig, 40) ?? null;
-    return [{ product, service: text(row.service, 100) ?? product, case_type: caseType, config }];
+    const repo = text(row.repo, 200);
+    return [{ product, service: text(row.service, 100) ?? product, case_type: caseType, config, ...(repo && REPO_RE.test(repo) ? { repo } : {}) }];
   });
   return { case_types: found.slice(0, MAX_CASE_TYPES) };
 }

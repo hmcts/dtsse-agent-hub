@@ -16,7 +16,7 @@ import { productLabel } from "./products.ts";
 import { conversationRef, forksOf, type SharedChatLink, type SharedConversationRow, type SharePerson } from "./shares.ts";
 import { type SharedThreadItem, sharedThreadItems } from "./sharing.ts";
 import { threadItems } from "./thread.ts";
-import { PART_BYTES, partCount, storedNameOf } from "./uploads.ts";
+import { storeUploadBytes } from "./upload-store.ts";
 import { UNTITLED } from "./views.ts";
 
 /**
@@ -305,22 +305,7 @@ export async function attachForkContext(db: Database, sent: { conversationId: st
     return false;
   }
   const bytes = new TextEncoder().encode(forkContextMarkdown(forked, row.documents));
-  const upload = await db.assistantUpload.create({
-    data: {
-      conversationId: sent.conversationId,
-      ownerOid: sent.ownerOid,
-      messageId: sent.messageId,
-      fileName: FORK_CONTEXT_FILE_NAME,
-      storedName: storedNameOf(FORK_CONTEXT_FILE_NAME),
-      mediaType: FORK_CONTEXT_MEDIA_TYPE,
-      bytes: BigInt(bytes.byteLength),
-      state: "stored"
-    },
-    select: { id: true }
-  });
-  for (let index = 0; index < partCount(bytes.byteLength); index += 1) {
-    await db.assistantUploadPart.create({ data: { uploadId: upload.id, index, data: bytes.slice(index * PART_BYTES, (index + 1) * PART_BYTES) } });
-  }
+  await storeUploadBytes(db, { ...sent, fileName: FORK_CONTEXT_FILE_NAME, mediaType: FORK_CONTEXT_MEDIA_TYPE, bytes });
   return true;
 }
 

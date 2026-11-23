@@ -36,9 +36,25 @@ describe("listCaseTypes", () => {
     );
 
     expect(await listCaseTypes({}, context(), deps)).toEqual({
-      case_types: [{ product: "sptribs", service: "sptribs", case_type: "CriminalInjuriesCompensation", config: "config-generator" }]
+      case_types: [{ product: "sptribs", service: "sptribs", case_type: "CriminalInjuriesCompensation", config: "config-generator", repo: "apps/x" }]
     });
     expect(deps.run).toHaveBeenCalledWith("/ws/scripts/ccd-case-types", ["list"], expect.objectContaining({ timeoutMs: 40_000 }));
+  });
+
+  it("should answer a repo path the hub accepts and drop one it does not", async () => {
+    const deps = answering(
+      JSON.stringify([
+        { product: "a", caseType: "A", repo: "apps/a/a-api" },
+        { product: "b", caseType: "B", repo: "../etc/passwd" }
+      ])
+    );
+
+    expect(await listCaseTypes({}, context(), deps)).toEqual({
+      case_types: [
+        { product: "a", service: "a", case_type: "A", config: null, repo: "apps/a/a-api" },
+        { product: "b", service: "b", case_type: "B", config: null }
+      ]
+    });
   });
 
   it("should leave out a row when its case type or product is not one the hub accepts", async () => {

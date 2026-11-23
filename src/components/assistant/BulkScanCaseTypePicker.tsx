@@ -13,6 +13,7 @@ export interface ListedCaseType {
   service: string;
   case_type: string;
   config: CcdConfig | null;
+  repo?: string;
 }
 
 /** A case type the person picked, with the fields their pod found for it. `omitted` is how many fields were left out to fit the answer. */
@@ -21,6 +22,7 @@ export interface PickedCaseType {
   service: string;
   caseType: string;
   config: ListedCaseType["config"];
+  repo?: string;
   rows: CcdRow[];
   omitted: number;
 }
@@ -164,6 +166,7 @@ export function BulkScanCaseTypePicker({
           service: type.service,
           caseType: type.case_type,
           config: type.config,
+          ...(type.repo ? { repo: type.repo } : {}),
           rows: outcome.result.fields,
           omitted: outcome.result.omitted
         });

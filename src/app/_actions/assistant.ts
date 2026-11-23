@@ -29,9 +29,13 @@ import { hasPod } from "@/assistant/pods";
 import { MAX_ARTEFACT_MARKDOWN, MAX_ARTEFACT_TITLE } from "@/assistant/schemas";
 import { sendToConversation } from "@/assistant/send";
 import { requestWake, stopAnswer } from "@/assistant/session-store";
-import { attachUploads, uploadNames } from "@/assistant/upload-store";
+import { attachUploads, storeUploadBytes, uploadNames } from "@/assistant/upload-store";
 import { attachedBody, MAX_ATTACHMENTS_PER_MESSAGE } from "@/assistant/uploads";
 import { needsWake } from "@/assistant/wake";
+import { clip, DEFAULT_JAVA_PACKAGE, handoffPrompt, isHandoffTarget, isSignedOff, JAVA_TARGETS, NOT_SIGNED_OFF } from "@/bulk-scan/handoff";
+import { handoffFiles } from "@/bulk-scan/handoff-files";
+import { loadSpec } from "@/bulk-scan/load";
+import { type Download, versionOf } from "@/bulk-scan/spec";
 import type { ThreadMessage } from "@/messages/direct-thread";
 import { MAX_BODY } from "@/messages/limits";
 import { prisma } from "@/store/prisma";
@@ -122,7 +126,14 @@ function uploadIdsOf(raw: unknown): string[] {
   return Array.isArray(raw) ? raw.filter((id): id is string => typeof id === "string") : [];
 }
 
-async function send(oid: string, conversation: ConversationRow, typed: string, uploadIds: readonly string[] = []): Promise<ThreadMessage> {
+/** `generated` are files the hub made, stored on the message in its transaction rather than claimed from the composer. */
+async function send(
+  oid: string,
+  conversation: ConversationRow,
+  typed: string,
+  uploadIds: readonly string[] = [],
+  generated: readonly Download[] = []
+): Promise<ThreadMessage> {
   // Read before the insert, because a message of files and no words still needs a body: see `attachedBody`. The
   // claim inside the transaction below is what actually decides whether these files may be sent.
   const names = uploadIds.length === 0 ? [] : await uploadNames(prisma, oid, conversation.id, uploadIds);
@@ -145,6 +156,16 @@ async function send(oid: string, conversation: ConversationRow, typed: string, u
     // not finished uploading, or is already on another message refuses the whole send, and no message is written.
     // The first message in a copy of someone else's chat also takes the copied turns, once.
     alongside: async (tx, messageId) => {
+      for (const file of generated) {
+        await storeUploadBytes(tx, {
+          conversationId: conversation.id,
+          ownerOid: oid,
+          messageId,
+          fileName: file.fileName,
+          mediaType: file.contentType,
+          bytes: file.bytes
+        });
+      }
       await attachUploads(tx, { viewerOid: oid, conversationId: conversation.id, messageId, uploadIds });
       await attachForkContext(tx, { conversationId: conversation.id, ownerOid: oid, messageId });
     }
@@ -171,6 +192,82 @@ export async function startConversation(input: { product: unknown; body: unknown
     }
     const conversation = await createConversation(prisma, viewer.oid, { product: input.product, title: text(input.title) });
     await send(viewer.oid, conversation, body);
+    revalidatePath("/assistant");
+    return { ok: true, id: conversation.id };
+  });
+}
+
+/**
+ * Removes the conversation a hand-over made when its send failed, and answers whether it did. Not when the message
+ * committed: the files are stored in the message's transaction, so any upload says it did. A cleanup that fails is
+ * logged and the conversation counts as kept.
+ */
+async function removeUnsent(oid: string, conversationId: string): Promise<boolean> {
+  try {
+    if ((await prisma.assistantUpload.count({ where: { conversationId } })) > 0) {
+      return false;
+    }
+    await remove(prisma, oid, conversationId);
+    return true;
+  } catch (cleanup) {
+    console.error(`the hand-over's conversation could not be removed: ${cleanup instanceof Error ? (cleanup.stack ?? cleanup.message) : String(cleanup)}`);
+    return true;
+  }
+}
+
+/**
+ * Hands a signed-off Bulk Scan form to the Assistant: a new conversation whose first message asks for the service's pull
+ * request and carries the form's generated code, spec and transformation sheet. Only the owner's own signed-off version
+ * goes: `loadSpec` reports anyone else's form as missing, and a version that is saved but not signed off is refused.
+ * The files are stored in the message's own transaction, so a refused send leaves neither a message nor a file. A
+ * conversation whose send failed before its message committed is removed and the error reported; one whose message
+ * committed is kept and opened, because the hand-over exists and only its start was interrupted. The conversation is made
+ * and the message sent in separate transactions, so those two are not one step.
+ */
+export async function handToAssistant(form: FormData): Promise<ActionResult<{ id: string }>> {
+  return await runAction<{ id: string }>("hand to assistant", async () => {
+    if (!virtualAgentsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    if ((await assistantChatGate(viewer)) === "blocked") {
+      return BLOCKED;
+    }
+    const target = text(form.get("target"));
+    if (!isHandoffTarget(target)) {
+      return { ok: false, error: "choose the code pattern the service uses" };
+    }
+    const version = versionOf(text(form.get("version")));
+    if (version === undefined) {
+      return { ok: false, error: "choose a version to hand over" };
+    }
+    const { record, spec } = await loadSpec(prisma, { actorOid: viewer.oid, ownerOid: viewer.oid }, text(form.get("id")), version);
+    if (!isSignedOff(record.versions, version)) {
+      return { ok: false, error: NOT_SIGNED_OFF };
+    }
+    // A Java target's package is as the person typed it, and a blank or invalid one is refused as the download route refuses it.
+    const javaPackage = JAVA_TARGETS.includes(target) ? text(form.get("package")) : DEFAULT_JAVA_PACKAGE;
+    const { files, names, newFields } = await handoffFiles(spec, target, javaPackage);
+    const prompt = checkBody(handoffPrompt({ spec, version, target, javaPackage, names, newFields }), files.length);
+    if (typeof prompt !== "string") {
+      return prompt;
+    }
+    const conversation = await createConversation(prisma, viewer.oid, {
+      product: "bulk-scan",
+      title: `Hand over ${clip(spec.form.name) || clip(spec.form.formType)}`
+    });
+    try {
+      await send(viewer.oid, conversation, prompt, [], files);
+    } catch (error) {
+      if (!(await removeUnsent(viewer.oid, conversation.id))) {
+        // The message committed, so the hand-over exists and is only waiting to start: open it rather than leave the person to hand it over again.
+        console.error(
+          `the hand-over's conversation ${conversation.id} was kept after its send failed: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`
+        );
+      } else {
+        throw error;
+      }
+    }
     revalidatePath("/assistant");
     return { ok: true, id: conversation.id };
   });

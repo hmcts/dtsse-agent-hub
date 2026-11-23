@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BulkScanEditorView } from "@/bulk-scan/editor-view";
 import { BulkScanDownloads } from "@/components/assistant/BulkScanDownloads";
 import { BulkScanEditor } from "@/components/assistant/BulkScanEditor";
+import { BulkScanHandoff } from "@/components/assistant/BulkScanHandoff";
 import { BulkScanList } from "@/components/assistant/BulkScanList";
 import { BulkScanSimulator } from "@/components/assistant/BulkScanSimulator";
 import { BulkScanUpload } from "@/components/assistant/BulkScanUpload";
@@ -303,7 +304,7 @@ const open = (user: ReturnType<typeof userEvent.setup>, id: string) =>
 
 describe("bulk scan editor", () => {
   it("should show a field's group, allowed values, TODOs and review markers when it is open", () => {
-    render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
+    render(<BulkScanEditor view={VIEW} signOff={vi.fn()} handToAssistant={vi.fn()} />);
 
     expect(screen.getByText("decide the outcome")).toBeTruthy();
     expect(screen.getByText(/Check the group/)).toBeTruthy();
@@ -317,7 +318,7 @@ describe("bulk scan editor", () => {
   it("should save only after a change, as the next version, and go to it", async () => {
     fetchMock.mockResolvedValue(reply(201, { version: 2 }));
     const user = userEvent.setup();
-    render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
+    render(<BulkScanEditor view={VIEW} signOff={vi.fn()} handToAssistant={vi.fn()} />);
     const save = screen.getByRole("button", SAVE) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
 
@@ -350,7 +351,7 @@ describe("bulk scan editor", () => {
       })
     );
     const user = userEvent.setup();
-    render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
+    render(<BulkScanEditor view={VIEW} signOff={vi.fn()} handToAssistant={vi.fn()} />);
 
     await open(user, "1.2");
     fireEvent.change(screen.getByLabelText("Label"), { target: { value: "Full name" } });
@@ -365,7 +366,7 @@ describe("bulk scan editor", () => {
 
   it("should say so when the save does not reach the server", async () => {
     fetchMock.mockRejectedValue(new Error("net"));
-    render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
+    render(<BulkScanEditor view={VIEW} signOff={vi.fn()} handToAssistant={vi.fn()} />);
 
     fireEvent.change(screen.getByLabelText("PO box"), { target: { value: "PO 1" } });
     fireEvent.click(screen.getByRole("button", SAVE));
@@ -376,7 +377,7 @@ describe("bulk scan editor", () => {
 
   it("should offer an input type and mandatory choice per field when a field is open", async () => {
     const user = userEvent.setup();
-    render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
+    render(<BulkScanEditor view={VIEW} signOff={vi.fn()} handToAssistant={vi.fn()} />);
 
     await open(user, "1.2");
     fireEvent.change(screen.getByLabelText("Input type"), { target: { value: "date" } });
@@ -394,7 +395,7 @@ describe("typing into the editor", () => {
   it("should keep what is typed in a key and the CCD ids box, and send the words when the box is left", async () => {
     fetchMock.mockResolvedValue(reply(201, { version: 2 }));
     const user = userEvent.setup();
-    render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
+    render(<BulkScanEditor view={VIEW} signOff={vi.fn()} handToAssistant={vi.fn()} />);
     await open(user, "1.2");
     const key = screen.getByLabelText("Key 1") as HTMLInputElement;
 
@@ -413,7 +414,7 @@ describe("typing into the editor", () => {
   it("should take digits only in the max length box, so it is never not a number, when letters are typed", async () => {
     fetchMock.mockResolvedValue(reply(201, { version: 2 }));
     const user = userEvent.setup();
-    render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
+    render(<BulkScanEditor view={VIEW} signOff={vi.fn()} handToAssistant={vi.fn()} />);
     await open(user, "1.2");
     const max = screen.getByLabelText("Max length") as HTMLInputElement;
 
@@ -426,7 +427,7 @@ describe("typing into the editor", () => {
 
   it("should name each field's and section's controls for a screen reader and a tooltip, and hint each input, when the inputs are empty", async () => {
     const user = userEvent.setup();
-    render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
+    render(<BulkScanEditor view={VIEW} signOff={vi.fn()} handToAssistant={vi.fn()} />);
     await open(user, "1.2");
 
     expect(screen.getByRole("button", { name: "Move 1.2 up" }).getAttribute("title")).toBe("Move 1.2 up");
@@ -438,14 +439,14 @@ describe("typing into the editor", () => {
   it("should send the version the edit started from, and refuse to save an older version over the later ones", async () => {
     fetchMock.mockResolvedValue(reply(201, { version: 4 }));
     const user = userEvent.setup();
-    render(<BulkScanEditor view={{ ...VIEW, version: 3, versions: [{ ...VERSIONS[0]!, version: 3 }] }} signOff={vi.fn()} />);
+    render(<BulkScanEditor view={{ ...VIEW, version: 3, versions: [{ ...VERSIONS[0]!, version: 3 }] }} signOff={vi.fn()} handToAssistant={vi.fn()} />);
     await open(user, "1.2");
     await user.type(screen.getByLabelText("Label"), "!");
     await user.click(screen.getByRole("button", SAVE));
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body).baseVersion).toBe(3);
 
     cleanup();
-    render(<BulkScanEditor view={{ ...VIEW, version: 1, versions: VERSIONS }} signOff={vi.fn()} />);
+    render(<BulkScanEditor view={{ ...VIEW, version: 1, versions: VERSIONS }} signOff={vi.fn()} handToAssistant={vi.fn()} />);
     await open(user, "1.2");
     await user.type(screen.getByLabelText("Label"), "!");
     expect((screen.getByRole("button", SAVE) as HTMLButtonElement).disabled).toBe(true);
@@ -455,12 +456,137 @@ describe("typing into the editor", () => {
   it("should show the refusal when another save got there first", async () => {
     fetchMock.mockResolvedValue(reply(409, { error: "this form has a newer version: reload the page" }));
     const user = userEvent.setup();
-    render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
+    render(<BulkScanEditor view={VIEW} signOff={vi.fn()} handToAssistant={vi.fn()} />);
 
     await open(user, "1.2");
     await user.type(screen.getByLabelText("Label"), "!");
     await user.click(screen.getByRole("button", SAVE));
 
     expect((await screen.findByText(/newer version/)).textContent).toContain("reload");
+  });
+});
+
+describe("bulk scan hand-over to the Assistant", () => {
+  const hand = (over: Partial<Parameters<typeof BulkScanHandoff>[0]> = {}) => {
+    const handToAssistant = vi.fn().mockResolvedValue({ ok: true, id: "c9" });
+    render(
+      <BulkScanHandoff
+        specId="s1"
+        version={2}
+        signedOff
+        formType="T1"
+        ccdCaseTypeId={undefined}
+        ccdProduct={undefined}
+        handToAssistant={handToAssistant}
+        {...over}
+      />
+    );
+    return handToAssistant;
+  };
+  const button = () => screen.getByRole("button", { name: /Hand to the Assistant|Handing over/ }) as HTMLButtonElement;
+
+  it("should send the version, target and package and open the new conversation when a signed-off version is handed over", async () => {
+    const user = userEvent.setup();
+    const handToAssistant = hand();
+
+    await user.click(button());
+
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/assistant/c9"));
+    const sent = handToAssistant.mock.calls[0]?.[0] as FormData;
+    expect([sent.get("id"), sent.get("version"), sent.get("target"), sent.get("package")]).toEqual(["s1", "2", "nfdiv", "com.example.bulkscan"]);
+  });
+
+  it("should start on the pattern of the case type's product and let the person change it", async () => {
+    const user = userEvent.setup();
+    const handToAssistant = hand({ ccdCaseTypeId: "C51", ccdProduct: "fis" });
+    const select = screen.getByLabelText("Code pattern") as HTMLSelectElement;
+
+    expect(select.value).toBe("fis");
+    expect(screen.queryByLabelText("Java package")).toBeNull();
+    await user.selectOptions(select, "probate");
+    await user.clear(screen.getByLabelText("Java package"));
+    await user.type(screen.getByLabelText("Java package"), "uk.gov.hmcts.probate");
+    await user.click(button());
+
+    const sent = handToAssistant.mock.calls[0]?.[0] as FormData;
+    expect([sent.get("target"), sent.get("package")]).toEqual(["probate", "uk.gov.hmcts.probate"]);
+  });
+
+  it("should send no package for a target that is not Java", async () => {
+    const user = userEvent.setup();
+    const handToAssistant = hand({ ccdCaseTypeId: "PRLAPPS", ccdProduct: "prl" });
+
+    await user.click(button());
+
+    const sent = handToAssistant.mock.calls[0]?.[0] as FormData;
+    expect([sent.get("target"), sent.has("package")]).toEqual(["fis", false]);
+  });
+
+  it("should be disabled, and say why, when the version is saved but not signed off", async () => {
+    const user = userEvent.setup();
+    const handToAssistant = hand({ signedOff: false });
+
+    expect(button().disabled).toBe(true);
+    expect(button().getAttribute("aria-describedby")).toBe(screen.getByText(/Sign off this version first/).id);
+    await user.click(button());
+    expect(handToAssistant).not.toHaveBeenCalled();
+  });
+
+  it("should be disabled, and say why, when the form type is not set", async () => {
+    const user = userEvent.setup();
+    const handToAssistant = hand({ formType: "  " });
+
+    expect(button().disabled).toBe(true);
+    expect(button().getAttribute("aria-describedby")).toBe(screen.getByText("Set the form type (document_sub_type) in Form details first.").id);
+    await user.click(button());
+    expect(handToAssistant).not.toHaveBeenCalled();
+  });
+
+  it("should be disabled with the engine's words when the form type cannot name a file", async () => {
+    const user = userEvent.setup();
+    const handToAssistant = hand({ formType: "FORM A1" });
+
+    expect(button().disabled).toBe(true);
+    expect(button().getAttribute("aria-describedby")).toBe(screen.getByText(/cannot be used in a file name/).id);
+    await user.click(button());
+    expect(handToAssistant).not.toHaveBeenCalled();
+  });
+
+  it("should give both reasons when the version is not signed off and has no form type", () => {
+    hand({ signedOff: false, formType: "" });
+
+    expect(button().getAttribute("aria-describedby")?.split(" ")).toHaveLength(2);
+  });
+
+  it("should show why it was refused, and stay on the page, when the action refuses or fails", async () => {
+    const user = userEvent.setup();
+    const handToAssistant = hand();
+    handToAssistant.mockResolvedValueOnce({ ok: false, error: "too big" }).mockRejectedValueOnce(new Error("net"));
+
+    await user.click(button());
+    expect((await screen.findByRole("alert")).textContent).toBe("too big");
+    await user.click(button());
+    await waitFor(() => expect(screen.getByRole("alert").textContent).not.toBe("too big"));
+    expect(push).not.toHaveBeenCalled();
+    expect(button().disabled).toBe(false);
+  });
+
+  it("should offer the hand-over on the Download tab of a version that is not signed off, disabled", async () => {
+    const user = userEvent.setup();
+    render(<BulkScanEditor view={VIEW} signOff={vi.fn()} handToAssistant={vi.fn()} />);
+
+    await user.click(screen.getByRole("tab", { name: "Download" }));
+
+    expect((screen.getByRole("button", { name: "Hand to the Assistant" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("should enable the hand-over on the Download tab of a signed-off version", async () => {
+    const user = userEvent.setup();
+    const signed = { ...VIEW, versions: [{ ...VERSIONS[1]! }], version: 1 };
+    render(<BulkScanEditor view={signed} signOff={vi.fn()} handToAssistant={vi.fn()} />);
+
+    await user.click(screen.getByRole("tab", { name: "Download" }));
+
+    expect((screen.getByRole("button", { name: "Hand to the Assistant" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });

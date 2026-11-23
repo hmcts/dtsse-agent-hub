@@ -52,7 +52,9 @@ export function BulkScanHeaderCaseType({
         conversationId={conversationId}
         selected={ccdCaseTypeId && ccdProduct ? { product: ccdProduct, caseType: ccdCaseTypeId } : null}
         onPicked={(picked) =>
-          onSpec((current) => withCaseType(current, { product: picked.product, caseType: picked.caseType, config: picked.config }, ccdFieldsOf(picked.rows)))
+          onSpec((current) =>
+            withCaseType(current, { product: picked.product, caseType: picked.caseType, config: picked.config, repo: picked.repo }, ccdFieldsOf(picked.rows))
+          )
         }
         onCleared={() => onSpec(withoutCaseType)}
         onFetching={setFetching}

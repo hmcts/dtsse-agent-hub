@@ -371,7 +371,7 @@ describe("the editor's case type", () => {
 
   it("should match the rows, keep the ids already set and count what is new and unsure when a case type is chosen", async () => {
     fetchMock.mockImplementation(podJobs());
-    render(<BulkScanEditor view={view({ ccd: [] })} signOff={vi.fn()} podConversationId="c1" />);
+    render(<BulkScanEditor view={view({ ccd: [] })} signOff={vi.fn()} handToAssistant={vi.fn()} podConversationId="c1" />);
 
     await openPicker();
     await userEvent.selectOptions(select(), "sptribs/CriminalInjuriesCompensation");
@@ -385,7 +385,7 @@ describe("the editor's case type", () => {
   it("should keep what was typed while the fields were being fetched when they arrive", async () => {
     fetchMock.mockImplementation(podJobs());
     answers[1] = { kind: "ccd.case-type-fields", answer: { status: "pending" } };
-    render(<BulkScanEditor view={view({ id: "1.1", ccd: [] })} signOff={vi.fn()} podConversationId="c1" />);
+    render(<BulkScanEditor view={view({ id: "1.1", ccd: [] })} signOff={vi.fn()} handToAssistant={vi.fn()} podConversationId="c1" />);
 
     await openPicker();
     await userEvent.selectOptions(select(), "sptribs/CriminalInjuriesCompensation");
@@ -410,7 +410,7 @@ describe("the editor's case type", () => {
   it("should keep the typed case type field off when the fields are being fetched", async () => {
     fetchMock.mockImplementation(podJobs());
     answers[1] = { kind: "ccd.case-type-fields", answer: { status: "pending" } };
-    render(<BulkScanEditor view={unlisted()} signOff={vi.fn()} podConversationId="c1" />);
+    render(<BulkScanEditor view={unlisted()} signOff={vi.fn()} handToAssistant={vi.fn()} podConversationId="c1" />);
 
     await openPicker();
     await userEvent.selectOptions(select(), "sptribs/CriminalInjuriesCompensation");
@@ -423,7 +423,7 @@ describe("the editor's case type", () => {
   });
 
   it("should offer a typed case type id, with the reason, when the person has no chat to read their workspace in", async () => {
-    render(<BulkScanEditor view={view({ id: "1.1", ccd: [] })} signOff={vi.fn()} podConversationId={null} />);
+    render(<BulkScanEditor view={view({ id: "1.1", ccd: [] })} signOff={vi.fn()} handToAssistant={vi.fn()} podConversationId={null} />);
 
     await userEvent.type(typed(), "CIC");
 
@@ -434,7 +434,7 @@ describe("the editor's case type", () => {
   it("should offer a typed case type id when the list cannot be read", async () => {
     fetchMock.mockImplementation(podJobs());
     answers[0] = { kind: "ccd.case-types", answer: { status: "failed", kind: "x", error: "script_missing", detail: "no tool" } };
-    render(<BulkScanEditor view={view({ id: "1.1", ccd: [] })} signOff={vi.fn()} podConversationId="c1" />);
+    render(<BulkScanEditor view={view({ id: "1.1", ccd: [] })} signOff={vi.fn()} handToAssistant={vi.fn()} podConversationId="c1" />);
 
     expect(typedDisclosure().open).toBe(false);
     await userEvent.click(select());
@@ -446,7 +446,7 @@ describe("the editor's case type", () => {
 
   it("should let a case type be typed from the closed disclosure when the list is ready but lacks the one wanted", async () => {
     fetchMock.mockImplementation(podJobs());
-    render(<BulkScanEditor view={view({ id: "1.1", ccd: [] })} signOff={vi.fn()} podConversationId="c1" />);
+    render(<BulkScanEditor view={view({ id: "1.1", ccd: [] })} signOff={vi.fn()} handToAssistant={vi.fn()} podConversationId="c1" />);
 
     await openPicker();
     expect(typedDisclosure().open).toBe(false);
@@ -458,7 +458,7 @@ describe("the editor's case type", () => {
 
   it("should offer a typed case type id when the form's case type is not in the list", async () => {
     fetchMock.mockImplementation(podJobs());
-    render(<BulkScanEditor view={unlisted()} signOff={vi.fn()} podConversationId="c1" />);
+    render(<BulkScanEditor view={unlisted()} signOff={vi.fn()} handToAssistant={vi.fn()} podConversationId="c1" />);
 
     await openPicker();
 
@@ -468,7 +468,7 @@ describe("the editor's case type", () => {
 
   it("should show the one picker, with its counts, and no typed id when the form's case type is in the list", async () => {
     fetchMock.mockImplementation(podJobs());
-    render(<BulkScanEditor view={view({ id: "1.1", ccd: [] })} signOff={vi.fn()} podConversationId="c1" />);
+    render(<BulkScanEditor view={view({ id: "1.1", ccd: [] })} signOff={vi.fn()} handToAssistant={vi.fn()} podConversationId="c1" />);
 
     expect(screen.queryByText(/to add/)).toBeNull();
     await openPicker();
@@ -482,7 +482,7 @@ describe("the editor's case type", () => {
   it("should drop the picked case type's product and badges when a different id is typed", async () => {
     fetchMock.mockImplementation(podJobs());
     const unsure = { ccdMatch: { status: "unsure", candidates: [], newField: { id: "x", type: "Text" } } };
-    render(<BulkScanEditor view={unlisted(unsure)} signOff={vi.fn()} podConversationId="c1" />);
+    render(<BulkScanEditor view={unlisted(unsure)} signOff={vi.fn()} handToAssistant={vi.fn()} podConversationId="c1" />);
 
     await openPicker();
     expect(screen.getByText("Unsure")).toBeTruthy();
@@ -495,7 +495,7 @@ describe("the editor's case type", () => {
 
   it("should refresh the status of a CCD id without changing it when the person set it", async () => {
     fetchMock.mockImplementation(podJobs());
-    render(<BulkScanEditor view={view({ ccd: ["cicCaseEmail"] })} signOff={vi.fn()} podConversationId="c1" />);
+    render(<BulkScanEditor view={view({ ccd: ["cicCaseEmail"] })} signOff={vi.fn()} handToAssistant={vi.fn()} podConversationId="c1" />);
 
     await openPicker();
     await userEvent.selectOptions(select(), "sptribs/CriminalInjuriesCompensation");

@@ -1,15 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { DEFAULT_JAVA_PACKAGE, JAVA_TARGETS } from "@/bulk-scan/handoff";
 import { FIELD, LINK } from "@/components/assistant/WelshParts";
-
-const JAVA_TARGETS = ["nfdiv", "probate"];
-const DEFAULT_PACKAGE = "com.example.bulkscan";
 
 /** The SIP and the transformation sheet as Excel, and the code for a service as a zip, all of the version being viewed. */
 export function BulkScanDownloads({ specId, version, targets }: Readonly<{ specId: string; version: number; targets: readonly string[] }>) {
   const [target, setTarget] = useState(targets.includes("nfdiv") ? "nfdiv" : (targets[0] ?? ""));
-  const [javaPackage, setJavaPackage] = useState(DEFAULT_PACKAGE);
+  const [javaPackage, setJavaPackage] = useState(DEFAULT_JAVA_PACKAGE);
   const base = `/api/ui/assistant/bulk-scan/${encodeURIComponent(specId)}/download?version=${version}`;
   const code = `${base}&kind=code&target=${encodeURIComponent(target)}${JAVA_TARGETS.includes(target) ? `&package=${encodeURIComponent(javaPackage)}` : ""}`;
   return (

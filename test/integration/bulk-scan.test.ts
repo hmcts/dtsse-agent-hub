@@ -8,10 +8,11 @@ import * as downloadRoute from "../../src/app/api/ui/assistant/bulk-scan/[id]/do
 import * as simulateRoute from "../../src/app/api/ui/assistant/bulk-scan/[id]/simulate/route.ts";
 import * as versionsRoute from "../../src/app/api/ui/assistant/bulk-scan/[id]/versions/route.ts";
 import * as uploadRoute from "../../src/app/api/ui/assistant/bulk-scan/route.ts";
-import { sidebarKinds } from "../../src/assistant/conversation-store.ts";
+import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
+import { findConversation, sidebarKinds } from "../../src/assistant/conversation-store.ts";
 import { sidebarGroups, sidebarMatches } from "../../src/assistant/views.ts";
 import { MAX_SPEC_BYTES } from "../../src/bulk-scan/spec.ts";
-import { listSpecs, readSpec, searchSpecs, sidebarSpecs } from "../../src/bulk-scan/spec-store.ts";
+import { createSpecs, listSpecs, readSpec, searchSpecs, sidebarSpecs } from "../../src/bulk-scan/spec-store.ts";
 import { decodeEvent, HUB_CHANNEL, type NotifiedEvent } from "../../src/realtime/events.ts";
 import { bulkScanEditor, bulkScanSpecs } from "../../src/web/data.ts";
 import { ALICE, BOB } from "./assistant-pod.ts";
@@ -19,10 +20,45 @@ import { connect, insertUser, prisma, resetDatabase } from "./database.ts";
 import { jsonOf } from "./routes.ts";
 
 vi.mock("next/headers", async () => (await import("./web-session.ts")).nextHeadersMock());
+const send = vi.hoisted(() => ({ failAfterStoring: false, failAfterCommit: false, cleanupFails: false }));
+vi.mock("../../src/assistant/conversation-store.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/assistant/conversation-store.ts")>();
+  return {
+    ...actual,
+    deleteConversation: async (...args: Parameters<typeof actual.deleteConversation>) => {
+      if (send.cleanupFails) {
+        throw new Error("the cleanup failed");
+      }
+      return await actual.deleteConversation(...args);
+    }
+  };
+});
+vi.mock("../../src/assistant/send.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/assistant/send.ts")>();
+  return {
+    ...actual,
+    sendToConversation: async (...[prisma, senderOid, conversation, message]: Parameters<typeof actual.sendToConversation>) => {
+      const sent = await actual.sendToConversation(prisma, senderOid, conversation, {
+        ...message,
+        alongside: async (tx, messageId) => {
+          await message.alongside?.(tx, messageId);
+          if (send.failAfterStoring) {
+            throw new Error("the send failed after its files were stored");
+          }
+        }
+      });
+      if (send.failAfterCommit) {
+        throw new Error("the send failed after its message committed");
+      }
+      return sent;
+    }
+  };
+});
 vi.mock("next/cache", async () => (await import("./web-session.ts")).nextCacheMock());
 
 const { actAs, revalidated } = await import("./web-session.ts");
 const actions = await import("../../src/app/_actions/bulk-scan.ts");
+const assistantActions = await import("../../src/app/_actions/assistant.ts");
 
 const client = await connect();
 afterAll(async () => {
@@ -520,5 +556,202 @@ describe("the forms in the sidebar", () => {
       await vi.waitFor(() => expect(sent()).toHaveLength(1), { timeout: 5000 });
       expect(sent()).toEqual([announced]);
     });
+  });
+});
+
+describe("handing a version to the Assistant", () => {
+  const WITH_NEW_FIELD = formSpecSchema.parse({
+    form: {
+      name: "T210 Application",
+      formType: "T210",
+      ccdCaseTypeId: "CIC",
+      ccdProduct: "sptribs",
+      ccdConfig: "config-generator",
+      ccdRepo: "apps/sptribs/sptribs-case-api"
+    },
+    sections: [
+      {
+        id: "1",
+        title: "About",
+        fields: [
+          { id: "1.1", label: "First name", keys: ["firstName"], mandatory: "mandatory", ccd: ["applicantFirstName"] },
+          {
+            id: "1.2",
+            label: "Nickname",
+            keys: ["nickname"],
+            ccd: ["applicantNickname"],
+            ccdMatch: { status: "new", newField: { id: "applicantNickname", type: "Text" } }
+          }
+        ]
+      }
+    ]
+  });
+
+  async function spec(): Promise<string> {
+    const [id] = await createSpecs(prisma, own(ALICE), [{ name: "T210 Application", spec: WITH_NEW_FIELD }]);
+    return id as string;
+  }
+
+  const handed = (id: string, over: Record<string, string> = {}) =>
+    assistantActions.handToAssistant(formOf({ id, version: "1", target: "nfdiv", package: "com.example.bulkscan", ...over }));
+
+  beforeEach(async () => {
+    await ensureAssistant(prisma, { oid: ALICE.oid, modelRoute: "own-licence" });
+    await ensureAssistant(prisma, { oid: BOB.oid, modelRoute: "own-licence" });
+  });
+
+  it("should start the owner's conversation with the generated files and the prepared prompt on its first message when the version is signed off", async () => {
+    const id = await spec();
+    await actions.signOffSpec(formOf({ id, version: "1" }));
+
+    const result = await handed(id);
+
+    expect(result).toMatchObject({ ok: true, id: expect.any(String) });
+    const conversationId = (result as { id: string }).id;
+    const conversation = await prisma.assistantConversation.findUniqueOrThrow({ where: { id: conversationId }, select: { ownerOid: true, product: true } });
+    expect(conversation).toEqual({ ownerOid: ALICE.oid, product: "bulk-scan" });
+    const message = await prisma.message.findFirstOrThrow({ select: { id: true, body: true } });
+    expect(message.body).toContain("is defined in apps/sptribs/sptribs-case-api, a config-generator service");
+    const uploads = await prisma.assistantUpload.findMany({
+      where: { conversationId },
+      orderBy: { createdAt: "asc" },
+      select: { fileName: true, messageId: true, state: true, ownerOid: true }
+    });
+    expect(uploads.map((u) => u.fileName)).toHaveLength(4);
+    expect(uploads.map((u) => u.fileName)).toEqual(
+      expect.arrayContaining(["T210-nfdiv.zip", "T210-spec.json", "T210-transformation.xlsx", "new-ccd-fields.json"])
+    );
+    expect(new Set(uploads.map((u) => u.messageId))).toEqual(new Set([message.id]));
+    expect(new Set(uploads.map((u) => `${u.state}/${u.ownerOid}`))).toEqual(new Set([`stored/${ALICE.oid}`]));
+  });
+
+  it("should refuse a version that is saved but not signed off, and create nothing", async () => {
+    const id = await spec();
+
+    const result = await handed(id);
+
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("Sign off this version first") });
+    expect(await prisma.assistantConversation.count()).toBe(0);
+    expect(await prisma.assistantUpload.count()).toBe(0);
+  });
+
+  it("should leave no conversation, message or file behind when the send fails after the files were stored", async () => {
+    const id = await spec();
+    await actions.signOffSpec(formOf({ id, version: "1" }));
+    send.failAfterStoring = true;
+    try {
+      expect(await handed(id)).toMatchObject({ ok: false });
+    } finally {
+      send.failAfterStoring = false;
+    }
+
+    expect([await prisma.assistantConversation.count(), await prisma.assistantUpload.count(), await prisma.message.count()]).toEqual([0, 0, 0]);
+  });
+
+  it("should keep the conversation, its message and its files, and open it, when the send fails after its message committed", async () => {
+    const id = await spec();
+    await actions.signOffSpec(formOf({ id, version: "1" }));
+    send.failAfterCommit = true;
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const result = await handed(id);
+      const [conversation] = await prisma.assistantConversation.findMany({ select: { id: true } });
+
+      expect(result).toEqual({ ok: true, id: conversation?.id });
+      expect(log.mock.calls.map((call) => String(call[0])).join("\n")).toContain("was kept after its send failed");
+    } finally {
+      send.failAfterCommit = false;
+      log.mockRestore();
+    }
+
+    expect([await prisma.assistantConversation.count(), await prisma.assistantUpload.count(), await prisma.message.count()]).toEqual([1, 4, 1]);
+  });
+
+  it("should report the send's own error, and log the cleanup's, when removing the conversation fails too", async () => {
+    const id = await spec();
+    await actions.signOffSpec(formOf({ id, version: "1" }));
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    send.failAfterStoring = true;
+    send.cleanupFails = true;
+    try {
+      const result = await handed(id);
+
+      expect(result).toMatchObject({ ok: false });
+      expect(log.mock.calls.map((call) => String(call[0])).join("\n")).toContain("the hand-over's conversation could not be removed");
+      expect(log.mock.calls.map((call) => String(call[0])).join("\n")).toContain("the send failed after its files were stored");
+    } finally {
+      send.failAfterStoring = false;
+      send.cleanupFails = false;
+      log.mockRestore();
+    }
+  });
+
+  it("should ignore the package for a target that is not Java", async () => {
+    const id = await spec();
+    await actions.signOffSpec(formOf({ id, version: "1" }));
+
+    expect(await handed(id, { target: "fis", package: "Not A Package" })).toMatchObject({ ok: true });
+  });
+
+  it.each([
+    ["blank", "  ", "Set the form type (document_sub_type) in Form details first."],
+    ["not safe for a file name", "FORM A1", 'the form type "FORM A1" cannot be used in a file name'],
+    ["containing a slash", "C100/1", 'the form type "C100/1" cannot be used in a file name']
+  ])("should refuse a signed-off version whose form type is %s, in words for the person, and create nothing", async (_label, formType, words) => {
+    const [id] = await createSpecs(prisma, own(ALICE), [{ name: "Odd", spec: { ...WITH_NEW_FIELD, form: { ...WITH_NEW_FIELD.form, formType } } }]);
+    await actions.signOffSpec(formOf({ id: id as string, version: "1" }));
+
+    expect(await handed(id as string)).toMatchObject({ ok: false, error: expect.stringContaining(words) });
+    expect(await prisma.assistantConversation.count()).toBe(0);
+  });
+
+  it.each([
+    ["blank", ""],
+    ["not a package", "Not A Package"]
+  ])("should refuse a Java target whose package is %s rather than use the default", async (_label, javaPackage) => {
+    const id = await spec();
+    await actions.signOffSpec(formOf({ id, version: "1" }));
+
+    expect(await handed(id, { target: "nfdiv", package: javaPackage })).toMatchObject({ ok: false, error: expect.stringContaining("Java package") });
+    expect(await prisma.assistantConversation.count()).toBe(0);
+  });
+
+  it("should refuse a signed-off version with no form type, and create nothing", async () => {
+    const [id] = await createSpecs(prisma, own(ALICE), [{ name: "No type", spec: { ...WITH_NEW_FIELD, form: { ...WITH_NEW_FIELD.form, formType: "" } } }]);
+    await actions.signOffSpec(formOf({ id: id as string, version: "1" }));
+
+    expect(await handed(id as string)).toEqual({ ok: false, error: "Set the form type (document_sub_type) in Form details first." });
+    expect(await prisma.assistantConversation.count()).toBe(0);
+  });
+
+  it("should refuse a spec the person does not own, and leave it with no conversation, for the owner and for them", async () => {
+    const id = await spec();
+    await actions.signOffSpec(formOf({ id, version: "1" }));
+    actAs("bob");
+
+    const result = await handed(id);
+
+    expect(result).toMatchObject({ ok: false });
+    expect(await prisma.assistantConversation.count()).toBe(0);
+    expect(await prisma.assistantUpload.count()).toBe(0);
+  });
+
+  it("should keep the conversation and its files from anyone but the owner", async () => {
+    const id = await spec();
+    await actions.signOffSpec(formOf({ id, version: "1" }));
+    const conversationId = ((await handed(id)) as { id: string }).id;
+
+    expect(await findConversation(prisma, BOB.oid, conversationId)).toBeUndefined();
+    expect(await findConversation(prisma, ALICE.oid, conversationId)).toBeDefined();
+    actAs("bob");
+    expect(await assistantActions.sendAssistantMessage({ conversationId, body: "hello" })).toMatchObject({ ok: false });
+  });
+
+  it("should refuse a target that is not a service pattern", async () => {
+    const id = await spec();
+    await actions.signOffSpec(formOf({ id, version: "1" }));
+
+    expect(await handed(id, { target: "envelopes" })).toMatchObject({ ok: false });
+    expect(await prisma.assistantConversation.count()).toBe(0);
   });
 });

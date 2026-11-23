@@ -64,7 +64,7 @@ type User = ReturnType<typeof userEvent.setup>;
 
 async function setup() {
   const user = userEvent.setup();
-  render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
+  render(<BulkScanEditor view={VIEW} signOff={vi.fn()} handToAssistant={vi.fn()} />);
   return user;
 }
 
@@ -612,7 +612,7 @@ const VIEW2 = {
 
 async function setup2() {
   const user = userEvent.setup();
-  render(<BulkScanEditor view={VIEW2} signOff={vi.fn()} />);
+  render(<BulkScanEditor view={VIEW2} signOff={vi.fn()} handToAssistant={vi.fn()} />);
   return user;
 }
 
@@ -764,10 +764,10 @@ describe("a refresh while editing", () => {
 
   it("should keep unsaved edits and save them against the version they started from when a newer latest version arrives", async () => {
     const user = userEvent.setup();
-    const { rerender } = render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
+    const { rerender } = render(<BulkScanEditor view={VIEW} signOff={vi.fn()} handToAssistant={vi.fn()} />);
     await editedLabel(user);
 
-    rerender(<BulkScanEditor view={newer()} signOff={vi.fn()} />);
+    rerender(<BulkScanEditor view={newer()} signOff={vi.fn()} handToAssistant={vi.fn()} />);
     expect((screen.getByLabelText("Label") as HTMLInputElement).value).toBe("Name!");
     await user.click(screen.getByRole("button", { name: "Save as version 3" }));
 
@@ -776,10 +776,10 @@ describe("a refresh while editing", () => {
 
   it("should start afresh when the version asked for changes", async () => {
     const user = userEvent.setup();
-    const { rerender } = render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
+    const { rerender } = render(<BulkScanEditor view={VIEW} signOff={vi.fn()} handToAssistant={vi.fn()} />);
     await editedLabel(user);
 
-    rerender(<BulkScanEditor view={newer({ version: 1 })} requested={1} signOff={vi.fn()} />);
+    rerender(<BulkScanEditor view={newer({ version: 1 })} requested={1} signOff={vi.fn()} handToAssistant={vi.fn()} />);
     await open(user, "1.2");
 
     expect((screen.getByLabelText("Label") as HTMLInputElement).value).toBe("Name");
@@ -787,10 +787,10 @@ describe("a refresh while editing", () => {
 
   it("should start afresh when the form changes", async () => {
     const user = userEvent.setup();
-    const { rerender } = render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
+    const { rerender } = render(<BulkScanEditor view={VIEW} signOff={vi.fn()} handToAssistant={vi.fn()} />);
     await editedLabel(user);
 
-    rerender(<BulkScanEditor view={{ ...VIEW, id: "s2" }} signOff={vi.fn()} />);
+    rerender(<BulkScanEditor view={{ ...VIEW, id: "s2" }} signOff={vi.fn()} handToAssistant={vi.fn()} />);
     await open(user, "1.2");
 
     expect((screen.getByLabelText("Label") as HTMLInputElement).value).toBe("Name");

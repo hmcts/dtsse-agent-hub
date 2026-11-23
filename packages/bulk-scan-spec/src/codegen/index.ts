@@ -4,6 +4,7 @@ import { envelopeFiles } from "./envelopes.ts";
 import { fisFiles } from "./fis.ts";
 import type { JavaOptions } from "./java.ts";
 import { nfdivFiles, probateFiles } from "./java.ts";
+import { codePackage } from "./model.ts";
 import { orchestratorFiles } from "./orchestrator.ts";
 import { sscsFiles } from "./sscs.ts";
 
@@ -20,7 +21,7 @@ export function generateTarget(target: Target, spec: FormSpec, java: JavaOptions
     case "nfdiv":
       return nfdivFiles(spec, java);
     case "probate":
-      return probateFiles(spec, { ...java, basePackage: java.basePackage.replace(/\.bulkscan$/, "") });
+      return probateFiles(spec, { ...java, basePackage: codePackage("probate", java.basePackage) });
     case "envelopes":
       return envelopeFiles(spec, { jurisdiction });
     case "orchestrator":
