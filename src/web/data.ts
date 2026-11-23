@@ -454,7 +454,7 @@ export async function assistantExportDefaults(viewer: Identity): Promise<ExportD
 /** A conversation's title and no more, for a tab title: the page reads the whole view, which a title does not need. */
 export async function assistantConversationTitle(viewer: Viewer, id: string): Promise<string | undefined> {
   const conversation = await findConversation(prisma, viewer.oid, id);
-  return conversation?.title ?? undefined;
+  return conversation === undefined ? undefined : (conversation.title ?? "");
 }
 
 /** One of the viewer's conversations, or `undefined` for the not-found the page answers. */
