@@ -146,7 +146,10 @@ async function startBridge(
   // A conversation's prompt is typed into its pane, so a test never reaches a real tmux: it is recorded with the socket's.
   const tmux = {
     sendKeys: async () => {},
-    paste: async (_name: string, text: string) => void (typed.push(text), socketWrites.push(text)),
+    paste: async (_name: string, text: string) => {
+      typed.push(text);
+      socketWrites.push(text);
+    },
     ...bridgeOptions.tmux
   };
   const running = runBridge({ sid, env, api: wrapApi ? wrapApi(api) : api, deliver, heartbeatMs: 100, ...bridgeOptions, tmux });
