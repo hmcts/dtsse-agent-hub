@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
+import { AssistantFrame } from "@/app/assistant/frame";
 import { ProjectList } from "@/components/feedback/dev/ProjectList";
 import { requireViewer } from "@/viewer/current";
 import { feedbackProjects } from "@/web/feedback-data";
-import { FeedbackFrame, requireFeedback } from "./frame";
+import { requireFeedback } from "./require-feedback";
 
 export const dynamic = "force-dynamic";
 
@@ -15,8 +16,8 @@ export default async function FeedbackProjectsPage({ searchParams }: Readonly<{ 
   const archived = (await searchParams).archived === "1";
   const projects = await feedbackProjects(viewer, archived);
   return (
-    <FeedbackFrame viewer={viewer}>
+    <AssistantFrame viewer={viewer}>
       <ProjectList projects={projects} archived={archived} />
-    </FeedbackFrame>
+    </AssistantFrame>
   );
 }

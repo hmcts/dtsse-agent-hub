@@ -46,9 +46,9 @@ function form(overrides: Partial<FormLink> = {}): FormLink {
 const ok = () => vi.fn(async () => ({ ok: true as const }));
 const actions: ConversationActions = { rename: ok(), pin: ok(), remove: ok(), pinFeedback: ok(), archiveFeedback: ok() };
 
-function shell(items: SidebarItem[]) {
+function shell(items: SidebarItem[], activeId: string | null = null) {
   return (
-    <AssistantShell now={Date.now()} viewerName="Alice Smith" groups={[{ label: "Today", items }]} activeId={null} actions={actions}>
+    <AssistantShell now={Date.now()} viewerName="Alice Smith" groups={[{ label: "Today", items }]} activeId={activeId} actions={actions}>
       <p>page</p>
     </AssistantShell>
   );
@@ -83,6 +83,16 @@ describe("a Bulk Scan form's row", () => {
     render(shell([form()]));
 
     expect(within(nav()).getByRole("link", { name: /^Bulk Scan form:\s*T210 claim form$/ }).textContent).not.toContain("signed off");
+  });
+
+  it("should be the current page when its editor is the one open", () => {
+    render(shell([form()], "f1"));
+
+    expect(
+      within(nav())
+        .getByRole("link", { name: /T210 claim form/ })
+        .getAttribute("aria-current")
+    ).toBe("page");
   });
 
   it("should offer no options menu when it is a form's row", () => {

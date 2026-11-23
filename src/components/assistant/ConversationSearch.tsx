@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useState } from "react";
 import { MAX_QUERY, searchTerms } from "@/assistant/search";
+import { isChat } from "@/assistant/sidebar";
 import type { SidebarMatch } from "@/assistant/views";
 import { ChatMark } from "@/components/assistant/ChatMark";
 import { rowHref } from "@/components/assistant/rowHref";
@@ -187,9 +188,7 @@ export function ConversationSearch({ search = fetchMatches, children }: { search
                   <ChatMark item={chat} />
                   <span className="min-w-0 truncate">{chat.title}</span>
                 </span>
-                {chat.kind === "feedback" || chat.kind === "form" || chat.snippet === null ? null : (
-                  <span className="line-clamp-2 text-xs text-asst-faint">{chat.snippet}</span>
-                )}
+                {!isChat(chat) || chat.snippet === null ? null : <span className="line-clamp-2 text-xs text-asst-faint">{chat.snippet}</span>}
               </div>
             ))}
           </div>

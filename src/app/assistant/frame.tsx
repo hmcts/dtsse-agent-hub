@@ -1,5 +1,4 @@
 import { cookies } from "next/headers";
-import { notFound } from "next/navigation";
 import { deleteConversation, pinConversation, renameConversation, saveAssistantModel, startConversation } from "@/app/_actions/assistant";
 import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/assistant-files";
 import { readAssistantAgent, readGitIdentity, readSchedule, saveSchedule } from "@/app/_actions/assistant-settings";
@@ -27,23 +26,12 @@ const ROW_ACTIONS: ConversationActions = {
   archiveFeedback: archiveFeedbackProject
 };
 
-/** Not found while prototype feedback is off, so its pages say nothing about a feature that is not there. */
-export function requireFeedback(): void {
-  if (!feedbackEnabled()) {
-    notFound();
-  }
-}
-
 /**
- * The feedback pages' frame: the Assistant's sidebar and settings, as every Assistant page has them, around the page.
- * It holds no getting-ready gate, since nothing here runs on the person's assistant. `projectId` is the project the
- * page is about, whose row the sidebar shows as the current one.
+ * The frame of the Assistant's pages that are not a chat: the sidebar and settings, as every Assistant page has them,
+ * around the page. It holds no getting-ready gate, since nothing here runs on the person's assistant. `activeId` is
+ * the id of the sidebar row the page is about, shown as the current one.
  */
-export async function FeedbackFrame({
-  viewer,
-  projectId = null,
-  children
-}: Readonly<{ viewer: Viewer; projectId?: string | null; children: React.ReactNode }>) {
+export async function AssistantFrame({ viewer, activeId = null, children }: Readonly<{ viewer: Viewer; activeId?: string | null; children: React.ReactNode }>) {
   const jar = await cookies();
   const theme = themeOf(jar.get(THEME_COOKIE)?.value);
   const [home, claudeMd, mine, files, size, defaults, model] = await Promise.all([
@@ -65,7 +53,7 @@ export async function FeedbackFrame({
     <AssistantShell
       viewerName={viewer.name}
       groups={home.conversations}
-      activeId={projectId}
+      activeId={activeId}
       theme={theme}
       collapsed={sidebarCollapsedOf(jar.get(SIDEBAR_COOKIE)?.value)}
       actions={ROW_ACTIONS}

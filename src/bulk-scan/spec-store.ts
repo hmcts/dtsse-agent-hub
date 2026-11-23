@@ -52,9 +52,34 @@ export async function listSpecs(db: Database, target: SpecTarget): Promise<SpecS
   });
 }
 
-/** Whether the owner has any spec, which is whether their sidebar has a form to mark. */
+/** Whether the owner has any spec `listSpecs` lists, which is whether their sidebar has a form to mark. */
 export async function hasSpecs(db: Database, ownerOid: string): Promise<boolean> {
-  return (await db.bulkScanSpec.findFirst({ where: { ownerOid }, select: { id: true } })) !== null;
+  return (await db.bulkScanSpec.findFirst({ where: { ownerOid, versions: { some: {} } }, select: { id: true } })) !== null;
+}
+
+export interface SpecMatch {
+  id: string;
+  name: string;
+  savedAt: Date;
+}
+
+/**
+ * Up to `limit` of the owner's specs whose name holds every one of `terms`, which are lower-case already, most recently
+ * saved first, each at the time of its latest version.
+ */
+export async function searchSpecs(db: Database, ownerOid: string, terms: readonly string[], limit: number): Promise<SpecMatch[]> {
+  if (terms.length === 0) {
+    return [];
+  }
+  return await db.$queryRaw<SpecMatch[]>`
+    SELECT s.id::text AS id, s.name, v.created_at AS "savedAt"
+      FROM bulk_scan_spec s
+      JOIN LATERAL (SELECT created_at FROM bulk_scan_spec_version WHERE spec_id = s.id ORDER BY version DESC LIMIT 1) v ON true
+     WHERE s.owner_oid = ${ownerOid}
+       AND NOT EXISTS (SELECT 1 FROM unnest(${terms}::text[]) AS u(term) WHERE strpos(lower(s.name), u.term) = 0)
+     ORDER BY v.created_at DESC, s.id
+     LIMIT ${limit}
+  `;
 }
 
 export interface VersionEntry {

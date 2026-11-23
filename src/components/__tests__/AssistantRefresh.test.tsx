@@ -4,6 +4,7 @@
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AssistantRefresh } from "@/components/assistant/AssistantRefresh";
+import { noteOwnSave } from "@/components/assistant/ownSave";
 
 /**
  * What the refresh does without a network. Its debounce and the events it listens for are covered beside the rest
@@ -87,5 +88,27 @@ describe("AssistantRefresh", () => {
     await reconnect();
 
     expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("should refresh once when a Bulk Scan form changed in another tab", async () => {
+    render(<AssistantRefresh />);
+
+    hubHandlers.get("bulk_scan_spec")?.({});
+    await settle();
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("should not refresh again for the announcement of this tab's own save, and should for the next", async () => {
+    render(<AssistantRefresh />);
+    noteOwnSave();
+
+    hubHandlers.get("bulk_scan_spec")?.({});
+    await settle();
+    expect(refresh).not.toHaveBeenCalled();
+
+    hubHandlers.get("bulk_scan_spec")?.({});
+    await settle();
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 });

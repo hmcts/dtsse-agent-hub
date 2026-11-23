@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sidebarCollapsedOf, sidebarCookie } from "./sidebar.ts";
+import { isChat, sidebarCollapsedOf, sidebarCookie } from "./sidebar.ts";
 
 describe("sidebarCollapsedOf", () => {
   it("should read collapsed only when the cookie says so", () => {
@@ -16,5 +16,16 @@ describe("sidebarCookie", () => {
 
   it("should expire the cookie when the sidebar is opened again", () => {
     expect(sidebarCookie(false)).toBe("asst_sidebar=; Path=/; Max-Age=0; SameSite=Lax");
+  });
+});
+
+describe("isChat", () => {
+  it.each([
+    ["local", true],
+    ["cloud", true],
+    ["feedback", false],
+    ["form", false]
+  ] as const)("should say %s is a chat: %s", (kind, expected) => {
+    expect(isChat({ kind })).toBe(expected);
   });
 });

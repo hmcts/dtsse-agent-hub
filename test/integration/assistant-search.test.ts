@@ -5,6 +5,7 @@ import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
 import type { ConversationRow } from "../../src/assistant/conversation-row.ts";
 import { conversationAgent, createConversation, listConversations, renameConversation, touchConversation } from "../../src/assistant/conversation-store.ts";
 import { searchConversations } from "../../src/assistant/search-store.ts";
+import { isChat } from "../../src/assistant/sidebar.ts";
 import {
   type ConversationMark,
   type ConversationMatch,
@@ -60,9 +61,7 @@ async function listed(who: Person): Promise<(string | null)[]> {
 /** What the sidebar's own grouped list marks each of their chats with, which a search result has to agree with. */
 async function marked(who: Person): Promise<Map<string, ConversationMark>> {
   const groups = await sidebarGroups(prisma, who.oid);
-  return new Map(
-    groups.flatMap((group) => group.items).flatMap((item) => (item.kind === "feedback" || item.kind === "form" ? [] : [[item.title, item.mark] as const]))
-  );
+  return new Map(groups.flatMap((group) => group.items).flatMap((item) => (!isChat(item) ? [] : [[item.title, item.mark] as const])));
 }
 
 /**
@@ -84,7 +83,7 @@ async function asked(persona: string, query: string): Promise<ConversationMatch[
   const response = await searchRoute(request);
   expect(response.status).toBe(200);
   const { results } = await jsonOf<{ results: SidebarMatch[] }>(response);
-  return results.flatMap((result) => (result.kind === "feedback" || result.kind === "form" ? [] : [result]));
+  return results.flatMap((result) => (!isChat(result) ? [] : [result]));
 }
 
 beforeEach(async () => {
@@ -517,14 +516,14 @@ describe("feedback projects beside the chats", () => {
       ["feedback", "Possession prototype"],
       ["cloud", "A possession claim on my assistant"]
     ]);
-    expect(rows.map(({ item }) => (item.kind === "feedback" || item.kind === "form" ? item.marked : item.mark !== null))).toEqual([true, true]);
+    expect(rows.map(({ item }) => (!isChat(item) ? item.marked : item.mark !== null))).toEqual([true, true]);
     expect(rows[0]?.item.id).toBe(id);
   });
 
   it("should mark nothing when the person has projects and no chats", async () => {
     await project("Possession prototype");
 
-    expect((await sidebar(BOB)).map(({ item }) => (item.kind === "feedback" || item.kind === "form" ? item.marked : item.mark))).toEqual([false]);
+    expect((await sidebar(BOB)).map(({ item }) => (!isChat(item) ? item.marked : item.mark))).toEqual([false]);
   });
 
   it("should put a project the person pinned in Pinned", async () => {
@@ -559,9 +558,7 @@ describe("feedback projects beside the chats", () => {
     await chat(ALICE, ["A possession claim on my assistant"]);
     await project("Possession prototype");
 
-    expect((await sidebar(ALICE)).map(({ item }) => [item.kind, item.kind === "feedback" || item.kind === "form" ? item.marked : item.mark])).toEqual([
-      ["cloud", null]
-    ]);
+    expect((await sidebar(ALICE)).map(({ item }) => [item.kind, !isChat(item) ? item.marked : item.mark])).toEqual([["cloud", null]]);
     expect((await sidebarMatches(prisma, ALICE.oid, "possession")).map((result) => result.kind)).toEqual(["cloud"]);
   });
 });

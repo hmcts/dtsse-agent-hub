@@ -41,6 +41,7 @@ import { LOOKUP_RATE_LIMIT, LOOKUP_RETENTION_MS } from "../../src/assistant/look
 import { searchConversations } from "../../src/assistant/search-store.ts";
 import { linkSession, pendingWakes } from "../../src/assistant/session-store.ts";
 import { accessToConversation, conversationsSharedBy, conversationsSharedWith, shareConversation } from "../../src/assistant/shares.ts";
+import { isChat } from "../../src/assistant/sidebar.ts";
 import { credentialBackend } from "../../src/credentials/backend.ts";
 import { putCredential } from "../../src/credentials/store.ts";
 import { directAsPerson } from "../../src/messages/send.ts";
@@ -972,7 +973,7 @@ describe("conversations", () => {
     expect((await assistantConversation(VIEWER, onLaptop))!.local).toBe(true);
     expect((await assistantConversation(VIEWER, onPod))!.local).toBe(false);
     const listed = (await openAssistant(VIEWER)).conversations.flatMap((group) => group.items);
-    expect(new Map(listed.map((item) => [item.id, item.kind === "feedback" || item.kind === "form" ? null : (item.mark?.where ?? null)]))).toEqual(
+    expect(new Map(listed.map((item) => [item.id, !isChat(item) ? null : (item.mark?.where ?? null)]))).toEqual(
       new Map([
         [onLaptop, "computer"],
         [onPod, "assistant"]
@@ -998,9 +999,7 @@ describe("conversations", () => {
 
     const listed = (await openAssistant(VIEWER)).conversations.flatMap((group) => group.items);
 
-    expect(listed.flatMap((item) => (item.id === onLaptop && item.kind !== "feedback" && item.kind !== "form" ? [item.mark] : []))).toEqual([
-      { where: "computer", session }
-    ]);
+    expect(listed.flatMap((item) => (item.id === onLaptop && isChat(item) ? [item.mark] : []))).toEqual([{ where: "computer", session }]);
   });
 
   /**
@@ -1014,7 +1013,7 @@ describe("conversations", () => {
 
     const listed = (await openAssistant(VIEWER)).conversations.flatMap((group) => group.items);
 
-    expect(listed.map((item) => [item.id, item.kind === "feedback" || item.kind === "form" ? null : item.mark])).toEqual([[onPod, null]]);
+    expect(listed.map((item) => [item.id, !isChat(item) ? null : item.mark])).toEqual([[onPod, null]]);
   });
 
   it("should wake a conversation when its composer is focused and the session is offline", async () => {

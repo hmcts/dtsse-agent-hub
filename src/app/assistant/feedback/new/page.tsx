@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import { createFeedbackProject, probeFeedbackLink } from "@/app/_actions/feedback";
+import { AssistantFrame } from "@/app/assistant/frame";
 import { FeedbackWizard, type WizardActions } from "@/components/feedback/dev/FeedbackWizard";
 import { FeedbackHeader } from "@/components/feedback/dev/ProjectList";
 import { allowPrivateTargets } from "@/feedback/targets";
 import { requireViewer } from "@/viewer/current";
-import { FeedbackFrame, requireFeedback } from "../frame";
+import { requireFeedback } from "../require-feedback";
 
 export const dynamic = "force-dynamic";
 
@@ -17,11 +18,11 @@ export default async function NewFeedbackProjectPage() {
   requireFeedback();
   const viewer = await requireViewer();
   return (
-    <FeedbackFrame viewer={viewer}>
+    <AssistantFrame viewer={viewer}>
       <div className="mx-auto flex max-w-[960px] flex-col gap-6 px-5 pb-10 pt-5">
         <FeedbackHeader title="New feedback project" back={{ href: "/assistant/feedback", label: "Feedback projects" }} />
         <FeedbackWizard actions={ACTIONS} allowHttp={allowPrivateTargets()} />
       </div>
-    </FeedbackFrame>
+    </AssistantFrame>
   );
 }

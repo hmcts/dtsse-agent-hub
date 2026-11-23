@@ -1,10 +1,11 @@
 import { notFound } from "next/navigation";
+import { AssistantFrame } from "@/app/assistant/frame";
 import { FeedbackHeader } from "@/components/feedback/dev/ProjectList";
 import { RecordingView } from "@/components/feedback/dev/RecordingView";
 import { requireViewer } from "@/viewer/current";
 import { feedbackRecordingPage } from "@/web/feedback-data";
 import { PROJECT_ACTIONS } from "../../../actions";
-import { FeedbackFrame, requireFeedback } from "../../../frame";
+import { requireFeedback } from "../../../require-feedback";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +19,7 @@ export default async function FeedbackRecordingPage({ params }: Readonly<{ param
     notFound();
   }
   return (
-    <FeedbackFrame viewer={viewer} projectId={data.project.id}>
+    <AssistantFrame viewer={viewer} activeId={data.project.id}>
       <div className="mx-auto flex max-w-[1100px] flex-col gap-5 px-5 pb-10 pt-5">
         <FeedbackHeader
           title={`${data.recording.author.name}'s recording`}
@@ -26,6 +27,6 @@ export default async function FeedbackRecordingPage({ params }: Readonly<{ param
         />
         <RecordingView data={data} actions={PROJECT_ACTIONS} />
       </div>
-    </FeedbackFrame>
+    </AssistantFrame>
   );
 }

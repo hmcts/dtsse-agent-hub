@@ -1,5 +1,6 @@
 "use client";
 
+import { isChat } from "@/assistant/sidebar";
 import type { ConversationMark, SidebarKind } from "@/assistant/views";
 import { useLiveLocalSession } from "@/components/assistant/LiveLocalSessions";
 import { LocalMark } from "@/components/assistant/LocalMark";
@@ -23,7 +24,7 @@ export type MarkedItem =
  */
 export function ChatMark({ item }: { item: MarkedItem }) {
   const live = useLiveLocalSession(item.id);
-  if (item.kind === "feedback" || item.kind === "form") {
+  if (!isChat(item)) {
     if (!item.marked) {
       return null;
     }

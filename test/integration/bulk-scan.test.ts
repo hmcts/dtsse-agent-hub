@@ -10,7 +10,7 @@ import * as versionsRoute from "../../src/app/api/ui/assistant/bulk-scan/[id]/ve
 import * as uploadRoute from "../../src/app/api/ui/assistant/bulk-scan/route.ts";
 import { sidebarGroups, sidebarMatches } from "../../src/assistant/views.ts";
 import { MAX_SPEC_BYTES } from "../../src/bulk-scan/spec.ts";
-import { listSpecs, readSpec } from "../../src/bulk-scan/spec-store.ts";
+import { hasSpecs, listSpecs, readSpec, searchSpecs } from "../../src/bulk-scan/spec-store.ts";
 import { decodeEvent, HUB_CHANNEL, type NotifiedEvent } from "../../src/realtime/events.ts";
 import { bulkScanEditor, bulkScanSpecs } from "../../src/web/data.ts";
 import { ALICE, BOB } from "./assistant-pod.ts";
@@ -426,6 +426,26 @@ describe("the forms in the sidebar", () => {
     expect((await forms(ALICE)).map((row) => row.signedOff)).toEqual([true]);
   });
 
+  it("should not count a spec with no version when deciding whether the person has a form", async () => {
+    await prisma.bulkScanSpec.create({ data: { ownerOid: ALICE.oid, name: "Empty" } });
+
+    expect(await listSpecs(prisma, own(ALICE))).toEqual([]);
+    expect(await hasSpecs(prisma, ALICE.oid)).toBe(false);
+  });
+
+  it("should return at most the limit, most recently saved first, when more forms match", async () => {
+    for (const [index, name] of ["Claim one", "Claim two", "Claim three", "Other"].entries()) {
+      const createdAt = new Date(Date.UTC(2026, 10, 1 + index));
+      await prisma.bulkScanSpec.create({
+        data: { ownerOid: ALICE.oid, name, versions: { create: { version: 1, spec: SPEC, savedByOid: ALICE.oid, createdAt } } }
+      });
+    }
+
+    const found = await searchSpecs(prisma, ALICE.oid, ["claim"], 2);
+
+    expect(found.map((row) => row.name)).toEqual(["Claim three", "Claim two"]);
+  });
+
   it("should find a form by its name and nobody else's when searching", async () => {
     const [id] = (await upload()) as [string];
     await upload("bob", "b.xlsx");
@@ -454,10 +474,8 @@ describe("the forms in the sidebar", () => {
       await listener.end();
     });
 
-    const spec = async () => {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      return heard.filter((event) => event.type === "bulk_scan_spec");
-    };
+    const sent = () => heard.filter((event) => event.type === "bulk_scan_spec");
+    const announced = { type: "bulk_scan_spec", owner_oid: ALICE.oid };
 
     it("should send bulk_scan_spec to the owner when a form is uploaded, saved, signed off and deleted", async () => {
       const [id] = (await upload()) as [string];
@@ -465,17 +483,19 @@ describe("the forms in the sidebar", () => {
       await actions.signOffSpec(formOf({ id, version: "2" }));
       await actions.deleteBulkScanSpec(formOf({ id }));
 
-      expect(await spec()).toEqual(Array(4).fill({ type: "bulk_scan_spec", owner_oid: ALICE.oid }));
+      await vi.waitFor(() => expect(sent()).toEqual(Array(4).fill(announced)), { timeout: 5000 });
     });
 
-    it("should send nothing when a save is refused", async () => {
+    it("should send nothing for a refused save when the next save is announced", async () => {
       const [id] = (await upload()) as [string];
-      await spec();
+      await vi.waitFor(() => expect(sent()).toHaveLength(1), { timeout: 5000 });
       heard = [];
 
-      await save(id, SPEC, "alice", 7);
+      expect((await save(id, SPEC, "alice", 7)).status).toBe(409);
+      expect((await save(id, SPEC)).status).toBe(201);
 
-      expect(await spec()).toEqual([]);
+      await vi.waitFor(() => expect(sent()).toHaveLength(1), { timeout: 5000 });
+      expect(sent()).toEqual([announced]);
     });
   });
 });

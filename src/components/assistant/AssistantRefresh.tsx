@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { takeOwnEcho } from "@/components/assistant/ownSave";
 import { useHubEvent } from "@/components/live/HubStream";
 import { useSettled } from "@/components/live/useSettled";
 
@@ -25,6 +26,10 @@ export function AssistantRefresh() {
   // just shared with them: its count, its place in the date groups, or its archiving.
   useHubEvent("feedback", refresh);
   // Each of the viewer's Bulk Scan forms is a row of the sidebar, so one added, saved, signed off or deleted changes it.
-  useHubEvent("bulk_scan_spec", refresh);
+  useHubEvent("bulk_scan_spec", () => {
+    if (!takeOwnEcho()) {
+      refresh();
+    }
+  });
   return null;
 }

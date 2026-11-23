@@ -2,7 +2,7 @@ import { canPostVideo, conversationAccess } from "../access/rules.ts";
 import { storedClientFeatures } from "../agents/client-features.ts";
 import { repoFileBase } from "../agents/github.ts";
 import { type Skill, storedSkills } from "../agents/skills.ts";
-import { hasSpecs, listSpecs, type SpecSummary } from "../bulk-scan/spec-store.ts";
+import { hasSpecs, listSpecs, type SpecSummary, searchSpecs } from "../bulk-scan/spec-store.ts";
 import type { CredentialKind } from "../credentials/names.ts";
 import { type NavProjectRow, navProjects, searchProjects } from "../feedback/nav-store.ts";
 import { feedbackEnabled } from "../feedback/settings.ts";
@@ -344,25 +344,21 @@ export async function conversationMatches(db: Database, ownerOid: string, query:
   return rows.map((row) => chatMatch(row, marked));
 }
 
-/** Whether `name` holds every one of `terms`, which are lower-case already; none matches nothing. */
-function namedByAll(name: string, terms: readonly string[]): boolean {
-  const lower = name.toLowerCase();
-  return terms.length > 0 && terms.every((term) => lower.includes(term));
-}
-
 /** The sidebar's search: the chats `conversationMatches` finds, and the feedback projects and forms the sidebar lists whose name matches. */
 export async function sidebarMatches(db: Database, ownerOid: string, query: string): Promise<SidebarMatch[]> {
   const terms = searchTerms(query);
+  const readForms = searchSpecs(db, ownerOid, terms, SEARCH_LIMIT);
   const [rows, projects, forms, marked] = await Promise.all([
     searchConversations(db, ownerOid, query),
     feedbackEnabled() ? searchProjects(db, ownerOid, terms, SEARCH_LIMIT) : [],
-    ownForms(db, ownerOid),
-    listMarked(db, ownerOid)
+    readForms,
+    // A match proves the person has a form; only when none matched is the rest of their forms asked about.
+    listMarked(db, ownerOid, { forms: readForms.then((found) => found.length > 0 || hasSpecs(db, ownerOid)) })
   ]);
   return mergeMatches<SidebarMatch>(
     rows.map((row) => chatMatch(row, marked)),
     projects.map(({ id, name, lastActiveAt }) => ({ kind: "feedback", id, title: name, lastActiveAt: lastActiveAt.toISOString(), marked })),
-    forms.filter((form) => namedByAll(form.name, terms)).map((row) => formLink(row, marked))
+    forms.map(({ id, name, savedAt }) => ({ kind: "form", id, title: name, lastActiveAt: savedAt.toISOString(), marked }))
   );
 }
 
