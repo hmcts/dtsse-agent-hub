@@ -12,7 +12,6 @@ import {
   importSip,
   importTransformSheet,
   isModelKey,
-  matchCcd,
   modelByKey,
   newCcdFieldFiles,
   readsKeys,
@@ -31,6 +30,7 @@ import { HttpError } from "../agent-api/http.ts";
 import { CCD_FIELD_ROWS, type CcdConfig } from "../assistant/ccd-jobs.ts";
 import { isPdf } from "../assistant/docmosis.ts";
 import { isXlsx } from "../assistant/welsh.ts";
+import { type CaseTypeChoice, withCaseType, withCaseTypeHeader } from "./case-type.ts";
 import { zipFiles } from "./zip.ts";
 
 /**
@@ -83,12 +83,7 @@ export async function importUpload(fileName: string, bytes: Uint8Array, caseType
     if (result.needsReview) {
       throw new HttpError(422, `${result.needsReview.reason}, so no field could be read from it. Ask your assistant to read its pages and draft the spec`);
     }
-    const forms = picked
-      ? result.bundle.forms.map((spec) => ({
-          ...spec,
-          form: { ...spec.form, ccdProduct: picked.product, ...(picked.config ? { ccdConfig: picked.config } : {}) }
-        }))
-      : result.bundle.forms;
+    const forms = picked ? result.bundle.forms.map((spec) => withCaseTypeHeader(spec, choiceOf(picked), picked.fields)) : result.bundle.forms;
     return { kind: "pdf", forms };
   }
   if (!isXlsx(bytes)) {
@@ -103,32 +98,28 @@ export async function importUpload(fileName: string, bytes: Uint8Array, caseType
     if (forms.length === 0) {
       throw new HttpError(422, "that SIP has no filled-in form tab");
     }
-    return openable({ kind: "sip", forms: withPicked(withCaseType(forms, caseType), picked) });
+    return openable({ kind: "sip", forms: withPicked(withTypedCaseType(forms, caseType), picked) });
   }
   const { spec } = readSheet(() => importTransformSheet(selectSheet(workbook, undefined)));
   if (spec.sections.every((s) => s.fields.length === 0)) {
     throw new HttpError(422, "no field rows were found in the first sheet: is it a transformation sheet?");
   }
-  return openable({ kind: "transformation sheet", forms: withPicked(withCaseType([spec], caseType), picked) });
+  return openable({ kind: "transformation sheet", forms: withPicked(withTypedCaseType([spec], caseType), picked) });
 }
 
-/** The forms with the case type the person picked: its product and configuration in the header, and each row's ids checked against its fields, keeping those the sheet has. */
+/** The forms with the case type the person picked: its header, and each row that carries an id checked against its fields. */
 function withPicked(forms: FormSpec[], picked: UploadedCaseType | undefined): FormSpec[] {
-  return picked
-    ? forms.map((f) =>
-        matchCcd(
-          { ...f, form: { ...f.form, ccdCaseTypeId: picked.caseType, ccdProduct: picked.product, ...(picked.config ? { ccdConfig: picked.config } : {}) } },
-          picked.fields,
-          {
-            keepSet: true
-          }
-        )
-      )
-    : forms;
+  return picked ? forms.map((f) => withCaseType(f, choiceOf(picked), picked.fields, { onlyMapped: true })) : forms;
 }
+
+const choiceOf = (picked: UploadedCaseType): CaseTypeChoice => ({
+  caseType: picked.caseType,
+  product: picked.product,
+  ...(picked.config ? { config: picked.config } : {})
+});
 
 /** The forms with the CCD case type the person typed as their header's, when one was typed. */
-function withCaseType(forms: FormSpec[], caseType: string | undefined): FormSpec[] {
+function withTypedCaseType(forms: FormSpec[], caseType: string | undefined): FormSpec[] {
   return caseType ? forms.map((f) => ({ ...f, form: { ...f.form, ccdCaseTypeId: caseType } })) : forms;
 }
 
@@ -204,6 +195,16 @@ export function checkSpec(raw: unknown): { ok: true; spec: FormSpec } | { ok: fa
   );
   if (lengthIssues.length > 0) {
     return { ok: false, issues: lengthIssues };
+  }
+  const idIssues = parsed.data.sections.flatMap((section, s) =>
+    section.fields.flatMap((field, f) =>
+      field.ccdMatch?.status === "new" && (field.ccdMatch.newField?.id.trim() === "" || field.ccd.some((id) => id.trim() === ""))
+        ? [{ path: `sections.${s}.fields.${f}.ccd`, message: "a new case field needs an id" }]
+        : []
+    )
+  );
+  if (idIssues.length > 0) {
+    return { ok: false, issues: idIssues };
   }
   const keyIssues = keyShapeIssues(parsed.data);
   if (keyIssues.length > 0) {

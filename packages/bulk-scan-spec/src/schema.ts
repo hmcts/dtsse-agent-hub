@@ -105,6 +105,8 @@ export const ccdMatchSchema = z.object({
   newField: z.object({ id: z.string(), type: z.string() }).optional(),
   /** Set when the id is not the matcher's: a person chose or typed it, or it came with the form. A later match against another case type keeps it. */
   chosenBy: z.enum(["person", "form"]).optional(),
+  /** Shared by the rows the matcher decided together, such as the lines of an address. */
+  group: z.string().optional(),
   /** Why the matcher decided as it did, for the person to check. */
   reason: z.string().optional()
 });
@@ -196,6 +198,8 @@ export const formHeaderSchema = z.object({
   /** The workspace product that defines the case type, and how it configures CCD; the picker sets both. */
   ccdProduct: z.string().optional(),
   ccdConfig: z.enum(["config-generator", "json", "hybrid"]).optional(),
+  /** The ids of the picked case type's fields, to check a typed id against. */
+  ccdFieldIds: z.array(z.string()).optional(),
   /** OCR keys holding party surnames, which the orchestrator matches against existing cases. */
   surnameKeys: z.array(z.string()).optional()
 });

@@ -43,14 +43,22 @@ export function caseDataSnippet(fields: { id: string; type: string; label: strin
   return `${blocks.join("\n\n")}\n`;
 }
 
-/** The case fields the form needs that its case type does not have, for the service's code: the list, and a CaseData snippet for a config-generator service. */
+/**
+ * The case fields the form needs that its case type does not have, for the service's code: the list, and a CaseData
+ * snippet for a config-generator service. An id with a dot is a member of a complex type, which is not a CaseData field
+ * of its own, so it is listed under `complexMembers` with the field that holds the type and left out of the snippet.
+ */
 export function newCcdFieldFiles(spec: FormSpec): OutputFile[] {
-  const fields = newCcdFields(spec);
-  if (fields.length === 0) {
+  const all = newCcdFields(spec);
+  if (all.length === 0) {
     return [];
   }
+  const fields = all.filter((f) => !f.id.includes("."));
+  const complexMembers = all
+    .filter((f) => f.id.includes("."))
+    .map((f) => ({ parent: f.id.slice(0, f.id.lastIndexOf(".")), id: f.id.slice(f.id.lastIndexOf(".") + 1), type: f.type, label: f.label }));
   return [
-    { path: "new-ccd-fields.json", content: `${JSON.stringify({ caseType: spec.form.ccdCaseTypeId ?? null, fields }, null, 2)}\n` },
-    ...(spec.form.ccdConfig === "config-generator" ? [{ path: "new-case-data-fields.java.txt", content: caseDataSnippet(fields) }] : [])
+    { path: "new-ccd-fields.json", content: `${JSON.stringify({ caseType: spec.form.ccdCaseTypeId ?? null, fields, complexMembers }, null, 2)}\n` },
+    ...(spec.form.ccdConfig === "config-generator" && fields.length > 0 ? [{ path: "new-case-data-fields.java.txt", content: caseDataSnippet(fields) }] : [])
   ];
 }

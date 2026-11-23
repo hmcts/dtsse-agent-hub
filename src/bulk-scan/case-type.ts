@@ -15,13 +15,27 @@ export interface CaseTypeChoice {
   config?: "config-generator" | "json" | "hybrid" | null;
 }
 
-/** The spec set to a case type, and matched against its fields. The ids a person already set stay; only their status is refreshed. */
-export function withCaseType(spec: FormSpec, choice: CaseTypeChoice, fields: CcdField[]): FormSpec {
+export interface CaseTypeOptions {
+  /** Map only the rows that carry an id, as a sheet's rows are: the others stay unmapped, with no proposal. */
+  onlyMapped?: boolean;
+}
+
+/** The form header set to a case type, with its fields' ids kept to check a typed id against. */
+export function withCaseTypeHeader(spec: FormSpec, choice: CaseTypeChoice, fields: readonly Pick<CcdField, "id">[]): FormSpec {
   const { ccdConfig: _config, ...form } = spec.form;
-  const header = { ...form, ccdCaseTypeId: choice.caseType, ccdProduct: choice.product, ...(choice.config ? { ccdConfig: choice.config } : {}) };
-  const unreviewed = {
+  const ccdFieldIds = [...new Set(fields.map((f) => f.id))].sort(byCode);
+  return {
     ...spec,
-    form: header,
+    form: { ...form, ccdCaseTypeId: choice.caseType, ccdProduct: choice.product, ccdFieldIds, ...(choice.config ? { ccdConfig: choice.config } : {}) }
+  };
+}
+
+const byCode = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/** The fields without the review entries about CCD ids, which an earlier case type's match left. */
+function withoutCcdReviews(spec: FormSpec): FormSpec {
+  return {
+    ...spec,
     sections: spec.sections.map((section) => ({
       ...section,
       fields: section.fields.map(({ review, ...field }) => {
@@ -30,41 +44,36 @@ export function withCaseType(spec: FormSpec, choice: CaseTypeChoice, fields: Ccd
       })
     }))
   };
-  return matchCcd(unreviewed, fields, { keepSet: true });
+}
+
+/** The spec set to a case type, and matched against its fields. The ids a person set or chose, and those that came with the form, stay; only their status is refreshed. */
+export function withCaseType(spec: FormSpec, choice: CaseTypeChoice, fields: CcdField[], options: CaseTypeOptions = {}): FormSpec {
+  return matchCcd(withoutCcdReviews(withCaseTypeHeader(spec, choice, fields)), fields, { keepSet: true, ...(options.onlyMapped ? { onlyMapped: true } : {}) });
 }
 
 /** The spec with no case type: its fields lose their status and the ids the matcher proposed, and keep the ids a person set or chose and those that came with the form. */
 export function withoutCaseType(spec: FormSpec): FormSpec {
-  const { ccdCaseTypeId: _id, ccdProduct: _product, ccdConfig: _config, ...form } = spec.form;
-  return {
+  const { ccdCaseTypeId: _id, ccdProduct: _product, ccdConfig: _config, ccdFieldIds: _ids, ...form } = spec.form;
+  return withoutCcdReviews({
     ...spec,
     form,
     sections: spec.sections.map((section) => ({
       ...section,
       fields: section.fields.map(({ ccdMatch, ...field }) => (ccdMatch !== undefined && ccdMatch.chosenBy === undefined ? { ...field, ccd: [] } : field))
     }))
-  };
+  });
 }
 
 /**
- * The rows that go with the one at `fieldIndex`: the rows next to it, in its section, that carry the same case field
- * decision, as the lines of an address do.
+ * The rows that go with the one at `fieldIndex`: those of its section that the matcher decided together (the lines of
+ * an address) and that share its proposal, so a row with an id of its own is edited alone.
  */
 function groupOf(fields: readonly Field[], fieldIndex: number): number[] {
-  const key = (f: Field | undefined): string | undefined => (f?.ccdMatch ? JSON.stringify(f.ccdMatch) : undefined);
-  const wanted = key(fields[fieldIndex]);
-  if (wanted === undefined) {
+  const own = fields[fieldIndex]?.ccdMatch;
+  if (own?.group === undefined) {
     return [fieldIndex];
   }
-  let from = fieldIndex;
-  let to = fieldIndex;
-  while (key(fields[from - 1]) === wanted) {
-    from--;
-  }
-  while (key(fields[to + 1]) === wanted) {
-    to++;
-  }
-  return Array.from({ length: to - from + 1 }, (_, i) => from + i);
+  return fields.flatMap((f, i) => (f.ccdMatch?.group === own.group && f.ccdMatch?.newField?.id === own.newField?.id ? [i] : []));
 }
 
 function mapGroup(spec: FormSpec, sectionIndex: number, fieldIndex: number, change: (field: Field) => Field): FormSpec {

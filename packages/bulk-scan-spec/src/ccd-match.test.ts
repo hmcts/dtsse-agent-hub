@@ -176,6 +176,55 @@ describe("ids that came with the form", () => {
   });
 });
 
+describe("rows that share a decision", () => {
+  const address = () =>
+    spec([
+      field("First line of address", { id: "2.2", ccd: ["applicantAddress.AddressLine1"] }),
+      field("Town or city", { ccd: ["applicantAddress.PostTown"] }),
+      field("Postcode", { ccd: ["applicantAddress.PostCode"] })
+    ]);
+
+  it("should keep each row's own ids when the rows of an address share one subject", () => {
+    const rows3 = rowsOf(matchCcd(address(), CASE_TYPE, { keepSet: true }));
+
+    expect(rows3.map((r) => r.ccd)).toEqual([["applicantAddress.AddressLine1"], ["applicantAddress.PostTown"], ["applicantAddress.PostCode"]]);
+    expect(rows3.map((r) => r.ccdMatch?.status)).toEqual(["new", "new", "new"]);
+  });
+
+  it("should give the rows of one subject the same group, and rows of another a different one", () => {
+    const rows3 = rowsOf(matchCcd(spec([field("First line of address", { id: "1" }), field("Town or city"), field("Phone number", { id: "2" })]), CASE_TYPE));
+
+    expect(rows3[0]?.ccdMatch?.group).toBeDefined();
+    expect(rows3[1]?.ccdMatch?.group).toBe(rows3[0]?.ccdMatch?.group);
+    expect(rows3[2]?.ccdMatch?.group).toBeUndefined();
+  });
+
+  it("should map only the rows that carry an id, and leave the others with no status and no proposal, when asked to", () => {
+    const rows2 = rowsOf(
+      matchCcd(spec([field("First name", { ccd: ["applicantFirstName"] }), field("Place of birth")]), CASE_TYPE, { keepSet: true, onlyMapped: true })
+    );
+
+    expect(rows2[0]?.ccdMatch?.status).toBe("existing");
+    expect(rows2[1]?.ccdMatch).toBeUndefined();
+    expect(rows2[1]?.ccd).toEqual([]);
+  });
+});
+
+describe("a proposed id", () => {
+  it.each([
+    ["Applicant's full name", "applicantFullName"],
+    ["Applicant’s date of birth", "applicantDateBirth"]
+  ])("should drop the possessive in %s", (label, id) => {
+    expect(rowsOf(matchCcd(spec([field(label)]), [ccd("zzz", "Text")]))[0]?.ccd).toEqual([id]);
+  });
+
+  it("should be a valid Java identifier when the label starts with a digit", () => {
+    const [id] = rowsOf(matchCcd(spec([field("3rd party name")]), [ccd("zzz", "Text")]))[0]?.ccd ?? [];
+
+    expect(id).toMatch(/^[A-Za-z_][A-Za-z0-9_]*$/);
+  });
+});
+
 describe("a date in three boxes", () => {
   it("should not be joined across sections or over a row that is not a field", () => {
     const day = field("Date of birth Day");
@@ -240,6 +289,32 @@ describe("new case fields", () => {
     expect(files[1]?.content).toContain(
       '@CCD(\n    label = "National insurance number",\n    access = {DefaultAccess.class}\n)\nprivate String nationalInsuranceNumber;'
     );
+  });
+
+  it("should list a complex member separately and write no field for it", () => {
+    const withMember = matchCcd(
+      spec(
+        [
+          field("Town", {
+            ccd: ["applicantAddress.PostTown"],
+            ccdMatch: { status: "new", newField: { id: "applicantAddress.PostTown", type: "Text" }, chosenBy: "form" }
+          })
+        ],
+        "S",
+        {
+          ccdCaseTypeId: "T",
+          ccdConfig: "config-generator"
+        }
+      ),
+      CASE_TYPE,
+      { keepSet: true }
+    );
+    const files = newCcdFieldFiles(withMember);
+
+    const json = JSON.parse(files[0]?.content as string);
+    expect(json.fields).toEqual([]);
+    expect(json.complexMembers).toEqual([{ parent: "applicantAddress", id: "PostTown", type: "Text", label: "Town" }]);
+    expect(files.map((f) => f.path)).toEqual(["new-ccd-fields.json"]);
   });
 
   it("should write nothing when no field is new", () => {

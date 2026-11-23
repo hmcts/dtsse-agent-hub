@@ -60,7 +60,7 @@ function pickedCaseType(caseType: string, product: unknown, config: unknown, fie
   if (typeof fields !== "string" || fields === "") {
     return undefined;
   }
-  if (fields.length > MAX_PICKED_FIELDS_BYTES) {
+  if (Buffer.byteLength(fields, "utf8") > MAX_PICKED_FIELDS_BYTES) {
     return errorResponse(400, "the case type's fields are too large");
   }
   if (caseType === "") {

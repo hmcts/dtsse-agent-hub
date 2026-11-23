@@ -1,6 +1,6 @@
 import { byCode } from "./compare.ts";
 import type { CcdMatch, Field, FormSpec } from "./schema.ts";
-import { dice, tokens } from "./similarity.ts";
+import { dice, tokens, words as words_ } from "./similarity.ts";
 
 /** One case field of a CCD case type, as matching needs it. */
 export interface CcdField {
@@ -326,14 +326,7 @@ function proposedType(subject: Subject, types: Set<string>): string {
 }
 
 function proposedId(subject: Subject, prefix: string, taken: Set<string>): string {
-  let words = [
-    ...firstLine(subject.label)
-      .replace(/\([^)]*\)/g, " ")
-      .toLowerCase()
-      .matchAll(/[a-z0-9]+/g)
-  ]
-    .map((m) => m[0])
-    .filter((w) => tokens(w).size > 0 || w === "date");
+  let words = words_(firstLine(subject.label));
   if (subject.shape === "address") {
     words = words.filter((w) => !FILLER.has(w) && w !== "line");
     if (!words.includes("address")) {
@@ -347,12 +340,13 @@ function proposedId(subject: Subject, prefix: string, taken: Set<string>): strin
   const qualifier = words.length <= 2 ? sectionWords(subject.section).slice(-2) : [];
   const qualified = [...qualifier.filter((q) => !words.includes(q)), ...words];
   const make = (parts: string[]): string => `${prefix}${prefix ? pascal(parts) : (parts[0] ?? "") + pascal(parts.slice(1))}`;
-  let id = make(words);
+  const ident = (id: string): string => (/^[A-Za-z_]/.test(id) ? id : `field${id.charAt(0).toUpperCase()}${id.slice(1)}`);
+  let id = ident(make(words));
   if (taken.has(id)) {
-    id = make(qualified);
+    id = ident(make(qualified));
   }
   for (let n = 2; taken.has(id); n++) {
-    id = `${make(qualified)}${n}`;
+    id = `${ident(make(qualified))}${n}`;
   }
   return id;
 }
@@ -363,6 +357,8 @@ const isKept = (field: Field): boolean => field.ccd.length > 0 && (field.ccdMatc
 export interface MatchOptions {
   /** Leave the ids a person set, typed or chose alone and only say whether they exist; ids the matcher proposed are matched again. */
   keepSet?: boolean;
+  /** Map only the rows that carry an id, as a sheet's rows are: the others get no status and no proposal. */
+  onlyMapped?: boolean;
 }
 
 /** `ccd` ids and `ccdMatch` for every field of a form that is read, from the case type's fields. */
@@ -379,16 +375,20 @@ export function matchCcd(spec: FormSpec, fields: CcdField[], options: MatchOptio
   const taken = new Set<string>([...known, ...refs.flatMap((r) => (options.keepSet && isKept(r.field) ? r.field.ccd : []))]);
   const out = new Map<number, { ccd: string[]; match: CcdMatch }>();
 
-  const decisions = subjects.map((subject) => {
-    const set = options.keepSet ? (refs[subject.members.find((m) => isKept((refs[m] as Ref).field)) ?? -1]?.field.ccd ?? []) : [];
-    const ranked = rank(subject, top, prefixWords, lead);
-    return { subject, set, ranked };
+  const keptMembers = (subject: Subject): number[] => (options.keepSet ? subject.members.filter((m) => isKept((refs[m] as Ref).field)) : []);
+  const decisions = subjects.flatMap((subject) => {
+    const kept = keptMembers(subject);
+    // Only rows that carry an id are mapped: a sheet leaves the others unmapped on purpose.
+    if (options.onlyMapped && kept.length === 0) {
+      return [];
+    }
+    return [{ subject, kept, ranked: kept.length > 0 ? [] : rank(subject, top, prefixWords, lead) }];
   });
 
   const claimed = new Map<string, number>();
   decisions.forEach((d, i) => {
     const best = d.ranked[0];
-    if (d.set.length === 0 && best?.fits && best.score >= EXISTING && best.score - (d.ranked.find((r) => r.fits && r !== best)?.score ?? 0) >= MARGIN) {
+    if (best?.fits && best.score >= EXISTING && best.score - (d.ranked.find((r) => r.fits && r !== best)?.score ?? 0) >= MARGIN) {
       const rival = claimed.get(best.field.id);
       if (rival === undefined || (decisions[rival]?.ranked[0]?.score ?? 0) < best.score) {
         claimed.set(best.field.id, i);
@@ -396,8 +396,40 @@ export function matchCcd(spec: FormSpec, fields: CcdField[], options: MatchOptio
     }
   });
 
+  /** A row that keeps its own ids: whether the case type has them, and the field to add when it lacks one. */
+  const ownDecision = (subject: Subject, member: number, group: string | undefined): { ccd: string[]; match: CcdMatch } => {
+    const { field } = refs[member] as Ref;
+    const ccd = field.ccd;
+    const missing = ccd.find((id) => !known.has(id));
+    const chosen = { chosenBy: field.ccdMatch?.chosenBy === "person" ? ("person" as const) : ("form" as const), ...(group ? { group } : {}) };
+    return {
+      ccd,
+      match:
+        missing === undefined
+          ? { status: "existing", ...chosen }
+          : {
+              status: "new",
+              newField: { id: missing, type: field.ccdMatch?.newField?.type ?? proposedType(subject, types) },
+              reason: "this id is not a field of the case type",
+              ...chosen
+            }
+    };
+  };
+
   decisions.forEach((d, i) => {
-    const { subject, set, ranked } = d;
+    const { subject, kept, ranked } = d;
+    const group = subject.members.length > 1 ? `g${subject.members[0]}` : undefined;
+    if (kept.length > 0) {
+      const first = ownDecision(subject, kept[0] as number, group);
+      for (const m of subject.members) {
+        if (kept.includes(m)) {
+          out.set(m, ownDecision(subject, m, group));
+        } else if (!options.onlyMapped) {
+          out.set(m, first);
+        }
+      }
+      return;
+    }
     const best = ranked[0];
     const newField = (): { id: string; type: string } => {
       const id = proposedId(subject, lead, taken);
@@ -406,22 +438,7 @@ export function matchCcd(spec: FormSpec, fields: CcdField[], options: MatchOptio
     };
     let ccd: string[];
     let match: CcdMatch;
-    if (set.length > 0) {
-      ccd = set;
-      const here = set.every((id) => known.has(id));
-      const prior = subject.members.map((m) => (refs[m] as Ref).field.ccdMatch?.newField).find(Boolean);
-      const chosen = {
-        chosenBy: subject.members.some((m) => (refs[m] as Ref).field.ccdMatch?.chosenBy === "person") ? ("person" as const) : ("form" as const)
-      };
-      match = here
-        ? { status: "existing", ...chosen }
-        : {
-            status: "new",
-            newField: { id: set[0] as string, type: prior?.type ?? proposedType(subject, types) },
-            reason: "this id is not a field of the case type",
-            ...chosen
-          };
-    } else if (best?.fits && claimed.get(best.field.id) === i) {
+    if (best?.fits && claimed.get(best.field.id) === i) {
       ccd = [best.field.id];
       match = { status: "existing", reason: `closest field of the case type by wording (similarity ${best.score.toFixed(2)})` };
     } else if (best && best.score >= SUGGEST) {
@@ -439,7 +456,7 @@ export function matchCcd(spec: FormSpec, fields: CcdField[], options: MatchOptio
       match = { status: "new", newField: proposed, reason: "no field of the case type is close" };
     }
     for (const m of subject.members) {
-      out.set(m, { ccd, match });
+      out.set(m, { ccd, match: group ? { ...match, group } : match });
     }
   });
 

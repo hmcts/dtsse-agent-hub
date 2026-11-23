@@ -27,15 +27,15 @@ export function patchHeader(spec: FormSpec, patch: HeaderPatch): FormSpec {
 /** The field values the editor changes in a row. */
 export type FieldPatch = Partial<Pick<Field, "id" | "label" | "keys" | "ccd" | "inputType" | "mandatory" | "regex" | "maxLength" | "minLength">>;
 
-/** The ids the form already knows the case type has: those of rows matched to an existing field. */
+/** The ids the form knows the case type has: all its fields when one is picked, else those of rows matched to an existing field. */
 function existingIds(spec: FormSpec): Set<string> {
-  return new Set(spec.sections.flatMap((s) => s.fields.flatMap((f) => (f.ccdMatch?.status === "existing" ? f.ccd : []))));
+  return new Set(spec.form.ccdFieldIds ?? spec.sections.flatMap((s) => s.fields.flatMap((f) => (f.ccdMatch?.status === "existing" ? f.ccd : []))));
 }
 
 /**
- * A field whose CCD ids were typed. The form does not hold the case type's fields, so an id is an existing field only if
- * the row listed it as a candidate or another row already matches it; any other is a field to add, with the id typed as
- * its proposal, and is checked against the case type again when one is picked.
+ * A field whose CCD ids were typed. An id is an existing field if the picked case type lists it. With no case type
+ * picked the form cannot tell, so it is one only if the row listed it as a candidate or another row already matches it. Any
+ * other is a field to add, with the id typed as its proposal.
  */
 function withTypedCcd(field: Field, known: Set<string>): Field {
   const match = field.ccdMatch;

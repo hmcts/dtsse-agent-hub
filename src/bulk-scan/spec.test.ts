@@ -166,7 +166,8 @@ describe("uploads", () => {
     const [form] = imported.forms;
     expect(form?.form).toMatchObject({ ccdCaseTypeId: "NFD", ccdProduct: "nfdiv", ccdConfig: "config-generator" });
     expect(form?.sections[0]?.fields[0]).toMatchObject({ ccd: ["applicantFirstName"], ccdMatch: { status: "existing" } });
-    expect(form?.sections[0]?.fields[1]?.ccdMatch).toBeDefined();
+    expect(form?.sections[0]?.fields[1]?.ccdMatch).toBeUndefined();
+    expect(form?.form.ccdFieldIds).toEqual(["applicantFirstName"]);
   });
 
   it("should set the case type on a spreadsheet's forms when one is typed", async () => {
@@ -185,6 +186,20 @@ describe("uploads", () => {
   it("should refuse a PDF that cannot be read", async () => {
     pdf.result = undefined;
     expect((await refusal(importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7")))).status).toBe(400);
+  });
+});
+
+describe("checkSpec on a new case field", () => {
+  it("should refuse a new case field with no id, on its row", () => {
+    const bad = formSpecSchema.parse({
+      form: { name: "F", formType: "F" },
+      sections: [{ id: "1", title: "S", fields: [{ label: "A", keys: ["a"], ccd: [""], ccdMatch: { status: "new", newField: { id: "", type: "Text" } } }] }]
+    });
+
+    const checked = checkSpec(bad);
+
+    expect(checked.ok).toBe(false);
+    expect(!checked.ok && checked.issues[0]).toMatchObject({ path: "sections.0.fields.0.ccd" });
   });
 });
 

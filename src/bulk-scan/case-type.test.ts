@@ -71,6 +71,21 @@ describe("withCaseType", () => {
 });
 
 describe("withoutCaseType", () => {
+  it("should drop the review entries about CCD ids and the case type's field list", () => {
+    const matched = withCaseType(spec(field("First name")), CHOICE, FIELDS);
+    const withReview = {
+      ...matched,
+      sections: matched.sections.map((s) => ({
+        ...s,
+        fields: s.fields.map((f) => ({ ...f, review: [{ about: "ccd" as const, reason: "x", confidence: "low" as const }] }))
+      }))
+    };
+    const result = withoutCaseType(withReview);
+
+    expect(rows(result)[0]?.review).toBeUndefined();
+    expect(result.form.ccdFieldIds).toBeUndefined();
+  });
+
   it("should keep an id that came with the form, through a pick and through no case type", () => {
     const sheet = spec(field("First name", { ccd: ["sheetId"] }));
 
@@ -95,6 +110,22 @@ describe("withoutCaseType", () => {
     expect(result.form.ccdCaseTypeId).toBeUndefined();
     expect(result.form.ccdProduct).toBeUndefined();
     expect(rows(result)[0]).not.toHaveProperty("ccdMatch");
+  });
+});
+
+describe("the case type's field ids", () => {
+  it("should be kept compactly in the header, and checked against when an id is typed", () => {
+    const matched = withCaseType(spec(field("Place of birth")), CHOICE, [...FIELDS, { id: "realField", label: "", type: "Text" }]);
+
+    expect(matched.form.ccdFieldIds).toEqual(["applicantEmail", "applicantEmailTwo", "applicantFirstName", "realField"]);
+    expect(rows(patchField(matched, 0, 0, { ccd: ["realField"] }))[0]?.ccdMatch).toMatchObject({ status: "existing" });
+    expect(rows(patchField(matched, 0, 0, { ccd: ["madeUp"] }))[0]?.ccdMatch).toMatchObject({ status: "new", newField: { id: "madeUp" } });
+  });
+
+  it("should leave rows with no id unmapped when only mapped rows are matched", () => {
+    const result = withCaseType(spec(field("First name", { ccd: ["applicantFirstName"] }), field("Place of birth")), CHOICE, FIELDS, { onlyMapped: true });
+
+    expect(rows(result)[1]?.ccdMatch).toBeUndefined();
   });
 });
 
@@ -132,6 +163,28 @@ describe("deciding an unsure row", () => {
     const typed = patchField(unsure(), 0, 0, { ccd: ["applicantEmail", "brandNewEmail"] });
 
     expect(rows(typed)[0]?.ccdMatch).toMatchObject({ status: "new", newField: { id: "brandNewEmail" } });
+  });
+
+  it("should keep a group together across edits to one of its rows", () => {
+    const address = spec(field("First line of address", { id: "2.2" }), field("Town or city"), field("Postcode"));
+    const matched = withCaseType(address, CHOICE, [{ id: "zzz", label: "", type: "Text" }]);
+    const once = editNewField(matched, 0, 1, { id: "homeAddress" });
+    const twice = editNewField(once, 0, 2, { type: "AddressGlobalUK" });
+
+    expect(rows(twice).map((f) => f.ccdMatch?.newField)).toEqual(Array(3).fill({ id: "homeAddress", type: "AddressGlobalUK" }));
+  });
+
+  it("should edit only the rows that share the edited row's proposal, within its group", () => {
+    const sheet = spec(
+      field("First line of address", { id: "2.2", ccd: ["applicantAddress.AddressLine1"] }),
+      field("Town or city", { ccd: ["applicantAddress.PostTown"] }),
+      field("Postcode", { ccd: ["applicantAddress.PostCode"] })
+    );
+    const matched = withCaseType(sheet, CHOICE, [{ id: "zzz", label: "", type: "Text" }]);
+
+    const edited = editNewField(matched, 0, 1, { type: "TextArea" });
+
+    expect(rows(edited).map((f) => f.ccdMatch?.newField?.type)).toEqual(["AddressUK", "TextArea", "AddressUK"]);
   });
 
   it("should apply a choice to every row of an address, which share one decision", () => {
