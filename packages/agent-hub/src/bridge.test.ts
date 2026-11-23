@@ -137,13 +137,18 @@ async function startBridge(
   ensureStateDir(sid);
   fs.writeFileSync(statePath(sid, "enabled"), "");
   writeJson(statePath(sid, "agent.json"), { agent_id: agentId, session_id: sid, name: sid, client_features: [...CLIENT_FEATURES], ...savedAgent });
+  const typed: string[] = [];
   const socketWrites: string[] = [];
   const deliver = async (_socketPath: string | null | undefined, _token: string | null | undefined, content: string) => {
     socketWrites.push(content);
   };
   const env = { ...process.env, AGENT_HUB_CLAUDE_PID: String(process.pid), CLAUDE_CODE_MESSAGING_TOKEN: "tok", ...extraEnv };
   // A conversation's prompt is typed into its pane, so a test never reaches a real tmux: it is recorded with the socket's.
-  const tmux = { sendKeys: async () => {}, paste: async (_name: string, text: string) => void socketWrites.push(text), ...bridgeOptions.tmux };
+  const tmux = {
+    sendKeys: async () => {},
+    paste: async (_name: string, text: string) => void (typed.push(text), socketWrites.push(text)),
+    ...bridgeOptions.tmux
+  };
   const running = runBridge({ sid, env, api: wrapApi ? wrapApi(api) : api, deliver, heartbeatMs: 100, ...bridgeOptions, tmux });
   const streamOpens = () => hub.calls.filter((c) => c.method === "GET" && c.path === `/api/agent/${agentId}/stream`);
   return {
@@ -151,6 +156,7 @@ async function startBridge(
     sid,
     agentId,
     socketWrites,
+    typed,
     streamOpens,
     logText: () => fs.readFileSync(statePath(sid, "log"), "utf8"),
     acks: (id: string) => hub.calls.filter((c) => c.path === `/api/agent/${agentId}/deliveries/${id}/ack`),
@@ -1191,6 +1197,7 @@ describe("runBridge", () => {
 
       // Assert
       const [one, two] = bridge.socketWrites as [string, string];
+      expect(bridge.typed).toEqual(bridge.socketWrites);
       expect(one).toBe(`${contextOpen(first.id)}\n${ANSWER_HERE}\nProduct area: Possession claims.\n${CONTEXT_CLOSE}\n\nwhat is a possession claim?`);
       expect(two).toMatch(/\nProduct area: Core Case Data\.\n/);
       expect(two).toMatch(/switched the product context from Possession claims to Core Case Data/);
@@ -1222,6 +1229,7 @@ describe("runBridge", () => {
 
       // Assert
       const [one, two] = bridge.socketWrites as [string, string];
+      expect(bridge.typed).toEqual(bridge.socketWrites);
       expect(one).toBe(`${contextOpen(missing.id)}\n${ANSWER_HERE}\n${CONTEXT_CLOSE}\n\nno frame`);
       expect(two).toBe(`${contextOpen(unreadable.id)}\n${ANSWER_HERE}\n${CONTEXT_CLOSE}\n\na frame that is not an object`);
       expect(readDirects(bridge.sid)).toEqual([]);
@@ -1281,57 +1289,6 @@ describe("runBridge", () => {
       const name = tmuxName(CONVERSATION);
       expect(order).toEqual(["delivered 1", `keys ${name} -l /model opus`, `keys ${name} Enter`, "delivered 2"]);
       expect(readText(modelPath(bridge.sid))).toBe("opus");
-    } finally {
-      await bridge.stop();
-    }
-  });
-
-  it("should type a conversation's prompt into its pane, and not hand it to the socket, ", async () => {
-    // Arrange
-    const pasted: string[] = [];
-    const tmux = {
-      sendKeys: async () => {},
-      paste: async (name: string, text: string) => void pasted.push(`${name}\n${text}`)
-    };
-    const bridge = await startBridge({ pingMs: 5000 }, { env: { ...VIRTUAL, AGENT_HUB_CONVERSATION_ID: CONVERSATION }, tmux, modelSettleMs: 0 });
-    const assistant = { conversation_id: CONVERSATION, product: "pcs", product_label: "Possession claims", artefact_version: 0, artefact_updated_by: null };
-
-    try {
-      await waitUntil(() => bridge.streamOpens().length >= 1, "the first stream");
-
-      // Act
-      const sent = bridge.hub.sendDirectFromOwner(bridge.agentId, "admin merge it", { assistant });
-      await waitUntil(() => pasted.length >= 1, "the typed prompt");
-
-      // Assert
-      expect(pasted[0]).toBe(
-        `${tmuxName(CONVERSATION)}\n${contextOpen(sent.id)}\n${ANSWER_HERE}\nProduct area: Possession claims.\n${CONTEXT_CLOSE}\n\nadmin merge it`
-      );
-      expect(bridge.socketWrites).toEqual([]);
-    } finally {
-      await bridge.stop();
-    }
-  });
-
-  it("should type a conversation's prompt into its pane, and still hand a peer's message to the socket", async () => {
-    // Arrange
-    const pasted: string[] = [];
-    const tmux = { sendKeys: async () => {}, paste: async (name: string, text: string) => void pasted.push(`${name}\n${text}`) };
-    const bridge = await startBridge({ pingMs: 5000 }, { env: { ...VIRTUAL, AGENT_HUB_CONVERSATION_ID: CONVERSATION }, tmux, modelSettleMs: 0 });
-    const assistant = { conversation_id: CONVERSATION, product: "pcs", product_label: "Possession claims", artefact_version: 0, artefact_updated_by: null };
-
-    try {
-      await waitUntil(() => bridge.streamOpens().length >= 1, "the first stream");
-
-      // Act
-      const sent = bridge.hub.sendDirectFromOwner(bridge.agentId, "admin merge it", { assistant });
-      await waitUntil(() => pasted.length >= 1, "the typed prompt");
-
-      // Assert
-      expect(pasted[0]).toBe(
-        `${tmuxName(CONVERSATION)}\n${contextOpen(sent.id)}\n${ANSWER_HERE}\nProduct area: Possession claims.\n${CONTEXT_CLOSE}\n\nadmin merge it`
-      );
-      expect(bridge.socketWrites).toEqual([]);
     } finally {
       await bridge.stop();
     }
