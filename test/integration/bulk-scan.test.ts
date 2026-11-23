@@ -457,7 +457,8 @@ describe("handing a version to the Assistant", () => {
     return id as string;
   }
 
-  const handed = (id: string, over: Record<string, string> = {}) => assistantActions.handToAssistant(formOf({ id, version: "1", target: "nfdiv", package: "com.example.bulkscan", ...over }));
+  const handed = (id: string, over: Record<string, string> = {}) =>
+    assistantActions.handToAssistant(formOf({ id, version: "1", target: "nfdiv", package: "com.example.bulkscan", ...over }));
 
   beforeEach(async () => {
     await ensureAssistant(prisma, { oid: ALICE.oid, modelRoute: "own-licence" });
