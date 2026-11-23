@@ -372,8 +372,8 @@ describe("starting a spec from a case type picked in the workspace", () => {
   it("should count the bytes of the fields, not the characters, against the limit when labels are multi-byte", async () => {
     const rows = Array.from({ length: 2300 }, (_, i) => ({ ID: `field${i}`, Label: "é".repeat(200), FieldType: "Text" }));
     const json = JSON.stringify(rows);
-    expect(json.length).toBeLessThan(964_000);
-    expect(Buffer.byteLength(json, "utf8")).toBeGreaterThan(964_000);
+    expect(json.length).toBeLessThan(965_536);
+    expect(Buffer.byteLength(json, "utf8")).toBeGreaterThan(965_536);
 
     expect((await pdfUpload(rows)).status).toBe(400);
   });

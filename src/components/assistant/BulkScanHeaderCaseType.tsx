@@ -6,7 +6,7 @@ import { useState } from "react";
 import { ccdCounts, withCaseType, withoutCaseType } from "@/bulk-scan/case-type";
 import { patchHeader } from "@/bulk-scan/edit";
 import { BulkScanCaseTypePicker, type ListedCaseTypes } from "@/components/assistant/BulkScanCaseTypePicker";
-import { INPUT, Labelled } from "@/components/assistant/BulkScanParts";
+import { BulkScanTypedCaseType } from "@/components/assistant/BulkScanTypedCaseType";
 
 /** Why the typed id is offered, in a few words: the list cannot be read, or it lacks the case type the form has. */
 function typedReason(list: ListedCaseTypes, spec: FormSpec): string | null {
@@ -63,21 +63,14 @@ export function BulkScanHeaderCaseType({
           {`${counts.newFields} new case ${counts.newFields === 1 ? "field" : "fields"} to add${counts.unsure > 0 ? `, ${counts.unsure} to choose` : ""}`}
         </p>
       ) : null}
-      {reason === null ? null : (
-        <>
-          <Labelled label="Or type a case type id">
-            <input
-              value={ccdCaseTypeId ?? ""}
-              disabled={fetching}
-              className={INPUT}
-              onChange={(e) =>
-                onSpec((current) => patchHeader(current.form.ccdProduct === undefined ? current : withoutCaseType(current), { ccdCaseTypeId: e.target.value }))
-              }
-            />
-          </Labelled>
-          <p className="text-xs text-asst-muted">{reason}</p>
-        </>
-      )}
+      <BulkScanTypedCaseType
+        value={ccdCaseTypeId ?? ""}
+        reason={reason}
+        disabled={fetching}
+        onChange={(typed) =>
+          onSpec((current) => patchHeader(current.form.ccdProduct === undefined ? current : withoutCaseType(current), { ccdCaseTypeId: typed }))
+        }
+      />
     </div>
   );
 }

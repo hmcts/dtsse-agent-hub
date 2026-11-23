@@ -3,7 +3,9 @@ import { type PodJobEvents, PodJobRefused, requestPodJob, waitForPodJob } from "
 
 /** How often a pod that is still waking is asked again, and how many times, past the hub's 30 seconds of grace. */
 export const WAKING_RETRY_MS = 3000;
-const WAKING_ATTEMPTS = 20;
+/** How long a pod still waking is waited for: a stopped pod takes a minute or two to start. */
+const WAKING_WAIT_MS = 180_000;
+const WAKING_ATTEMPTS = Math.ceil(WAKING_WAIT_MS / WAKING_RETRY_MS);
 
 /** `status` is why the job could not be asked for, and `code` the error code a job that failed ended with, or `timeout`. */
 export type JobResult<T> =

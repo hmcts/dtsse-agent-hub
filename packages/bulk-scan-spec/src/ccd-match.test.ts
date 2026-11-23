@@ -211,14 +211,51 @@ describe("rows that share a decision", () => {
 });
 
 describe("a group with rows that have no ids of their own", () => {
-  it("should share the group's decision only, copying neither the ids nor who chose them, when some of its rows have none", () => {
+  it("should decide the group's other rows afresh, not copy the kept row's decision or who chose it, when some of its rows have no ids", () => {
     const rows2 = rowsOf(
       matchCcd(spec([field("First line of address", { id: "2.2", ccd: ["applicantAddress"] }), field("Town or city")]), CASE_TYPE, { keepSet: true })
     );
 
     expect(rows2[0]?.ccdMatch?.chosenBy).toBe("form");
-    expect(rows2[1]?.ccd).toEqual([]);
+    expect(rows2[1]?.ccdMatch?.reason).toMatch(/closest field of the case type/);
     expect(rows2[1]?.ccdMatch?.chosenBy).toBeUndefined();
+  });
+});
+
+describe("matching a group again against another case type", () => {
+  const address = (second: Record<string, unknown>) =>
+    spec([
+      field("First line of address", {
+        id: "2.2",
+        ccd: ["chosenAddress"],
+        ccdMatch: { status: "new", newField: { id: "chosenAddress", type: "AddressUK" }, chosenBy: "person" }
+      }),
+      field("Town or city", second)
+    ]);
+  const stale = { ccd: ["staleOld"], ccdMatch: { status: "new", newField: { id: "staleOld", type: "Text" } } };
+
+  it("should decide the rows the person did not set afresh when only some rows of the group were set", () => {
+    const rows2 = rowsOf(matchCcd(address(stale), CASE_TYPE, { keepSet: true }));
+
+    expect(rows2[0]?.ccd).toEqual(["chosenAddress"]);
+    expect(rows2[1]?.ccd).not.toEqual(["staleOld"]);
+    expect(JSON.stringify(rows2[1]?.ccdMatch)).not.toContain("staleOld");
+  });
+
+  it("should clear a status the earlier case type left on a row with no id when only mapped rows are matched", () => {
+    const rows2 = rowsOf(
+      matchCcd(address({ ccdMatch: { status: "new", newField: { id: "staleOld", type: "Text" } } }), CASE_TYPE, { keepSet: true, onlyMapped: true })
+    );
+
+    expect(rows2[1]?.ccdMatch).toBeUndefined();
+  });
+});
+
+describe("a row with several ids the case type lacks", () => {
+  it("should record every one of them as a field to add", () => {
+    const rows2 = matchCcd(spec([field("Anything", { ccd: ["missingOne", "applicantEmail", "missingTwo"] })]), CASE_TYPE, { keepSet: true });
+
+    expect(newCcdFields(rows2).map((f) => f.id)).toEqual(["missingOne", "missingTwo"]);
   });
 });
 

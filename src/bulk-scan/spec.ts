@@ -119,11 +119,11 @@ const choiceOf = (picked: UploadedCaseType): CaseTypeChoice => ({
   ...(picked.config ? { config: picked.config } : {})
 });
 
-/** The forms with the CCD case type the person typed as their header's, when one was typed. */
 function withSource(forms: FormSpec[], source: "pdf" | "sip" | "sheet"): FormSpec[] {
   return forms.map((f) => ({ ...f, form: { ...f.form, source } }));
 }
 
+/** The forms with the CCD case type the person typed as their header's, when one was typed. */
 function withTypedCaseType(forms: FormSpec[], caseType: string | undefined): FormSpec[] {
   return caseType ? forms.map((f) => ({ ...f, form: { ...f.form, ccdCaseTypeId: caseType } })) : forms;
 }

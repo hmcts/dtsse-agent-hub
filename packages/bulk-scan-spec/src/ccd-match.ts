@@ -410,16 +410,37 @@ export function matchCcd(spec: FormSpec, fields: CcdField[], options: MatchOptio
   const prepared = prepare(top, prefixWords, lead);
   // The matcher's own earlier proposals are proposed again, so only ids that stay and the case type's own are taken.
   const taken = new Set<string>([...known, ...refs.flatMap((r) => (options.keepSet && isKept(r.field) ? r.field.ccd : []))]);
-  const out = new Map<number, { ccd: string[]; match: CcdMatch }>();
+  /** `match` undefined clears the row's status: a row the case type leaves unmapped keeps nothing of an earlier case type's. */
+  const out = new Map<number, { ccd: string[]; match: CcdMatch | undefined }>();
 
   const keptMembers = (subject: Subject): number[] => (options.keepSet ? subject.members.filter((m) => isKept((refs[m] as Ref).field)) : []);
-  const decisions = subjects.flatMap((subject) => {
+  interface Decision {
+    subject: Subject;
+    kept: number[];
+    ranked: Scored[];
+    /** Tells apart the group of the rows decided afresh from that of the rows that kept their ids. */
+    groupSuffix?: string;
+  }
+  const decisions = subjects.flatMap((subject): Decision[] => {
     const kept = keptMembers(subject);
-    // Only rows that carry an id are mapped: a sheet leaves the others unmapped on purpose.
-    if (options.onlyMapped && kept.length === 0) {
-      return [];
+    const rest = subject.members.filter((m) => !kept.includes(m));
+    // Only rows that carry an id are mapped: a sheet leaves the others unmapped on purpose, and keeps nothing of an earlier match on them.
+    if (options.onlyMapped) {
+      for (const m of rest) {
+        out.set(m, { ccd: (refs[m] as Ref).field.ccd, match: undefined });
+      }
+      return kept.length > 0 ? [{ subject, kept, ranked: [] }] : [];
     }
-    return [{ subject, kept, ranked: kept.length > 0 ? [] : rank(subject, prepared) }];
+    if (kept.length === 0) {
+      return [{ subject, kept, ranked: rank(subject, prepared) }];
+    }
+    // The rows of the group that no person set are decided again against this case type, not left with the last one's.
+    const decided: Decision[] = [{ subject, kept, ranked: [] }];
+    if (rest.length > 0) {
+      const restSubject = { ...subject, members: rest };
+      decided.push({ subject: restSubject, kept: [], ranked: rank(restSubject, prepared), groupSuffix: "r" });
+    }
+    return decided;
   });
 
   const claimed = new Map<string, number>();
@@ -437,7 +458,7 @@ export function matchCcd(spec: FormSpec, fields: CcdField[], options: MatchOptio
   const ownDecision = (subject: Subject, member: number, group: string | undefined): { ccd: string[]; match: CcdMatch } => {
     const { field } = refs[member] as Ref;
     const ccd = field.ccd;
-    const missing = ccd.find((id) => !known.has(id));
+    const [missing, ...more] = ccd.filter((id) => !known.has(id));
     const chosen = { chosenBy: field.ccdMatch?.chosenBy === "person" ? ("person" as const) : ("form" as const), ...(group ? { group } : {}) };
     return {
       ccd,
@@ -447,6 +468,7 @@ export function matchCcd(spec: FormSpec, fields: CcdField[], options: MatchOptio
           : {
               status: "new",
               newField: { id: missing, type: field.ccdMatch?.newField?.type ?? proposedType(subject, types) },
+              ...(more.length > 0 ? { extraNewFields: more.map((id) => ({ id, type: proposedType(subject, types) })) } : {}),
               reason: "this id is not a field of the case type",
               ...chosen
             }
@@ -455,7 +477,7 @@ export function matchCcd(spec: FormSpec, fields: CcdField[], options: MatchOptio
 
   decisions.forEach((d, i) => {
     const { subject, kept, ranked } = d;
-    const group = subject.members.length > 1 ? `g${subject.members[0]}` : undefined;
+    const group = subject.members.length > 1 ? `g${subject.members[0]}${d.groupSuffix ?? ""}` : undefined;
     if (kept.length > 0) {
       // A row of the group with no id of its own is left as it is: the ids and who set them belong to the rows that have them.
       for (const m of kept) {
@@ -500,7 +522,14 @@ export function matchCcd(spec: FormSpec, fields: CcdField[], options: MatchOptio
       ...section,
       fields: section.fields.map((field) => {
         const decided = out.get(at++);
-        return decided ? { ...field, ccd: decided.ccd, ccdMatch: decided.match } : field;
+        if (!decided) {
+          return field;
+        }
+        if (decided.match === undefined) {
+          const { ccdMatch: _match, ...rest } = field;
+          return { ...rest, ccd: decided.ccd };
+        }
+        return { ...field, ccd: decided.ccd, ccdMatch: decided.match };
       })
     }))
   };
@@ -511,9 +540,11 @@ export function newCcdFields(spec: FormSpec): { id: string; type: string; label:
   const seen = new Map<string, { id: string; type: string; label: string }>();
   for (const section of spec.sections) {
     for (const field of section.fields) {
-      const add = field.ccdMatch?.status === "new" ? field.ccdMatch.newField : undefined;
-      if (add && !seen.has(add.id)) {
-        seen.set(add.id, { id: add.id, type: add.type, label: firstLine(field.label) });
+      const match = field.ccdMatch?.status === "new" ? field.ccdMatch : undefined;
+      for (const add of [match?.newField, ...(match?.extraNewFields ?? [])]) {
+        if (add && !seen.has(add.id)) {
+          seen.set(add.id, { id: add.id, type: add.type, label: firstLine(field.label) });
+        }
       }
     }
   }

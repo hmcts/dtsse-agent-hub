@@ -194,7 +194,7 @@ describe("the case type picker", () => {
 
 function spec(over: object): FormSpec {
   return {
-    form: { name: "F", formType: "F1" },
+    form: { name: "F", formType: "F1", source: "pdf" },
     sections: [
       {
         id: "1",
@@ -325,6 +325,21 @@ describe("the upload with a case type picked", () => {
     await waitFor(() => expect((screen.getByRole("button", { name: "Start the form" }) as HTMLButtonElement).disabled).toBe(false), { timeout: 5000 });
   });
 
+  it("should offer a typed case type id on the upload page, open when the list cannot be read, and send it", async () => {
+    fetchMock.mockImplementation(podJobs());
+    render(<BulkScanUpload podConversationId={null} />);
+
+    const details = screen.getByText("Or type a case type id", { selector: "summary" }).closest("details") as HTMLDetailsElement;
+    expect(details.open).toBe(true);
+    await userEvent.upload(screen.getByLabelText(/^Form:/), new File(["x"], "t.pdf"));
+    await userEvent.type(screen.getByLabelText("Or type a case type id"), "CIC");
+    await userEvent.click(screen.getByRole("button", { name: "Start the form" }));
+
+    await waitFor(() => expect(push).toHaveBeenCalled());
+    const body = fetchMock.mock.calls.find((call) => call[0] === "/api/ui/assistant/bulk-scan")?.[1].body as FormData;
+    expect(body.get("caseType")).toBe("CIC");
+  });
+
   it("should let the form start with no case type when none is picked, and offer no definition upload", async () => {
     fetchMock.mockImplementation(podJobs({ status: "unsupported" }));
     render(<BulkScanUpload podConversationId="c1" />);
@@ -389,6 +404,7 @@ describe("the editor's case type", () => {
     const v = view({ id: "1.1", ccd: [], ...over }) as { spec: FormSpec };
     return { ...v, spec: { ...v.spec, form: { ...v.spec.form, ccdCaseTypeId: "Gone", ccdProduct: "other" } } } as never;
   };
+  const typedDisclosure = () => screen.getByText("Or type a case type id", { selector: "summary" }).closest("details") as HTMLDetailsElement;
   const typed = () => screen.getByLabelText("Or type a case type id") as HTMLInputElement;
 
   it("should keep the typed case type field off when the fields are being fetched", async () => {
@@ -403,7 +419,7 @@ describe("the editor's case type", () => {
     for (const id of Object.keys(pending)) {
       pending[id] = { status: "done", kind: "ccd.case-type-fields", result: { fields: ROWS, total: 2, omitted: 0 } };
     }
-    await waitFor(() => expect(screen.queryByLabelText("Or type a case type id")).toBeNull(), { timeout: 5000 });
+    await waitFor(() => expect(typed().disabled).toBe(false), { timeout: 5000 });
   });
 
   it("should offer a typed case type id, with the reason, when the person has no chat to read their workspace in", async () => {
@@ -420,11 +436,24 @@ describe("the editor's case type", () => {
     answers[0] = { kind: "ccd.case-types", answer: { status: "failed", kind: "x", error: "script_missing", detail: "no tool" } };
     render(<BulkScanEditor view={view({ id: "1.1", ccd: [] })} signOff={vi.fn()} podConversationId="c1" />);
 
-    expect(screen.queryByLabelText("Or type a case type id")).toBeNull();
+    expect(typedDisclosure().open).toBe(false);
     await userEvent.click(select());
 
+    await waitFor(() => expect(typedDisclosure().open).toBe(true));
     expect(await screen.findByLabelText("Or type a case type id")).toBeTruthy();
     expect(screen.getByText(/could not be listed/)).toBeTruthy();
+  });
+
+  it("should let a case type be typed from the closed disclosure when the list is ready but lacks the one wanted", async () => {
+    fetchMock.mockImplementation(podJobs());
+    render(<BulkScanEditor view={view({ id: "1.1", ccd: [] })} signOff={vi.fn()} podConversationId="c1" />);
+
+    await openPicker();
+    expect(typedDisclosure().open).toBe(false);
+    await userEvent.click(screen.getByText("Or type a case type id", { selector: "summary" }));
+    await userEvent.type(typed(), "Wanted");
+
+    expect(typed().value).toBe("Wanted");
   });
 
   it("should offer a typed case type id when the form's case type is not in the list", async () => {
@@ -446,7 +475,7 @@ describe("the editor's case type", () => {
     await userEvent.selectOptions(select(), "sptribs/CriminalInjuriesCompensation");
 
     expect(await screen.findByText(/new case fields to add/)).toBeTruthy();
-    expect(screen.queryByLabelText("Or type a case type id")).toBeNull();
+    expect(typedDisclosure().open).toBe(false);
     expect(select().selectedOptions[0]?.textContent).toBe("sptribs: CriminalInjuriesCompensation");
   });
 

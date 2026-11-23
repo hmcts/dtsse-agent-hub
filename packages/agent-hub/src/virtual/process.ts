@@ -17,6 +17,8 @@ export type RunOptions = {
   input?: string;
   /** Kills the command as the timeout does once it aborts, for a caller whose own budget can run out first. */
   signal?: AbortSignal;
+  /** Runs the command as the head of its own process group and kills the whole group, for one that starts children (Gradle) that must not outlive it. */
+  killGroup?: boolean;
   /** How long after the kill to stop waiting for the pipes to close; `SIGKILL_AFTER_MS` unless a test says otherwise. */
   killGraceMs?: number;
 };
@@ -41,14 +43,14 @@ export function childEnv(env: Env, drop: string[] = []): NodeJS.ProcessEnv {
 export function run(
   cmd: string,
   args: string[],
-  { env = process.env, timeoutMs = 60000, input, signal, killGraceMs = SIGKILL_AFTER_MS }: RunOptions = {}
+  { env = process.env, timeoutMs = 60000, input, signal, killGraceMs = SIGKILL_AFTER_MS, killGroup = false }: RunOptions = {}
 ): Promise<RunResult> {
   return new Promise((resolve) => {
     let stdout = "";
     let stderr = "";
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(cmd, args, { env, stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"] });
+      child = spawn(cmd, args, { env, detached: killGroup, stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"] });
     } catch (e) {
       resolve({ code: 127, stdout, stderr: (e as Error).message });
       return;
@@ -75,7 +77,15 @@ export function run(
     // up the same way and for the same reason — the handles are ref'd, and the CLI exits only when the loop
     // drains, so a caller would wait on this for ever rather than for `timeoutMs`.
     function kill() {
-      child.kill("SIGKILL");
+      if (killGroup && child.pid !== undefined) {
+        try {
+          process.kill(-child.pid, "SIGKILL");
+        } catch {
+          child.kill("SIGKILL");
+        }
+      } else {
+        child.kill("SIGKILL");
+      }
       abandon ??= setTimeout(() => {
         child.stdout?.destroy();
         child.stderr?.destroy();

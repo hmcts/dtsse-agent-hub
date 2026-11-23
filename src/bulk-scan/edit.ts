@@ -50,7 +50,7 @@ function withTypedCcd(field: Field, known: Set<string>, caseTypePicked: boolean)
     const { ccdMatch: _match, ...rest } = field;
     return rest;
   }
-  const lacking = field.ccd.find((typed) => !known.has(typed) && !(match.candidates ?? []).some((c) => c.id === typed));
+  const [lacking, ...more] = field.ccd.filter((typed) => !known.has(typed) && !(match.candidates ?? []).some((c) => c.id === typed));
   if (lacking === undefined) {
     return { ...field, ccdMatch: { status: "existing", chosenBy: "person", ...(match.group ? { group: match.group } : {}) } };
   }
@@ -59,6 +59,7 @@ function withTypedCcd(field: Field, known: Set<string>, caseTypePicked: boolean)
     ccdMatch: {
       status: "new",
       newField: { id: lacking, type: match.newField?.type ?? proposedTypeOf(field) },
+      ...(more.length > 0 ? { extraNewFields: more.map((id) => ({ id, type: proposedTypeOf(field) })) } : {}),
       chosenBy: "person",
       ...(match.group ? { group: match.group } : {})
     }

@@ -427,11 +427,11 @@ describe("NotifyPanel picker", () => {
   });
 
   it("should give up on a pod that stays waking, and offer to try again", async () => {
-    serve({ latest: null, asks: { "notify.list": Array.from({ length: 30 }, () => ({ status: "waking" })) } });
+    serve({ latest: null, asks: { "notify.list": Array.from({ length: 70 }, () => ({ status: "waking" })) } });
     await open({ notify: null });
 
     fireEvent.change(screen.getByLabelText("Product"), { target: { value: "pcs" } });
-    for (let at = 0; at < 20; at += 1) {
+    for (let at = 0; at < 60; at += 1) {
       await wait(WAKING_RETRY_MS);
     }
 

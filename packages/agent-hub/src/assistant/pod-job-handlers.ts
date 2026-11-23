@@ -32,7 +32,7 @@ const videoAttach: PodJobHandler = {
 /** The command runner the handlers that run programs share, its module loaded only when a job arrives. */
 async function runner(): Promise<Run> {
   const { run } = await import("../virtual/process.ts");
-  return (cmd, argv, opts) => run(cmd, argv, { env: opts.env as NodeJS.ProcessEnv, timeoutMs: opts.timeoutMs, signal: opts.signal });
+  return (cmd, argv, opts) => run(cmd, argv, { env: opts.env as NodeJS.ProcessEnv, timeoutMs: opts.timeoutMs, signal: opts.signal, killGroup: opts.killGroup });
 }
 
 /** The case types the owner's workspace declares. */

@@ -7,7 +7,7 @@ import { needsReview, reviewTotal } from "./outline.ts";
 
 const field = (label: string, extra: Record<string, unknown> = {}) => fieldSchema.parse({ label, keys: [label.replace(/\W/g, "")], ...extra });
 const spec = (...fields: ReturnType<typeof field>[]): FormSpec =>
-  formSpecSchema.parse({ form: { name: "F", formType: "F1" }, sections: [{ id: "1", title: "Your details", fields }] });
+  formSpecSchema.parse({ form: { name: "F", formType: "F1", source: "pdf" }, sections: [{ id: "1", title: "Your details", fields }] });
 const rows = (s: FormSpec) => s.sections.flatMap((section) => section.fields);
 
 const FIELDS = [
@@ -122,6 +122,13 @@ describe("a form that came from a sheet", () => {
 
   it.each(["sip", "sheet"] as const)("should leave the rows the %s left unmapped without a proposal when a case type is picked", (source) => {
     expect(rows(withCaseType(sheet(source), CHOICE, FIELDS))[1]?.ccdMatch).toBeUndefined();
+  });
+
+  it("should leave the rows unmapped when the form was saved before it recorded where it came from", () => {
+    const old = sheet("sheet");
+    const { source: _source, ...form } = old.form;
+
+    expect(rows(withCaseType({ ...old, form }, CHOICE, FIELDS))[1]?.ccdMatch).toBeUndefined();
   });
 
   it("should propose for a row with no id when the form came from a PDF", () => {

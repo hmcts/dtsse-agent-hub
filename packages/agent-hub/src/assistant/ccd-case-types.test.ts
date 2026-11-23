@@ -107,7 +107,8 @@ describe("caseTypeFields", () => {
     ["unknown case type: Nope. Run: ccd-case-types list", "unknown_case_type"],
     ["NFD is defined by more than one product (a, b). Pass --product.", "ambiguous_case_type"],
     ["apps/x/y is not cloned. Clone it with: ./scripts/add-repo", "not_cloned"],
-    ["generateCCDConfig failed in apps/x/y.", "generation_failed"],
+    ["Generating the X definition: ./gradlew generateCCDConfig in apps/x/y\ngenerateCCDConfig failed in apps/x/y.", "generation_failed"],
+    ["Generating the X definition: ./gradlew generateCCDConfig in apps/x/y\nNo CaseField rows under: apps/x/y/build", "failed"],
     ["something else", "failed"]
   ])("should answer %s as %s", async (stderr, code) => {
     await expect(caseTypeFields({ case_type: "T" }, context(), answering("", 1, stderr))).rejects.toMatchObject({ code });
@@ -161,7 +162,15 @@ describe("scriptFailure", () => {
     expect(failure.detail).toContain(tool);
   });
 
-  it("should cut long words when the script says a lot", () => {
+  it("should ask for the script's whole process group to be killed when it is stopped", async () => {
+    const deps = answering("[]");
+
+    await caseTypeFields({ case_type: "T" }, context(), deps);
+
+    expect(deps.run).toHaveBeenCalledWith(expect.any(String), expect.any(Array), expect.objectContaining({ killGroup: true }));
+  });
+
+  it("should still cut long words", () => {
     expect(scriptFailure("x".repeat(1000), 1).detail).toHaveLength(280);
   });
 });

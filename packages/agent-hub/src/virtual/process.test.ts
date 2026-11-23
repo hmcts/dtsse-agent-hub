@@ -20,6 +20,23 @@ describe("run", () => {
     expect(r.stderr).toMatch(/ENOENT/);
   });
 
+  it("should kill the command's own children too when it is run as a group and times out", async () => {
+    const r = await run("bash", ["-c", "sleep 60 & echo $!; wait"], { env: pod.env(), timeoutMs: 300, killGroup: true });
+    const child = Number(r.stdout.trim());
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(() => process.kill(child, 0)).toThrow();
+  });
+
+  it("should leave the command's children running when it is not run as a group and times out", async () => {
+    const r = await run("bash", ["-c", "sleep 60 & echo $!; wait"], { env: pod.env(), timeoutMs: 300, killGraceMs: 100 });
+    const child = Number(r.stdout.trim());
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(() => process.kill(child, 0)).not.toThrow();
+    process.kill(child, "SIGKILL");
+  });
+
   it("should feed stdin to the command and collect both streams when given input", async () => {
     // Act
     const r = await run("bash", ["-c", "cat; echo oops >&2"], { env: pod.env(), input: "hello" });

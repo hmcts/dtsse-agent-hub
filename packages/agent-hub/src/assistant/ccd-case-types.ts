@@ -101,7 +101,8 @@ export function scriptFailure(stderr: string, code: number): PodJobError {
   if (/is not cloned/i.test(stderr)) {
     return new PodJobError("not_cloned", detail);
   }
-  if (/generateCCDConfig|no current build\/definitions/i.test(stderr)) {
+  // The script's progress line names generateCCDConfig on every run; its failure is the last line it prints.
+  if (/^generateCCDConfig failed in|no current build\/definitions/i.test(message)) {
     return new PodJobError("generation_failed", detail);
   }
   return new PodJobError("failed", detail);
@@ -119,7 +120,7 @@ async function script(context: PodJobContext, deps: CcdDeps, args: string[], tim
   if (!(deps.exists ?? existsSync)(path)) {
     throw new PodJobError("script_missing", SCRIPT_MISSING);
   }
-  const result = await deps.run(path, args, { env: context.env, timeoutMs, signal: context.signal });
+  const result = await deps.run(path, args, { env: context.env, timeoutMs, signal: context.signal, killGroup: true });
   if (result.code !== 0) {
     throw scriptFailure(result.stderr, result.code);
   }

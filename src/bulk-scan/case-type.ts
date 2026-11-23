@@ -17,7 +17,7 @@ export interface CaseTypeChoice {
 }
 
 export interface CaseTypeOptions {
-  /** Map only the rows that carry an id; by default, whether the form came from a SIP or a sheet, whose unmapped rows are deliberate. */
+  /** Map only the rows that carry an id; by default, unless the form came from a PDF: a sheet's unmapped rows are deliberate, and a form saved before its source was recorded is read as a sheet. */
   onlyMapped?: boolean;
 }
 
@@ -49,7 +49,7 @@ function withoutCcdReviews(spec: FormSpec): FormSpec {
 export function withCaseType(spec: FormSpec, choice: CaseTypeChoice, fields: CcdField[], options: CaseTypeOptions = {}): FormSpec {
   return matchCcd(withoutCcdReviews(withCaseTypeHeader(spec, choice, fields)), fields, {
     keepSet: true,
-    onlyMapped: options.onlyMapped ?? (spec.form.source === "sip" || spec.form.source === "sheet")
+    onlyMapped: options.onlyMapped ?? spec.form.source !== "pdf"
   });
 }
 
