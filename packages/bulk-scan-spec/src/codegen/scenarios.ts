@@ -69,9 +69,11 @@ export function sampleValue(model: KeyModel): string {
   const pattern = formatPattern(model);
   const guess = defaultSample(model);
   const usual = pattern && !new RegExp(anchoredPattern(pattern)).test(guess) ? (sampleFromRegex(pattern) ?? guess) : guess;
-  const sliced = pattern || !model.maxLength ? usual : usual.slice(0, model.maxLength);
-  const fitted = pattern || !model.minLength ? sliced : sliced.padEnd(model.minLength, "x");
-  return firstFitting(model, [fitted, ...(pattern ? [sampleFromRegex(pattern)] : []).filter((s): s is string => s !== undefined), ...SHORT_SAMPLES]);
+  const fitted = pattern || !model.maxLength ? usual : usual.slice(0, model.maxLength);
+  const built = [fitted, ...(pattern ? [sampleFromRegex(pattern)] : []).filter((s): s is string => s !== undefined)];
+  // An open-ended format such as ^[XG].* accepts the sample padded out to the minimum length; one that does not leaves no sample to fit.
+  const padded = model.minLength ? built.flatMap((s) => ["x", "0", "a"].map((c) => s.padEnd(model.minLength ?? 0, c))) : [];
+  return firstFitting(model, [...built, ...padded, ...SHORT_SAMPLES]);
 }
 
 function defaultSample(model: KeyModel): string {

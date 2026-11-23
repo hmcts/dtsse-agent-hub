@@ -1,9 +1,10 @@
 import { basename, extname } from "node:path";
 import { proposeCcd } from "./ccd-propose.ts";
+import { yesNoEmits } from "./emits.ts";
 import { formatFromNote } from "./hints.ts";
 import { proposeKeys } from "./key-proposal.ts";
 import { decideMandatory } from "./mandatory.ts";
-import { draftFields } from "./pdf-draft.ts";
+import { draftFields, isYesNoPair } from "./pdf-draft.ts";
 import type { PdfContent } from "./pdf-extract.ts";
 import { extractPdf } from "./pdf-extract.ts";
 import type { Bundle, Field, Section } from "./schema.ts";
@@ -112,6 +113,7 @@ export async function fromPdf(input: FromPdfInput): Promise<FromPdfResult> {
     const field: Field = {
       ...d.field,
       mandatory: decision.mandatory,
+      ...(isYesNoPair(d) && mine[0] ? { emits: yesNoEmits(mine[0].key) } : {}),
       ...(format ? { regex: format.regex } : {}),
       ...(decision.required ? { required: decision.required } : {}),
       keys: mine.map((k) => k.key),

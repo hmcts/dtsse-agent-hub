@@ -1,4 +1,5 @@
 import type { FormSpec } from "@hmcts-cft/bulk-scan-spec";
+import { yesNoEmits } from "@hmcts-cft/bulk-scan-spec/emits";
 import { describe, expect, it } from "vitest";
 import {
   addField,
@@ -71,6 +72,26 @@ describe("patching a spec", () => {
     expect(next.sections[0]?.fields[0]).not.toHaveProperty("id");
     expect(next.sections[0]?.fields[0]).not.toHaveProperty("regex");
     expect(next.sections[0]?.fields[0]).not.toHaveProperty("maxLength");
+  });
+
+  it("should keep a Yes and No pair's emits, and the conditions on its answer, when its key is renamed", () => {
+    const pair = field({
+      id: "1.1",
+      inputType: "checkbox",
+      keys: ["solicitor"],
+      group: { kind: "xor", size: 2, options: [{ key: "solicitor" }] },
+      emits: yesNoEmits("solicitor")
+    });
+    const dependent = field({
+      id: "1.2",
+      keys: ["name"],
+      mandatory: "conditional",
+      required: { label: "'Solicitor?' is answered Yes", when: { solicitor: "Yes" } }
+    });
+    const renamed = patchField({ ...spec, sections: [{ id: "1", title: "A", fields: [pair, dependent] }] } as never, 0, 0, { keys: ["hasSolicitor"] });
+    const [first, second] = renamed.sections[0]?.fields ?? [];
+    expect(first?.emits).toEqual(yesNoEmits("hasSolicitor"));
+    expect(second?.required?.when).toEqual({ hasSolicitor: "Yes" });
   });
 
   it("should set the form's case type and drop it when emptied", () => {

@@ -2,7 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { type FormEvent, useId, useState } from "react";
-import { MAX_BULK_SCAN_FILE_BYTES, MAX_CASE_TYPE_ID, mebibytes } from "@/bulk-scan/limits";
+import { describeBytes } from "@/assistant/uploads";
+import { MAX_BULK_SCAN_FILE_BYTES, MAX_CASE_TYPE_ID } from "@/bulk-scan/limits";
 import { FIELD } from "@/components/assistant/WelshParts";
 
 /** Starts a spec from a form PDF, an Exela SIP or an HMCTS transformation sheet, and opens it. */
@@ -21,7 +22,7 @@ export function BulkScanUpload() {
       return;
     }
     if (form.size > MAX_BULK_SCAN_FILE_BYTES) {
-      setError(`That file is too large: a form may be up to ${mebibytes(MAX_BULK_SCAN_FILE_BYTES)}.`);
+      setError(`That file is too large: a form may be up to ${describeBytes(MAX_BULK_SCAN_FILE_BYTES)}.`);
       return;
     }
     const body = new FormData();

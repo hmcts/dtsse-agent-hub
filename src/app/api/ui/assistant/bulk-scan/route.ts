@@ -1,7 +1,8 @@
 import type { NextRequest } from "next/server";
 import { errorResponse, json } from "@/agent-api/http";
 import { readBytes } from "@/assistant/upload-body";
-import { MAX_BULK_SCAN_FILE_BYTES, MAX_CASE_TYPE_ID, MAX_UPLOAD_BODY_BYTES, mebibytes } from "@/bulk-scan/limits";
+import { describeBytes } from "@/assistant/uploads";
+import { MAX_BULK_SCAN_FILE_BYTES, MAX_CASE_TYPE_ID, MAX_UPLOAD_BODY_BYTES } from "@/bulk-scan/limits";
 import { importUpload, specName, uploadFileName } from "@/bulk-scan/spec";
 import { createSpecs } from "@/bulk-scan/spec-store";
 import { prisma } from "@/store/prisma";
@@ -10,6 +11,12 @@ import { uiRefusals, uiViewer } from "../../request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+/** The multipart body read once, up to the cap, and parsed; the buffer it was read into is not kept, so the upload is held as the parsed file and nothing else. */
+async function parseForm(request: NextRequest): Promise<FormData | undefined> {
+  const body = await readBytes(request, MAX_UPLOAD_BODY_BYTES);
+  return await new Response(body, { headers: { "content-type": request.headers.get("content-type") ?? "" } }).formData().catch(() => undefined);
+}
 
 /** A form PDF, Exela SIP or transformation sheet, uploaded to start a spec, with the CCD case type id the person typed; one spec is made for each form the file holds. */
 export async function POST(request: NextRequest): Promise<Response> {
@@ -21,11 +28,10 @@ export async function POST(request: NextRequest): Promise<Response> {
     return errorResponse(404, "the Bulk Scan form builder is not available on this deployment");
   }
   return await uiRefusals("bulk scan upload", async () => {
-    const body = await readBytes(request, MAX_UPLOAD_BODY_BYTES);
-    const form = await new Response(body, { headers: { "content-type": request.headers.get("content-type") ?? "" } }).formData().catch(() => undefined);
+    const form = await parseForm(request);
     const file = form?.get("form");
     if (!(file instanceof File) || file.size > MAX_BULK_SCAN_FILE_BYTES) {
-      return errorResponse(400, `choose a form PDF or an Excel spreadsheet (.pdf or .xlsx), up to ${mebibytes(MAX_BULK_SCAN_FILE_BYTES)}`);
+      return errorResponse(400, `choose a form PDF or an Excel spreadsheet (.pdf or .xlsx), up to ${describeBytes(MAX_BULK_SCAN_FILE_BYTES)}`);
     }
     const name = uploadFileName(file.name);
     if (name === null) {

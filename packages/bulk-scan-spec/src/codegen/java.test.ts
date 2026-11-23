@@ -324,6 +324,14 @@ describe("minimum length", () => {
     expect(JSON.stringify(sscs9(s))).toContain('"anyOf":[{"maxLength":0},{"minLength":3}]');
   });
 
+  it("should pad a sample to the minimum when the format is open-ended, and report a key no value can satisfy", () => {
+    const open = spec([{ id: "1.1", keys: ["ref"], regex: "^[XG].*", minLength: 9 }]);
+    expect(validData(open).ref).toMatch(/^[XG].{8,}$/);
+    expect(usR8(open)).toEqual([]);
+    const fixed = spec([{ id: "1.1", keys: ["ref"], regex: "^[XG]\\d{2}$", minLength: 9 }]);
+    expect(usR8(fixed)).toEqual(["ref"]);
+  });
+
   it("should give a valid sample at least the minimum long", () => {
     expect(validData(minimal()).code?.length).toBeGreaterThanOrEqual(3);
   });

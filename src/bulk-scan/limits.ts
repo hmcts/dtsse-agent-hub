@@ -9,8 +9,3 @@ export const MAX_UPLOAD_BODY_BYTES = MAX_BULK_SCAN_FILE_BYTES + MULTIPART_OVERHE
 
 /** The longest case type id typed with an upload. */
 export const MAX_CASE_TYPE_ID = 100;
-
-/** A size as the messages word it: 5 MiB. */
-export function mebibytes(bytes: number): string {
-  return `${bytes / (1024 * 1024)} MiB`;
-}
