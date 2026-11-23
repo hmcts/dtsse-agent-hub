@@ -2,24 +2,25 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ccdDefinitionOf, loadCcdDefinition, proposeCcd } from "./ccd-propose.ts";
+import { ccdDefinitionOf, loadCcdDefinition } from "./ccd-propose.ts";
 
+const asFields = (...ids: string[]) => ids.map((id) => ({ id, label: "", type: "Text" }));
 const rows = (...ids: string[]) => JSON.stringify(ids.map((ID) => ({ ID, FieldType: "Text" })));
 const typed = (CaseTypeID: string, ...ids: string[]) => ids.map((ID) => ({ CaseTypeID, ID, FieldType: "Text" }));
 
 describe("ccdDefinitionOf", () => {
   it("should name the case type and list only case field ids when the definition has label fields and rows without an id", () => {
     const list = [...typed("CIC", "applicantName"), { CaseTypeID: "CIC", ID: "heading", FieldType: "Label" }, { ID: "", FieldType: "Text" }];
-    expect(ccdDefinitionOf(list)).toEqual({ caseType: "CIC", fields: ["applicantName"] });
+    expect(ccdDefinitionOf(list)).toEqual({ caseType: "CIC", fields: asFields("applicantName") });
   });
 
   it("should leave the case type out when every row's is blank, and take the one that was typed", () => {
-    expect(ccdDefinitionOf(typed("", "a"))).toEqual({ fields: ["a"] });
-    expect(ccdDefinitionOf(typed("", "a"), "Typed")).toEqual({ caseType: "Typed", fields: ["a"] });
+    expect(ccdDefinitionOf(typed("", "a"))).toEqual({ fields: asFields("a") });
+    expect(ccdDefinitionOf(typed("", "a"), "Typed")).toEqual({ caseType: "Typed", fields: asFields("a") });
   });
 
   it("should keep only the typed case type's rows when the definition holds several", () => {
-    expect(ccdDefinitionOf([...typed("One", "a"), ...typed("Two", "b")], "Two")).toEqual({ caseType: "Two", fields: ["b"] });
+    expect(ccdDefinitionOf([...typed("One", "a"), ...typed("Two", "b")], "Two")).toEqual({ caseType: "Two", fields: asFields("b") });
   });
 
   it("should list the case types found when the typed one is not one of them", () => {
@@ -43,8 +44,8 @@ describe("loadCcdDefinition", () => {
   it("should read the same definition when given a CaseField.json file or the directory holding it", () => {
     const dir = mkdtempSync(join(tmpdir(), "ccd-"));
     writeFileSync(join(dir, "CaseField.json"), JSON.stringify(typed("CIC", "applicant1FirstName")));
-    expect(loadCcdDefinition(dir)).toEqual({ caseType: "CIC", fields: ["applicant1FirstName"] });
-    expect(loadCcdDefinition(join(dir, "CaseField.json"))).toEqual({ caseType: "CIC", fields: ["applicant1FirstName"] });
+    expect(loadCcdDefinition(dir)).toEqual({ caseType: "CIC", fields: asFields("applicant1FirstName") });
+    expect(loadCcdDefinition(join(dir, "CaseField.json"))).toEqual({ caseType: "CIC", fields: asFields("applicant1FirstName") });
   });
 
   it("should read every file of a CaseField folder in name order", () => {
@@ -53,7 +54,7 @@ describe("loadCcdDefinition", () => {
     writeFileSync(join(dir, "CaseField", "b.json"), rows("second"));
     writeFileSync(join(dir, "CaseField", "a.json"), rows("first"));
     writeFileSync(join(dir, "CaseField", "notes.txt"), "ignored");
-    expect(loadCcdDefinition(dir).fields).toEqual(["first", "second"]);
+    expect(loadCcdDefinition(dir).fields).toEqual(asFields("first", "second"));
   });
 
   it("should refuse and name the file when a CaseEvent.json is given as the case fields or a file is not JSON", () => {
@@ -66,20 +67,5 @@ describe("loadCcdDefinition", () => {
 
   it("should say so when the directory holds no case fields", () => {
     expect(() => loadCcdDefinition(mkdtempSync(join(tmpdir(), "ccd-")))).toThrow("no CaseField.json");
-  });
-});
-
-describe("proposeCcd", () => {
-  const fields = ["applicant1FirstName", "applicant2FirstName", "marriageDate"];
-
-  it("should propose the field whose id wording is closest, and nothing when none is close", () => {
-    const [first, none] = proposeCcd(["soleOrApplicant1FirstName First name(s) Full name", "Court name"], fields);
-    expect(first).toMatchObject({ id: "applicant1FirstName" });
-    expect(none).toBeUndefined();
-  });
-
-  it("should let two contexts share one CCD field", () => {
-    const found = proposeCcd(["applicant1FirstName", "applicant 1 first name"], fields);
-    expect(found.map((f) => f?.id)).toEqual(["applicant1FirstName", "applicant1FirstName"]);
   });
 });

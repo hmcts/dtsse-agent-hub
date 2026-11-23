@@ -2,8 +2,10 @@
 
 import type { FormSpec } from "@hmcts-cft/bulk-scan-spec";
 import { useId } from "react";
+import { chooseCandidate, chooseNew, editNewField } from "@/bulk-scan/case-type";
 import { ccdIds, clearReview, clearTodo, type FieldPatch, formKeys, mapField, patchField, patchSection, sheetIds } from "@/bulk-scan/edit";
 import { fieldName, type Identity, labelLine } from "@/bulk-scan/outline";
+import { BulkScanCcdStatus } from "@/components/assistant/BulkScanCcdStatus";
 import { BulkScanFieldDetails, type FormChoices } from "@/components/assistant/BulkScanFieldDetails";
 import type { Selection } from "@/components/assistant/BulkScanOutline";
 import { Card, INPUT, Labelled } from "@/components/assistant/BulkScanParts";
@@ -76,6 +78,15 @@ export function BulkScanDetail({
         onField={(change) => onSpec(mapField(spec, s, f, change), false)}
         onClearTodo={(index) => onSpec(clearTodo(spec, s, f, index), false)}
         onClearReview={(index) => onSpec(clearReview(spec, s, f, index), false)}
+        ccdStatus={
+          <BulkScanCcdStatus
+            field={field}
+            name={name}
+            onChooseCandidate={(id) => onSpec(chooseCandidate(spec, s, f, id), false)}
+            onChooseNew={() => onSpec(chooseNew(spec, s, f), false)}
+            onEditNew={(patch) => onSpec(editNewField(spec, s, f, patch), false)}
+          />
+        }
       />
     </section>
   );

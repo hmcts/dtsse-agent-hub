@@ -1,4 +1,5 @@
-import type { Assignment, Emit, Field, FormSpec, Operand, Rule, Scalar, Section } from "@hmcts-cft/bulk-scan-spec";
+import type { Assignment, CcdMatch, Emit, Field, FormSpec, Operand, Rule, Scalar, Section } from "@hmcts-cft/bulk-scan-spec";
+import { proposedTypeOf } from "@hmcts-cft/bulk-scan-spec/ccd-match";
 import { emitsOf, valueSets } from "@hmcts-cft/bulk-scan-spec/emits";
 import { renderCasePath, renderLogic } from "@hmcts-cft/bulk-scan-spec/logic";
 import { readsKeys } from "@hmcts-cft/bulk-scan-spec/model";
@@ -27,6 +28,43 @@ export function patchHeader(spec: FormSpec, patch: HeaderPatch): FormSpec {
 
 /** The field values the editor changes in a row. */
 export type FieldPatch = Partial<Pick<Field, "id" | "label" | "keys" | "ccd" | "inputType" | "mandatory" | "regex" | "maxLength" | "minLength">>;
+
+/** The ids the form knows the case type has: all its fields when one is picked, else those of rows matched to an existing field. */
+function existingIds(spec: FormSpec): Set<string> {
+  return new Set(spec.form.ccdFieldIds ?? spec.sections.flatMap((s) => s.fields.flatMap((f) => (f.ccdMatch?.status === "existing" ? f.ccd : []))));
+}
+
+/**
+ * A field whose CCD ids were typed. An id is an existing field if the picked case type lists it. With no case type
+ * picked the form cannot tell, so it is one only if the row listed it as a candidate or another row already matches it. Any
+ * other is a field to add, with the id typed as its proposal.
+ */
+function withTypedCcd(field: Field, known: Set<string>, caseTypePicked: boolean): Field {
+  // A row with no status (a sheet's unmapped row, one the matcher skipped) is checked only when a case type can say.
+  const match: CcdMatch | undefined = field.ccdMatch ?? (caseTypePicked ? { status: "new" } : undefined);
+  if (!match) {
+    return field;
+  }
+  const [id] = field.ccd;
+  if (id === undefined) {
+    const { ccdMatch: _match, ...rest } = field;
+    return rest;
+  }
+  const [lacking, ...more] = field.ccd.filter((typed) => !known.has(typed) && !(match.candidates ?? []).some((c) => c.id === typed));
+  if (lacking === undefined) {
+    return { ...field, ccdMatch: { status: "existing", chosenBy: "person", ...(match.group ? { group: match.group } : {}) } };
+  }
+  return {
+    ...field,
+    ccdMatch: {
+      status: "new",
+      newField: { id: lacking, type: match.newField?.type ?? proposedTypeOf(field) },
+      ...(more.length > 0 ? { extraNewFields: more.map((id) => ({ id, type: proposedTypeOf(field) })) } : {}),
+      chosenBy: "person",
+      ...(match.group ? { group: match.group } : {})
+    }
+  };
+}
 
 /** The spec with one field replaced by what `change` makes of it. */
 export function mapField(spec: FormSpec, sectionIndex: number, fieldIndex: number, change: (field: Field) => Field): FormSpec {
@@ -160,6 +198,9 @@ export function patchField(spec: FormSpec, sectionIndex: number, fieldIndex: num
     }
     if (patch.mandatory !== undefined && patch.mandatory !== "conditional") {
       delete next.required;
+    }
+    if (patch.ccd !== undefined) {
+      next = withTypedCcd(next, existingIds(spec), spec.form.ccdFieldIds !== undefined);
     }
     return next;
   });

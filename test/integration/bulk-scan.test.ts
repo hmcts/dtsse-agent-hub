@@ -1,5 +1,6 @@
 // The Bulk Scan form builder end to end through Postgres: the upload that makes a spec, saves that make versions,
 // sign-off, the engine's answers, and that nobody but the owner reaches any of it.
+import { readFileSync } from "node:fs";
 import { formSpecSchema, generateTransformWorkbook, readWorkbookBytes } from "@hmcts-cft/bulk-scan-spec";
 import { NextRequest } from "next/server";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -339,3 +340,49 @@ function formOf(values: Record<string, string>): FormData {
   }
   return data;
 }
+
+describe("starting a spec from a case type picked in the workspace", () => {
+  async function pdfUpload(fields: unknown, extra: Record<string, string | File> = {}) {
+    const { makePdf, SAMPLE_FORM } = await import("../../packages/bulk-scan-spec/src/__fixtures__/make-pdf.ts");
+    const form = uploadForm("sample.pdf", new Uint8Array(readFileSync(await makePdf("sample", SAMPLE_FORM))));
+    form.set("caseType", "NFD");
+    form.set("product", "nfdiv");
+    form.set("config", "config-generator");
+    form.set("fields", JSON.stringify(fields));
+    for (const [name, value] of Object.entries(extra)) {
+      form.set(name, value);
+    }
+    return await uploadRoute.POST(as("alice", "/api/ui/assistant/bulk-scan", { method: "POST", body: form }));
+  }
+
+  it("should match the form and keep the product and configuration in the header when the pod found the fields", async () => {
+    const response = await pdfUpload([{ ID: "applicant1FirstName", Label: "First name", FieldType: "Text" }]);
+    expect(response.status).toBe(201);
+
+    const [id] = (await jsonOf<{ ids: string[] }>(response)).ids;
+    const spec = (await readSpec(prisma, own(ALICE), id as string))?.spec as {
+      form: object;
+      sections: { fields: { label: string; ccd: string[]; ccdMatch?: { status: string } }[] }[];
+    };
+    expect(spec.form).toMatchObject({ ccdCaseTypeId: "NFD", ccdProduct: "nfdiv", ccdConfig: "config-generator" });
+    const first = spec.sections.flatMap((s) => s.fields).find((f) => f.label === "First name(s)");
+    expect(first).toMatchObject({ ccd: ["applicant1FirstName"], ccdMatch: { status: "existing" } });
+  });
+
+  it("should count the bytes of the fields, not the characters, against the limit when labels are multi-byte", async () => {
+    const rows = Array.from({ length: 2300 }, (_, i) => ({ ID: `field${i}`, Label: "é".repeat(200), FieldType: "Text" }));
+    const json = JSON.stringify(rows);
+    expect(json.length).toBeLessThan(965_536);
+    expect(Buffer.byteLength(json, "utf8")).toBeGreaterThan(965_536);
+
+    expect((await pdfUpload(rows)).status).toBe(400);
+  });
+
+  it("should refuse the fields when they are not what the CCD job answers or no case type is named", async () => {
+    const bad = await pdfUpload([{ ID: "a" }]);
+    const unnamed = await pdfUpload([{ ID: "a", FieldType: "Text" }], { caseType: "" });
+
+    expect([bad.status, unnamed.status]).toEqual([400, 400]);
+    expect(await prisma.bulkScanSpec.count()).toBe(0);
+  });
+});

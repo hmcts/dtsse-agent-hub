@@ -351,6 +351,7 @@ function FieldLine({
           ) : null}
           {flags.todo > 0 ? <Flag icon="todo" count={flags.todo} label={`${flags.todo} ${flags.todo === 1 ? "TODO" : "TODOs"}`} /> : null}
           {flags.english ? <Flag icon="english" label="Unparsed English" /> : null}
+          {flags.unsure ? <Flag icon="unsure" label="CCD field still to choose" /> : null}
           {problems > 0 ? (
             <span role="img" aria-label={`${problems} ${problems === 1 ? "error" : "errors"}`} title={`${problems} errors`} className="text-asst-error">
               <Icon name="error" className="h-3.5 w-3.5" />

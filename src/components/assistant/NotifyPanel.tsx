@@ -10,7 +10,6 @@ import { ARTEFACT_MIN_WIDTH, CHAT_MIN_WIDTH } from "@/components/assistant/layou
 import {
   groupTemplates,
   type JsonObject,
-  jobFailure,
   type ListedTemplate,
   lineDiff,
   type NotifySummary,
@@ -24,7 +23,7 @@ import {
   showsNotifyPreview,
   TYPE_NAMES
 } from "@/components/assistant/notify-data";
-import { PodJobRefused, requestPodJob, waitForPodJob } from "@/components/assistant/podJobClient";
+import { type PodJobWords, runPodJob as runNotifyJob, WAKING_RETRY_MS } from "@/components/assistant/podJobRun";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
 import { AnnouncerRegion, useAnnouncer } from "@/components/live/Announcer";
 import { useHubSubscribe } from "@/components/live/HubStream";
@@ -35,70 +34,20 @@ const select = "h-[30px] min-w-0 max-w-full shrink rounded-lg border border-asst
 
 /** How long the draft is left alone before what was typed is saved. */
 export const SAVE_AFTER_MS = 800;
-/** How often a pod that is still waking is asked again, and for how long, past the hub's 30 seconds of grace. */
-export const WAKING_RETRY_MS = 3000;
-const WAKING_ATTEMPTS = 20;
+export { WAKING_RETRY_MS };
 
 /** The products a pod can read Notify keys for: the package's own table, as the pod's is. */
 const PRODUCTS = mergeProducts([]).filter((product) => BUILT_IN_PRODUCTS.some((built) => built.id === product.id));
 const productLabel = (id: string): string => PRODUCTS.find((product) => product.id === id)?.label ?? id;
 
-type JobResult<T> = { ok: true; result: T } | { ok: false; message: string };
+const NOTIFY_WORDS: PodJobWords = {
+  unsupported: "Your assistant cannot read Notify yet. Restart it from the settings to update it, then try again.",
+  noPod: "This chat runs on your own computer, so the CFT Workspace cannot read Notify for it.",
+  assistantGone: "This chat's assistant has been replaced, so it cannot read Notify for it."
+};
 
-/**
- * One pod job from asking to answer. A pod still waking is asked again every `WAKING_RETRY_MS`, which is how the
- * first ask after its first status report goes through; a refusal, a pod that cannot run the kind, and a job that
- * ends in anything but `done` come back as words to show.
- */
-async function runPodJob<T>(
-  conversationId: string,
-  kind: string,
-  args: unknown,
-  events: ReturnType<typeof useHubSubscribe>,
-  signal: AbortSignal
-): Promise<JobResult<T>> {
-  try {
-    for (let attempt = 0; ; attempt += 1) {
-      const asked = await requestPodJob(conversationId, kind, args, { signal });
-      if (asked.status === "waking") {
-        if (attempt + 1 >= WAKING_ATTEMPTS) {
-          return { ok: false, message: "Your assistant is still starting. Try again in a moment." };
-        }
-        await new Promise<void>((resolve, reject) => {
-          const timer = setTimeout(resolve, WAKING_RETRY_MS);
-          signal.addEventListener(
-            "abort",
-            () => {
-              clearTimeout(timer);
-              reject(signal.reason);
-            },
-            { once: true }
-          );
-        });
-        continue;
-      }
-      if (asked.status === "unsupported") {
-        return { ok: false, message: "Your assistant cannot read Notify yet. Restart it from the settings to update it, then try again." };
-      }
-      if (asked.status === "no_pod") {
-        return { ok: false, message: "This chat runs on your own computer, so the CFT Workspace cannot read Notify for it." };
-      }
-      if (asked.status === "assistant_gone") {
-        return { ok: false, message: "This chat's assistant has been replaced, so it cannot read Notify for it." };
-      }
-      const outcome = await waitForPodJob(conversationId, asked.job_id, { signal, events });
-      if (outcome.status === "done") {
-        return { ok: true, result: outcome.result as T };
-      }
-      return { ok: false, message: jobFailure(outcome) };
-    }
-  } catch (error) {
-    if (signal.aborted) {
-      throw error;
-    }
-    return { ok: false, message: error instanceof PodJobRefused ? error.message : "Your assistant could not be reached. Try again." };
-  }
-}
+const runPodJob = <T,>(conversationId: string, kind: string, args: unknown, events: ReturnType<typeof useHubSubscribe>, signal: AbortSignal) =>
+  runNotifyJob<T>(conversationId, kind, args, events, signal, NOTIFY_WORDS);
 
 /** The latest version, read when the panel opens, again whenever the page says the version or revision moved on, and on `refresh`. */
 function useNotifyView(notify: NotifySummary | null, conversationId: string): { view: NotifyView | null; failed: boolean; refresh: () => void } {

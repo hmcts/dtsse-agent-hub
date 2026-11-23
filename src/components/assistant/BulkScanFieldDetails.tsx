@@ -1,6 +1,7 @@
 "use client";
 
 import type { Field } from "@hmcts-cft/bulk-scan-spec";
+import type { ReactNode } from "react";
 import { casePathWords, clearLogicText, conditionsOf, type FieldPatch, logicWords, withoutKey, withRequired, wordsOf, writeAsRules } from "@/bulk-scan/edit";
 import { MANDATORY_CHOICES } from "@/bulk-scan/outline";
 import { BulkScanConditions, type KeyChoice } from "@/components/assistant/BulkScanConditions";
@@ -30,7 +31,8 @@ export function BulkScanFieldDetails({
   onPatch,
   onField,
   onClearTodo,
-  onClearReview
+  onClearReview,
+  ccdStatus
 }: Readonly<{
   field: Field;
   choices: FormChoices;
@@ -39,6 +41,8 @@ export function BulkScanFieldDetails({
   onField: (change: (field: Field) => Field) => void;
   onClearTodo: (index: number) => void;
   onClearReview: (index: number) => void;
+  /** Where the field stands against the form's case type, drawn under the CCD ids. */
+  ccdStatus?: ReactNode;
 }>) {
   const review = field.review ?? [];
   return (
@@ -114,6 +118,7 @@ export function BulkScanFieldDetails({
         <Labelled label="CCD ids, separated by spaces">
           <CcdIds value={field.ccd} onChange={(ccd) => onPatch({ ccd })} />
         </Labelled>
+        {ccdStatus}
       </Card>
 
       <Card title="Rules">

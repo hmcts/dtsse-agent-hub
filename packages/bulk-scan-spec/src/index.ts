@@ -1,3 +1,4 @@
+export * from "./ccd-match.ts";
 export * from "./cells.ts";
 export * from "./code-keys.ts";
 export * from "./codegen/case-data.ts";

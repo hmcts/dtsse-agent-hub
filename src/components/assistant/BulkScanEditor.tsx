@@ -8,6 +8,7 @@ import type { BulkScanEditorView } from "@/bulk-scan/editor-view";
 import { identitiesOf, reconcileIdentities, reviewTotal } from "@/bulk-scan/outline";
 import { BulkScanDetail } from "@/components/assistant/BulkScanDetail";
 import { BulkScanDownloads } from "@/components/assistant/BulkScanDownloads";
+import { BulkScanHeaderCaseType } from "@/components/assistant/BulkScanHeaderCaseType";
 import { BulkScanOutline, type Selection } from "@/components/assistant/BulkScanOutline";
 import { FOCUS, INPUT, Labelled } from "@/components/assistant/BulkScanParts";
 import { BulkScanSimulator } from "@/components/assistant/BulkScanSimulator";
@@ -31,7 +32,11 @@ function firstSelection(spec: FormSpec): Selection | null {
  * version, and tabs for the simulator, the downloads and the sign-off, which all work on the version saved. The page
  * keys this on the spec and version, so a save or a change of version starts it afresh from what was stored.
  */
-export function BulkScanEditor({ view, signOff }: Readonly<{ view: BulkScanEditorView; signOff: SignOffAction }>) {
+export function BulkScanEditor({
+  view,
+  signOff,
+  podConversationId = null
+}: Readonly<{ view: BulkScanEditorView; signOff: SignOffAction; podConversationId?: string | null }>) {
   const router = useRouter();
   const [spec, setSpec] = useState<FormSpec>(view.spec);
   const [dirty, setDirty] = useState(false);
@@ -50,9 +55,16 @@ export function BulkScanEditor({ view, signOff }: Readonly<{ view: BulkScanEdito
   const toReview = reviewTotal(spec, problems.fields);
   const current = view.versions.find((v) => v.version === view.version);
 
-  function change(next: FormSpec, moved = false): void {
-    setIds(reconcileIdentities(spec, next, ids, fresh));
-    setSpec(next);
+  /** The spec as the last change left it, which a change that arrives later (a case type's fields) is made against, not the one rendered when it began. */
+  const latestSpec = useRef(spec);
+
+  /** `next` as a function is applied to the latest spec, for a change that arrives after others have been made. */
+  function change(next: FormSpec | ((current: FormSpec) => FormSpec), moved = false): void {
+    const before = latestSpec.current;
+    const made = typeof next === "function" ? next(before) : next;
+    latestSpec.current = made;
+    setIds((prev) => reconcileIdentities(before, made, prev, fresh));
+    setSpec(made);
     setDirty(true);
     if (moved) {
       setProblems({ fields: new Map(), form: problems.form });
@@ -126,9 +138,7 @@ export function BulkScanEditor({ view, signOff }: Readonly<{ view: BulkScanEdito
           <Labelled label="PO box">
             <input value={spec.form.poBox ?? ""} className={INPUT} onChange={(e) => change(patchHeader(spec, { poBox: e.target.value }))} />
           </Labelled>
-          <Labelled label="Case type (CCD case type id)">
-            <input value={spec.form.ccdCaseTypeId ?? ""} className={INPUT} onChange={(e) => change(patchHeader(spec, { ccdCaseTypeId: e.target.value }))} />
-          </Labelled>
+          <BulkScanHeaderCaseType spec={spec} conversationId={podConversationId} onSpec={change} />
         </div>
       </section>
 

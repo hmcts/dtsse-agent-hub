@@ -60,6 +60,7 @@ import {
 } from "../assistant/views.ts";
 import { hasWelshPlugin } from "../assistant/welsh.ts";
 import { type BulkScanEditorView, bulkScanEditorView } from "../bulk-scan/editor-view.ts";
+import { podConversationId } from "../bulk-scan/pod-conversation.ts";
 import { listSpecs, readSpec, type SpecSummary } from "../bulk-scan/spec-store.ts";
 import { findChannel, listChannels } from "../channels/store.ts";
 import { credentialBackend } from "../credentials/backend.ts";
@@ -692,6 +693,11 @@ export async function sharedChats(viewer: Identity): Promise<SharedChats> {
 /** The viewer's own Bulk Scan form specs, newest first. */
 export async function bulkScanSpecs(viewer: Identity): Promise<SpecSummary[]> {
   return await listSpecs(prisma, { actorOid: viewer.oid, ownerOid: viewer.oid });
+}
+
+/** The chat the viewer's Bulk Scan pod jobs run in, or `null` when they have none on their assistant. */
+export async function bulkScanPodConversation(viewer: Identity): Promise<string | null> {
+  return await podConversationId(prisma, viewer.oid);
 }
 
 /** One of the viewer's specs at a version, or its latest, with everything the editor draws from it; `undefined` when it is not theirs. */

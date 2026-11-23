@@ -1,4 +1,5 @@
 import { DOCMOSIS_LOAD_KIND, LOAD_BUDGET_MS } from "./docmosis-load-kind.ts";
+import type { Run } from "./lookups.ts";
 import { loadNotify } from "./notify-tools.ts";
 import { PodJobError, type PodJobHandler } from "./pod-jobs.ts";
 import { VIDEO_ATTACH_BUDGET_MS, VIDEO_ATTACH_KIND } from "./video-attach-kind.ts";
@@ -11,10 +12,8 @@ const docmosisLoad: PodJobHandler = {
   kind: DOCMOSIS_LOAD_KIND,
   budgetMs: LOAD_BUDGET_MS,
   run: async (args, context) => {
-    const [{ docmosisLoadHandler }, { run }] = await Promise.all([import("./docmosis-load.ts"), import("../virtual/process.ts")]);
-    const handler = docmosisLoadHandler({
-      run: (cmd, argv, opts) => run(cmd, argv, { env: opts.env as NodeJS.ProcessEnv, timeoutMs: opts.timeoutMs, signal: opts.signal })
-    });
+    const [{ docmosisLoadHandler }, run] = await Promise.all([import("./docmosis-load.ts"), runner()]);
+    const handler = docmosisLoadHandler({ run });
     return await handler.run(args, context);
   }
 };
@@ -24,17 +23,35 @@ const videoAttach: PodJobHandler = {
   kind: VIDEO_ATTACH_KIND,
   budgetMs: VIDEO_ATTACH_BUDGET_MS,
   run: async (args, context) => {
-    const [{ videoAttachHandler }, { run }, { atlassianLogin }] = await Promise.all([
-      import("./video-attach.ts"),
-      import("../virtual/process.ts"),
-      import("../virtual/atlassian.ts")
-    ]);
-    const handler = videoAttachHandler({
-      run: (cmd, argv, opts) => run(cmd, argv, { env: opts.env as NodeJS.ProcessEnv, timeoutMs: opts.timeoutMs, signal: opts.signal }),
-      login: ({ env }) => atlassianLogin({ env })
-    });
+    const [{ videoAttachHandler }, run, { atlassianLogin }] = await Promise.all([import("./video-attach.ts"), runner(), import("../virtual/atlassian.ts")]);
+    const handler = videoAttachHandler({ run, login: ({ env }) => atlassianLogin({ env }) });
     return await handler.run(args, context);
   }
+};
+
+/** The command runner the handlers that run programs share, its module loaded only when a job arrives. */
+async function runner(): Promise<Run> {
+  const { run } = await import("../virtual/process.ts");
+  return (cmd, argv, opts) => run(cmd, argv, { env: opts.env as NodeJS.ProcessEnv, timeoutMs: opts.timeoutMs, signal: opts.signal, killGroup: opts.killGroup });
+}
+
+/** The case types the owner's workspace declares. */
+export const ccdCaseTypes: PodJobHandler = {
+  kind: "ccd.case-types",
+  // Under the hub's 60 seconds.
+  budgetMs: 50_000,
+  concurrency: 2,
+  run: async (args, context) => (await import("./ccd-case-types.ts")).listCaseTypes(args, context, { run: await runner() })
+};
+
+/** One case type's fields; a config-generator service's definition may be generated first. */
+export const ccdCaseTypeFields: PodJobHandler = {
+  kind: "ccd.case-type-fields",
+  // Under the hub's 180 seconds, past the 160 the script is given.
+  budgetMs: 170_000,
+  // One at a time: two generations of one repository's definition would run Gradle twice in the same clone.
+  concurrency: 1,
+  run: async (args, context) => (await import("./ccd-case-types.ts")).caseTypeFields(args, context, { run: await runner() })
 };
 
 const SAFE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/;
@@ -100,4 +117,4 @@ export const notifyPull: PodJobHandler = {
  * Imported by `features.ts` and so by everything that reports a claim: a handler's module should import its heavy
  * dependencies inside `run`, not at the top.
  */
-export const POD_JOB_HANDLERS: readonly PodJobHandler[] = [docmosisLoad, notifyList, notifyPull, videoAttach];
+export const POD_JOB_HANDLERS: readonly PodJobHandler[] = [docmosisLoad, notifyList, notifyPull, videoAttach, ccdCaseTypes, ccdCaseTypeFields];

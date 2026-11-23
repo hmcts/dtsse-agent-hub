@@ -16,6 +16,7 @@ import {
   envelopeKeys,
   importUpload,
   isTarget,
+  parseCcdFields,
   scenarioEntries,
   simulate,
   sipDownload,
@@ -124,15 +125,57 @@ describe("uploads", () => {
     expect((await refusal(importUpload("x.xlsx", bytes))).message).toContain("could not be read");
   });
 
-  it("should take the forms a PDF's draft holds", async () => {
+  it("should take the forms a PDF's draft holds, marked as from a PDF, when it is imported", async () => {
     pdf.result = { bundle: { forms: [SPEC] }, checklist: [] };
-    expect((await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"))).forms).toEqual([SPEC]);
+    expect((await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"))).forms).toEqual([{ ...SPEC, form: { ...SPEC.form, source: "pdf" } }]);
   });
 
   it("should name the case type in a PDF's form header when one is typed", async () => {
     pdf.result = { bundle: { forms: [SPEC] }, checklist: [] };
     await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"), "CIC");
     expect(pdf.input).toMatchObject({ caseType: "CIC" });
+    expect(pdf.input).not.toHaveProperty("ccdFields");
+  });
+
+  it("should record the product and configuration and match the fields when the person's pod fetched them", async () => {
+    pdf.result = { bundle: { forms: [SPEC] }, checklist: [] };
+    const fields = parseCcdFields([{ ID: "cicCaseFullName", Label: "Full name", FieldType: "Text" }]);
+
+    const { forms } = await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"), "CriminalInjuriesCompensation", {
+      caseType: "CriminalInjuriesCompensation",
+      product: "sptribs",
+      config: "config-generator",
+      fields
+    });
+
+    expect(pdf.input).toMatchObject({ ccdFields: [{ id: "cicCaseFullName", label: "Full name", type: "Text" }], caseType: "CriminalInjuriesCompensation" });
+    expect(forms[0]?.form).toMatchObject({ ccdProduct: "sptribs", ccdConfig: "config-generator" });
+  });
+
+  it("should refuse the fields when they are not what the CCD job answers", () => {
+    expect(() => parseCcdFields([{ ID: "a" }])).toThrow("not in the shape");
+    expect(() => parseCcdFields("x")).toThrow("not in the shape");
+  });
+
+  it("should keep the ids the sheet has and record the product and configuration when a case type is picked for a spreadsheet", async () => {
+    const fields = parseCcdFields([{ ID: "applicantFirstName", Label: "First name", FieldType: "Text" }]);
+    const picked = { caseType: "NFD", product: "nfdiv", config: "config-generator" as const, fields };
+
+    const imported = await importUpload("t.xlsx", await bytesOf(generateTransformWorkbook(SPEC)), "NFD", picked);
+
+    const [form] = imported.forms;
+    expect(form?.form).toMatchObject({ ccdCaseTypeId: "NFD", ccdProduct: "nfdiv", ccdConfig: "config-generator" });
+    expect(form?.sections[0]?.fields[0]).toMatchObject({ ccd: ["applicantFirstName"], ccdMatch: { status: "existing" } });
+    expect(form?.sections[0]?.fields[1]?.ccdMatch).toBeUndefined();
+    expect(form?.form.ccdFieldIds).toEqual(["applicantFirstName"]);
+  });
+
+  it("should record where each form came from when it is imported", async () => {
+    pdf.result = { bundle: { forms: [SPEC] }, checklist: [] };
+
+    expect((await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"))).forms[0]?.form.source).toBe("pdf");
+    expect((await importUpload("t.xlsx", await bytesOf(generateTransformWorkbook(SPEC)))).forms[0]?.form.source).toBe("sheet");
+    expect((await importUpload("sip.xlsx", await bytesOf(generateSipWorkbook({ forms: [SPEC] })))).forms[0]?.form.source).toBe("sip");
   });
 
   it("should set the case type on a spreadsheet's forms when one is typed", async () => {
@@ -151,6 +194,20 @@ describe("uploads", () => {
   it("should refuse a PDF that cannot be read", async () => {
     pdf.result = undefined;
     expect((await refusal(importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7")))).status).toBe(400);
+  });
+});
+
+describe("checkSpec on a new case field", () => {
+  it("should refuse a new case field on its row when it has no id", () => {
+    const bad = formSpecSchema.parse({
+      form: { name: "F", formType: "F" },
+      sections: [{ id: "1", title: "S", fields: [{ label: "A", keys: ["a"], ccd: [""], ccdMatch: { status: "new", newField: { id: "", type: "Text" } } }] }]
+    });
+
+    const checked = checkSpec(bad);
+
+    expect(checked.ok).toBe(false);
+    expect(!checked.ok && checked.issues[0]).toMatchObject({ path: "sections.0.fields.0.ccd" });
   });
 });
 

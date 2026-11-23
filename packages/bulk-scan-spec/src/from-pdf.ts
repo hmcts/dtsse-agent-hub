@@ -1,5 +1,6 @@
 import { basename, extname } from "node:path";
-import { proposeCcd } from "./ccd-propose.ts";
+import type { CcdField } from "./ccd-match.ts";
+import { matchCcd } from "./ccd-match.ts";
 import { yesNoEmits } from "./emits.ts";
 import { formatFromNote } from "./hints.ts";
 import { proposeKeys } from "./key-proposal.ts";
@@ -7,7 +8,7 @@ import { decideMandatory } from "./mandatory.ts";
 import { draftFields, isYesNoPair } from "./pdf-draft.ts";
 import type { PdfContent } from "./pdf-extract.ts";
 import { extractPdf } from "./pdf-extract.ts";
-import type { Bundle, Field, Section } from "./schema.ts";
+import type { Bundle, Field, FormSpec, Section } from "./schema.ts";
 import { bundleSchema } from "./schema.ts";
 
 export interface FromPdfInput {
@@ -17,8 +18,8 @@ export interface FromPdfInput {
   bytes?: Uint8Array;
   /** Keys the service already uses, to reuse and imitate. */
   houseKeys?: string[];
-  /** CCD case field ids of the service's definition. */
-  ccdIds?: string[];
+  /** The case fields of the service's CCD case type. */
+  ccdFields?: CcdField[];
   /** The CCD case type the form belongs to, written to the form's header. */
   caseType?: string;
 }
@@ -59,6 +60,26 @@ ${pageText(content)}
 `;
 }
 
+/** A review line for each guess of a CCD id; an unsure row is not one, since the editor asks for it to be resolved. */
+function withCcdReview(spec: FormSpec, checklist: { confidence: keyof typeof RANK; line: string }[]): FormSpec {
+  return {
+    ...spec,
+    sections: spec.sections.map((section) => ({
+      ...section,
+      fields: section.fields.map((field) => {
+        const match = field.ccdMatch;
+        if (!match || match.status === "unsure") {
+          return field;
+        }
+        const confidence = match.status === "new" ? "low" : "medium";
+        const reason = `${field.ccd.join(", ")}: ${match.status === "new" ? "a new case field to add; " : ""}${match.reason ?? "already in the case type"}`;
+        checklist.push({ confidence, line: `[${confidence}] ${[field.id, field.label.split("\n")[0]].filter(Boolean).join(" ")}: ccd, ${reason}` });
+        return { ...field, review: [...(field.review ?? []), { about: "ccd" as const, reason, confidence }] };
+      })
+    }))
+  };
+}
+
 /** Reads a PDF and drafts its field spec, proposing keys, groups and CCD ids and flagging each as a guess. */
 export async function fromPdf(input: FromPdfInput): Promise<FromPdfResult> {
   const content = await extractPdf(input.bytes ?? input.pdf);
@@ -85,10 +106,6 @@ export async function fromPdf(input: FromPdfInput): Promise<FromPdfResult> {
     const mine = slotKeys.flatMap((k) => k.parts ?? [k]);
     return { d, mine };
   });
-  const ccd = proposeCcd(
-    withKeys.map(({ d, mine }) => `${mine.map((k) => k.key).join(" ")} ${d.field.label} ${d.question}`),
-    input.ccdIds ?? []
-  );
   const decisions = decideMandatory(
     drafts,
     withKeys.map(({ mine }) => mine.map((k) => k.key))
@@ -112,14 +129,6 @@ export async function fromPdf(input: FromPdfInput): Promise<FromPdfResult> {
     if (format) {
       review.push({ about: "regex", reason: `${format.regex}: the form says "${format.source}"`, confidence: "medium" });
     }
-    const proposed = ccd[i];
-    if (input.ccdIds) {
-      review.push(
-        proposed
-          ? { about: "ccd", reason: `${proposed.id}: ${proposed.reason}`, confidence: proposed.confidence }
-          : { about: "ccd", reason: "no CCD field close enough", confidence: "low" }
-      );
-    }
     const field: Field = {
       ...d.field,
       mandatory: decision.mandatory,
@@ -127,7 +136,7 @@ export async function fromPdf(input: FromPdfInput): Promise<FromPdfResult> {
       ...(format ? { regex: format.regex } : {}),
       ...(decision.required ? { required: decision.required } : {}),
       keys: mine.map((k) => k.key),
-      ccd: proposed ? [proposed.id] : [],
+      ccd: [],
       ...(d.groupSize && d.groupSize > 1
         ? { group: { kind: "xor" as const, size: d.groupSize, options: mine.map((k, n) => ({ key: k.key, label: d.slotLabels[n] ?? "" })) } }
         : {}),
@@ -142,7 +151,10 @@ export async function fromPdf(input: FromPdfInput): Promise<FromPdfResult> {
     pages.set(d.page, [...(pages.get(d.page) ?? []), ...field.keys]);
   });
   const pageOrder = [...pages].map(([page, pageKeys]) => ({ page, keys: pageKeys })).sort((a, b) => a.page - b.page);
-  const bundle = bundleSchema.parse({ forms: [{ form, sections: [...sections.values()], pageOrder }] });
+  const drafted = bundleSchema.parse({ forms: [{ form, sections: [...sections.values()], pageOrder }] });
+  const bundle = input.ccdFields
+    ? { ...drafted, forms: drafted.forms.map((f) => withCcdReview(matchCcd(f, input.ccdFields as CcdField[]), checklist)) }
+    : drafted;
   checklist.sort((a, b) => RANK[a.confidence] - RANK[b.confidence]);
   return { bundle, checklist: checklist.map((c) => c.line) };
 }

@@ -4,7 +4,7 @@ import { deleteBulkScanSpec } from "@/app/_actions/bulk-scan";
 import { BulkScanList } from "@/components/assistant/BulkScanList";
 import { BulkScanUpload } from "@/components/assistant/BulkScanUpload";
 import { requireViewer } from "@/viewer/current";
-import { bulkScanSpecs } from "@/web/data";
+import { bulkScanPodConversation, bulkScanSpecs } from "@/web/data";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +17,7 @@ export const metadata: Metadata = { title: "Bulk Scan forms" };
  */
 export default async function BulkScanFormsPage() {
   const viewer = await requireViewer();
-  const specs = await bulkScanSpecs(viewer);
+  const [specs, podConversationId] = await Promise.all([bulkScanSpecs(viewer), bulkScanPodConversation(viewer)]);
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto flex max-w-[960px] flex-col gap-6 px-5 pb-10 pt-7">
@@ -28,7 +28,7 @@ export default async function BulkScanFormsPage() {
             validation and transformation code.
           </p>
         </div>
-        <BulkScanUpload />
+        <BulkScanUpload podConversationId={podConversationId} />
         <BulkScanList specs={specs} remove={deleteBulkScanSpec} />
         <p className="text-[13px]">
           <Link href="/assistant" className="text-asst-accent underline hover:text-asst-accent-hover">

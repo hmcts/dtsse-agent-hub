@@ -3,17 +3,22 @@
 import { useRouter } from "next/navigation";
 import { type FormEvent, useId, useState } from "react";
 import { describeBytes } from "@/assistant/uploads";
-import { MAX_BULK_SCAN_FILE_BYTES, MAX_CASE_TYPE_ID } from "@/bulk-scan/limits";
+import { MAX_BULK_SCAN_FILE_BYTES } from "@/bulk-scan/limits";
+import { BulkScanCaseTypePicker, type ListedCaseTypes, type PickedCaseType } from "@/components/assistant/BulkScanCaseTypePicker";
+import { BulkScanTypedCaseType } from "@/components/assistant/BulkScanTypedCaseType";
 import { FIELD } from "@/components/assistant/WelshParts";
 
 /** Starts a spec from a form PDF, an Exela SIP or an HMCTS transformation sheet, and opens it. */
-export function BulkScanUpload() {
+export function BulkScanUpload({ podConversationId = null }: Readonly<{ podConversationId?: string | null }>) {
   const router = useRouter();
   const inputId = useId();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<File | null>(null);
-  const [caseType, setCaseType] = useState("");
+  const [picked, setPicked] = useState<PickedCaseType | null>(null);
+  const [loadingFields, setLoadingFields] = useState(false);
+  const [typedCaseType, setTypedCaseType] = useState("");
+  const [list, setList] = useState<ListedCaseTypes>({ state: podConversationId === null ? "none" : "idle", types: [] });
 
   async function upload(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -27,7 +32,15 @@ export function BulkScanUpload() {
     }
     const body = new FormData();
     body.set("form", form);
-    body.set("caseType", caseType);
+    if (picked === null && typedCaseType.trim() !== "") {
+      body.set("caseType", typedCaseType.trim());
+    }
+    if (picked !== null) {
+      body.set("caseType", picked.caseType);
+      body.set("product", picked.product);
+      body.set("config", picked.config ?? "");
+      body.set("fields", JSON.stringify(picked.rows));
+    }
     setBusy(true);
     setError(null);
     try {
@@ -68,23 +81,25 @@ export function BulkScanUpload() {
           onChange={(event) => setForm(event.target.files?.[0] ?? null)}
           className={`${FIELD} max-w-md`}
         />
-        <label htmlFor={`${inputId}-case-type`} className="text-[13px] text-asst-muted">
-          CCD case type id (optional)
-        </label>
-        <input
-          id={`${inputId}-case-type`}
-          name="caseType"
-          type="text"
-          maxLength={MAX_CASE_TYPE_ID}
-          placeholder="CriminalInjuriesCompensation"
-          value={caseType}
-          onChange={(event) => setCaseType(event.target.value)}
+        <BulkScanCaseTypePicker
+          conversationId={podConversationId}
+          selected={picked === null ? null : { product: picked.product, caseType: picked.caseType }}
+          onPicked={setPicked}
+          onCleared={() => setPicked(null)}
+          onFetching={setLoadingFields}
+          onList={setList}
           disabled={busy}
-          className={`${FIELD} max-w-md`}
         />
-        <button type="submit" disabled={busy} className="w-fit rounded-lg border border-asst-line px-3 py-1.5 text-[13px] font-medium">
+        <BulkScanTypedCaseType
+          value={typedCaseType}
+          reason={list.state === "none" || list.state === "failed" ? "The list of your workspace's case types is not available." : null}
+          disabled={busy || picked !== null}
+          onChange={setTypedCaseType}
+        />
+        <button type="submit" disabled={busy || loadingFields} className="w-fit rounded-lg border border-asst-line px-3 py-1.5 text-[13px] font-medium">
           Start the form
         </button>
+        {loadingFields ? <p className="text-[13px] text-asst-muted">Waiting for the case type's fields, so the form can be matched against them.</p> : null}
       </form>
       {busy ? <p className="text-[13px] text-asst-muted">Reading it…</p> : null}
       {error === null ? null : (

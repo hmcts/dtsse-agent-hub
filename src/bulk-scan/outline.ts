@@ -6,19 +6,22 @@ export interface FieldFlags {
   todo: number;
   /** The sheet's logic is still text, or a branch holds English the importer could not read. */
   english: boolean;
+  /** The row's CCD field is still to be chosen. */
+  unsure: boolean;
 }
 
 export function fieldFlags(field: Field): FieldFlags {
   return {
     review: (field.review ?? []).length,
     todo: field.todo.length,
-    english: Boolean(field.logicText) || field.rules.some((rule) => Boolean(rule.action))
+    english: Boolean(field.logicText) || field.rules.some((rule) => Boolean(rule.action)),
+    unsure: field.ccdMatch?.status === "unsure"
   };
 }
 
-/** A field needs review while it has a review marker or a TODO that nobody has marked done. */
+/** A field needs review while it has a review marker or a TODO that nobody has marked done, or its CCD field is still to be chosen. */
 export function needsReview(field: Field): boolean {
-  return field.todo.length > 0 || (field.review ?? []).length > 0;
+  return field.todo.length > 0 || (field.review ?? []).length > 0 || field.ccdMatch?.status === "unsure";
 }
 
 /** How many fields want a person: those with an open marker or TODO, and those the last save refused. */
@@ -58,7 +61,7 @@ const RANK = { low: 0, medium: 1, high: 2 } as const;
 
 /** How soon a field wants a person: 0 for a TODO or a low-confidence marker, up to 2 for a high one, 3 when nothing is open. */
 export function reviewRank(field: Field): number {
-  const ranks = [...(field.todo.length > 0 ? [0] : []), ...(field.review ?? []).map((r) => RANK[r.confidence])];
+  const ranks = [...(field.todo.length > 0 || field.ccdMatch?.status === "unsure" ? [0] : []), ...(field.review ?? []).map((r) => RANK[r.confidence])];
   return ranks.length > 0 ? Math.min(...ranks) : 3;
 }
 

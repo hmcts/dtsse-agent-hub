@@ -29,7 +29,7 @@ const field = (over: Partial<Field>): Field => ({
 describe("fieldFlags", () => {
   it("should count open markers and TODOs when a field has them", () => {
     const flags = fieldFlags(field({ todo: ["TODO: a"], review: [{ about: "key", reason: "guessed", confidence: "low" }] }));
-    expect(flags).toEqual({ review: 1, todo: 1, english: false });
+    expect(flags).toEqual({ review: 1, todo: 1, english: false, unsure: false });
   });
 
   it("should report English when the sheet's logic is text or a branch holds an action", () => {
@@ -48,6 +48,18 @@ describe("needsReview and reviewTotal", () => {
     } as unknown as FormSpec;
     expect(reviewTotal(spec)).toBe(2);
     expect(needsReview(field({}))).toBe(false);
+  });
+
+  it("should count a field whose CCD field is still to choose when its status is unsure", () => {
+    const unsure = field({ ccdMatch: { status: "unsure", candidates: [], newField: { id: "x", type: "Text" } } });
+    const spec = {
+      sections: [{ id: "1", title: "A", fields: [unsure, field({ ccdMatch: { status: "new", newField: { id: "y", type: "Text" } } })] }]
+    } as unknown as FormSpec;
+
+    expect(fieldFlags(unsure).unsure).toBe(true);
+    expect(needsReview(unsure)).toBe(true);
+    expect(reviewTotal(spec)).toBe(1);
+    expect(reviewRank(unsure)).toBe(0);
   });
 });
 

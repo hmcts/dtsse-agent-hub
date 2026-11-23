@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+/** How a service configures CCD, as the workspace's case type list says. */
+export const CCD_CONFIGS = ["config-generator", "json", "hybrid"] as const;
+export type CcdConfig = (typeof CCD_CONFIGS)[number];
+
 export const OUTCOMES = ["success", "warning", "exception"] as const;
 export const outcomeSchema = z.enum(OUTCOMES);
 export type Outcome = z.infer<typeof outcomeSchema>;
@@ -92,6 +96,28 @@ export const reviewSchema = z.object({
 });
 export type Review = z.infer<typeof reviewSchema>;
 
+export const CCD_STATUSES = ["existing", "new", "unsure"] as const;
+
+/**
+ * How a field's CCD id stands against the form's case type: `existing` is a field the case type already has, `new` one
+ * to add (its proposed id and CCD FieldType are `newField`, and the id is also the field's `ccd`), and `unsure` a
+ * field with no id yet and `candidates` the person picks from, or `newField` to add instead.
+ */
+export const ccdMatchSchema = z.object({
+  status: z.enum(CCD_STATUSES),
+  candidates: z.array(z.object({ id: z.string(), type: z.string(), label: z.string().optional() })).optional(),
+  newField: z.object({ id: z.string(), type: z.string() }).optional(),
+  /** The other ids of a row with several that the case type lacks, beside `newField`, which is the first. */
+  extraNewFields: z.array(z.object({ id: z.string(), type: z.string() })).optional(),
+  /** Set when the id is not the matcher's: a person chose or typed it, or it came with the form. A later match against another case type keeps it. */
+  chosenBy: z.enum(["person", "form"]).optional(),
+  /** Shared by the rows the matcher decided together, such as the lines of an address. */
+  group: z.string().optional(),
+  /** Why the matcher decided as it did, for the person to check. */
+  reason: z.string().optional()
+});
+export type CcdMatch = z.infer<typeof ccdMatchSchema>;
+
 export const fieldSchema = z
   .object({
     /** The sheet's ID column: "1.1", or a label such as "QR code" on non-question rows. Blank on continuation rows. */
@@ -111,6 +137,8 @@ export const fieldSchema = z
     keys: z.array(z.string()).default([]),
     /** CCD case field ids the keys feed. */
     ccd: z.array(z.string()).default([]),
+    /** Whether the ids in `ccd` exist in the form's case type; absent when no case type was matched against. */
+    ccdMatch: ccdMatchSchema.optional(),
     /** Anything in the CCD column that is not a field id, e.g. "No corresponding field on CCD". */
     ccdNote: z.string().optional(),
     validationRule: z.string().optional(),
@@ -173,6 +201,13 @@ export const formHeaderSchema = z.object({
   /** CCD case type and create event the transformation targets. */
   ccdCaseTypeId: z.string().optional(),
   ccdEventId: z.string().optional(),
+  /** The workspace product that defines the case type, and how it configures CCD; the picker sets both. */
+  ccdProduct: z.string().optional(),
+  ccdConfig: z.enum(CCD_CONFIGS).optional(),
+  /** The ids of the picked case type's fields, to check a typed id against. */
+  ccdFieldIds: z.array(z.string()).optional(),
+  /** What the form was started from, which decides whether a case type's match may propose fields for rows with no id: a sheet's unmapped rows are deliberate. */
+  source: z.enum(["pdf", "sip", "sheet"]).optional(),
   /** OCR keys holding party surnames, which the orchestrator matches against existing cases. */
   surnameKeys: z.array(z.string()).optional()
 });

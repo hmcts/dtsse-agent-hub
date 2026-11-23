@@ -35,18 +35,17 @@ describe("bulk scan upload", () => {
   const choose = (label: RegExp, file: File) => fireEvent.change(screen.getByLabelText(label), { target: { files: [file] } });
   const start = () => fireEvent.click(screen.getByRole("button", { name: "Start the form" }));
 
-  it("should send the form with the case type typed and open the first spec when it is read", async () => {
+  it("should send the form and open the first spec when it is read", async () => {
     fetchMock.mockResolvedValue(reply(201, { ids: ["abc", "def"] }));
     render(<BulkScanUpload />);
 
     choose(/^Form:/, new File(["x"], "My form.pdf"));
-    fireEvent.change(screen.getByLabelText(/CCD case type id/), { target: { value: "CriminalInjuriesCompensation" } });
     start();
 
     await waitFor(() => expect(push).toHaveBeenCalledWith("/assistant/bulk-scan/abc"));
     const body = fetchMock.mock.calls[0]?.[1].body as FormData;
     expect((body.get("form") as File).name).toBe("My form.pdf");
-    expect(body.get("caseType")).toBe("CriminalInjuriesCompensation");
+    expect(body.has("definition")).toBe(false);
   });
 
   it("should refuse a form before sending anything when it is too large", () => {
@@ -326,7 +325,7 @@ describe("bulk scan editor", () => {
     fireEvent.change(screen.getByLabelText("Label"), { target: { value: "Full name" } });
     fireEvent.change(screen.getByLabelText("Max length"), { target: { value: "40" } });
     fireEvent.change(screen.getByLabelText("Min length"), { target: { value: "5" } });
-    fireEvent.change(screen.getByLabelText("Case type (CCD case type id)"), { target: { value: "CriminalInjuriesCompensation" } });
+    fireEvent.change(screen.getByLabelText("Or type a case type id"), { target: { value: "CriminalInjuriesCompensation" } });
     await user.click(screen.getByRole("button", { name: "Add a key" }));
     await user.type(screen.getByLabelText("Key 2"), "other{Enter}");
     fireEvent.change(screen.getByLabelText("CCD ids"), { target: { value: "ccdName" } });

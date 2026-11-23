@@ -1,4 +1,6 @@
 import {
+  type CcdConfig,
+  type CcdField,
   caseDataFor,
   type Data,
   expectedFor,
@@ -12,6 +14,7 @@ import {
   importTransformSheet,
   isModelKey,
   modelByKey,
+  newCcdFieldFiles,
   readsKeys,
   readWorkbookBytes,
   type Scenario,
@@ -22,10 +25,13 @@ import {
   type Target,
   validData
 } from "@hmcts-cft/bulk-scan-spec";
+import { ccdFieldsOf } from "@hmcts-cft/bulk-scan-spec/ccd-match";
 import { z } from "zod";
 import { HttpError } from "../agent-api/http.ts";
+import { CCD_FIELD_ROWS } from "../assistant/ccd-jobs.ts";
 import { isPdf } from "../assistant/docmosis.ts";
 import { isXlsx } from "../assistant/welsh.ts";
+import { type CaseTypeChoice, withCaseType, withCaseTypeHeader } from "./case-type.ts";
 import { zipFiles } from "./zip.ts";
 
 /**
@@ -38,25 +44,48 @@ import { zipFiles } from "./zip.ts";
 export const MAX_SPEC_BYTES = 3 * 1024 * 1024;
 export const MAX_SPEC_NAME = 200;
 
+/** The case type a person picked, whose fields their pod fetched: the product that defines it and how it configures CCD. */
+export interface UploadedCaseType {
+  caseType: string;
+  product: string;
+  config?: CcdConfig;
+  fields: CcdField[];
+}
+
+/** The case fields a pod job found, as the browser sends them back with an upload. */
+export function parseCcdFields(json: unknown): CcdField[] {
+  const parsed = CCD_FIELD_ROWS.safeParse(json);
+  if (!parsed.success) {
+    throw new HttpError(400, "the case type's fields are not in the shape the CCD job answers");
+  }
+  return ccdFieldsOf(parsed.data);
+}
+
 export interface Imported {
   kind: "pdf" | "sip" | "transformation sheet";
   forms: FormSpec[];
 }
 
-/** Reads an uploaded form PDF, Exela SIP or HMCTS transformation sheet into one spec per form it holds, with `caseType`, the CCD case type id the person typed, as each form's. */
-export async function importUpload(fileName: string, bytes: Uint8Array, caseType?: string): Promise<Imported> {
+/**
+ * Reads an uploaded form PDF, Exela SIP or HMCTS transformation sheet into one spec per form it holds, with `caseType`
+ * as each form's CCD case type id. A PDF's fields are matched against `picked`, the case type the person chose.
+ */
+export async function importUpload(fileName: string, bytes: Uint8Array, caseType?: string, picked?: UploadedCaseType): Promise<Imported> {
   if (isPdf(bytes)) {
-    const result = await fromPdf({ pdf: fileName, bytes, ...(caseType ? { caseType } : {}) }).catch((error: unknown) => {
-      console.error(`a form PDF could not be read: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`);
-      return undefined;
-    });
+    const result = await fromPdf({ pdf: fileName, bytes, ...(picked ? { ccdFields: picked.fields } : {}), ...(caseType ? { caseType } : {}) }).catch(
+      (error: unknown) => {
+        console.error(`a form PDF could not be read: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`);
+        return undefined;
+      }
+    );
     if (!result) {
       throw new HttpError(400, "that PDF could not be read");
     }
     if (result.needsReview) {
       throw new HttpError(422, `${result.needsReview.reason}, so no field could be read from it. Ask your assistant to read its pages and draft the spec`);
     }
-    return { kind: "pdf", forms: result.bundle.forms };
+    const forms = picked ? result.bundle.forms.map((spec) => withCaseTypeHeader(spec, choiceOf(picked), picked.fields)) : result.bundle.forms;
+    return { kind: "pdf", forms: withSource(forms, "pdf") };
   }
   if (!isXlsx(bytes)) {
     throw new HttpError(400, "choose a form PDF, an Exela SIP or a transformation sheet (.xlsx)");
@@ -70,17 +99,32 @@ export async function importUpload(fileName: string, bytes: Uint8Array, caseType
     if (forms.length === 0) {
       throw new HttpError(422, "that SIP has no filled-in form tab");
     }
-    return openable({ kind: "sip", forms: withCaseType(forms, caseType) });
+    return openable({ kind: "sip", forms: withPicked(withSource(withTypedCaseType(forms, caseType), "sip"), picked) });
   }
   const { spec } = readSheet(() => importTransformSheet(selectSheet(workbook, undefined)));
   if (spec.sections.every((s) => s.fields.length === 0)) {
     throw new HttpError(422, "no field rows were found in the first sheet: is it a transformation sheet?");
   }
-  return openable({ kind: "transformation sheet", forms: withCaseType([spec], caseType) });
+  return openable({ kind: "transformation sheet", forms: withPicked(withSource(withTypedCaseType([spec], caseType), "sheet"), picked) });
+}
+
+/** The forms with the case type the person picked: its header, and each row that carries an id checked against its fields. */
+function withPicked(forms: FormSpec[], picked: UploadedCaseType | undefined): FormSpec[] {
+  return picked ? forms.map((f) => withCaseType(f, choiceOf(picked), picked.fields)) : forms;
+}
+
+const choiceOf = (picked: UploadedCaseType): CaseTypeChoice => ({
+  caseType: picked.caseType,
+  product: picked.product,
+  ...(picked.config ? { config: picked.config } : {})
+});
+
+function withSource(forms: FormSpec[], source: "pdf" | "sip" | "sheet"): FormSpec[] {
+  return forms.map((f) => ({ ...f, form: { ...f.form, source } }));
 }
 
 /** The forms with the CCD case type the person typed as their header's, when one was typed. */
-function withCaseType(forms: FormSpec[], caseType: string | undefined): FormSpec[] {
+function withTypedCaseType(forms: FormSpec[], caseType: string | undefined): FormSpec[] {
   return caseType ? forms.map((f) => ({ ...f, form: { ...f.form, ccdCaseTypeId: caseType } })) : forms;
 }
 
@@ -156,6 +200,16 @@ export function checkSpec(raw: unknown): { ok: true; spec: FormSpec } | { ok: fa
   );
   if (lengthIssues.length > 0) {
     return { ok: false, issues: lengthIssues };
+  }
+  const idIssues = parsed.data.sections.flatMap((section, s) =>
+    section.fields.flatMap((field, f) =>
+      field.ccdMatch?.status === "new" && (field.ccdMatch.newField?.id.trim() === "" || field.ccd.some((id) => id.trim() === ""))
+        ? [{ path: `sections.${s}.fields.${f}.ccd`, message: "a new case field needs an id" }]
+        : []
+    )
+  );
+  if (idIssues.length > 0) {
+    return { ok: false, issues: idIssues };
   }
   const keyIssues = keyShapeIssues(parsed.data);
   if (keyIssues.length > 0) {
@@ -263,7 +317,7 @@ export function codeDownload(spec: FormSpec, target: Target, javaPackage: string
     throw new HttpError(400, "the Java package is lower-case words joined by dots, such as uk.gov.hmcts.divorce.bulkscan");
   }
   try {
-    const files = generateTarget(target, spec, { basePackage: javaPackage });
+    const files = [...generateTarget(target, spec, { basePackage: javaPackage }), ...newCcdFieldFiles(spec)];
     return {
       fileName: `${stem(spec)}-${target}.zip`,
       contentType: "application/zip",

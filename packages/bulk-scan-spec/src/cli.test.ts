@@ -35,6 +35,36 @@ describe("cli on a bundle with several forms", () => {
   });
 });
 
+describe("cli codegen for every target", () => {
+  it("should write the new case fields once, not once per target, when every target is asked for", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cli-new-"));
+    const spec = join(dir, "spec.json");
+    writeFileSync(
+      spec,
+      JSON.stringify({
+        forms: [
+          formSpecSchema.parse({
+            form: { name: "A", formType: "A", ccdCaseTypeId: "T" },
+            sections: [
+              {
+                id: "1",
+                title: "S",
+                fields: [{ label: "Place", keys: ["place"], ccd: ["place"], ccdMatch: { status: "new", newField: { id: "place", type: "Text" } } }]
+              }
+            ]
+          })
+        ]
+      })
+    );
+
+    const result = run("codegen", "--spec", spec, "--target", "all", "--out", join(dir, "out"));
+
+    expect(result.status).toBe(0);
+    expect(result.stdout.match(/new-ccd-fields\.json/g)).toHaveLength(1);
+    expect(existsX(join(dir, "out", "new-ccd-fields.json"))).toBe(true);
+  });
+});
+
 describe("cli generate validates before writing", () => {
   it("should not write the SIP when --transform cannot be satisfied", () => {
     const dir = mkdtempSync(join(tmpdir(), "cli-gen-"));

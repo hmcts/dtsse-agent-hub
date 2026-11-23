@@ -10,6 +10,7 @@ import { sscsFiles } from "./sscs.ts";
 export const TARGETS = ["fis", "sscs", "nfdiv", "probate", "envelopes", "orchestrator"] as const;
 export type Target = (typeof TARGETS)[number];
 
+/** What one target writes. The files every target shares, the form's new case fields, are `newCcdFieldFiles`: written once by whoever writes several targets. */
 export function generateTarget(target: Target, spec: FormSpec, java: JavaOptions, jurisdiction?: string): OutputFile[] {
   switch (target) {
     case "fis":
@@ -26,3 +27,5 @@ export function generateTarget(target: Target, spec: FormSpec, java: JavaOptions
       return orchestratorFiles(spec);
   }
 }
+
+export { newCcdFieldFiles } from "./new-ccd-fields.ts";

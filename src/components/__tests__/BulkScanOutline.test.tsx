@@ -533,7 +533,7 @@ describe("the header and tabs", () => {
     expect(header.getByText(/Signed off by Bo/)).toBeTruthy();
     expect((screen.getByLabelText("Form name") as HTMLInputElement).value).toBe("T210");
     expect(screen.getByLabelText("PO box")).toBeTruthy();
-    expect(screen.getByLabelText("Case type (CCD case type id)")).toBeTruthy();
+    expect(screen.getByLabelText("Case type")).toBeTruthy();
   });
 
   it("should show the UK day a version was saved on when it was saved after midnight BST", () => {
