@@ -3,13 +3,15 @@
 import { readFileSync } from "node:fs";
 import { formSpecSchema, generateTransformWorkbook, readWorkbookBytes } from "@hmcts-cft/bulk-scan-spec";
 import { NextRequest } from "next/server";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as downloadRoute from "../../src/app/api/ui/assistant/bulk-scan/[id]/download/route.ts";
 import * as simulateRoute from "../../src/app/api/ui/assistant/bulk-scan/[id]/simulate/route.ts";
 import * as versionsRoute from "../../src/app/api/ui/assistant/bulk-scan/[id]/versions/route.ts";
 import * as uploadRoute from "../../src/app/api/ui/assistant/bulk-scan/route.ts";
+import { sidebarGroups, sidebarMatches } from "../../src/assistant/views.ts";
 import { MAX_SPEC_BYTES } from "../../src/bulk-scan/spec.ts";
 import { listSpecs, readSpec } from "../../src/bulk-scan/spec-store.ts";
+import { decodeEvent, HUB_CHANNEL, type NotifiedEvent } from "../../src/realtime/events.ts";
 import { bulkScanEditor, bulkScanSpecs } from "../../src/web/data.ts";
 import { ALICE, BOB } from "./assistant-pod.ts";
 import { connect, insertUser, prisma, resetDatabase } from "./database.ts";
@@ -384,5 +386,96 @@ describe("starting a spec from a case type picked in the workspace", () => {
 
     expect([bad.status, unnamed.status]).toEqual([400, 400]);
     expect(await prisma.bulkScanSpec.count()).toBe(0);
+  });
+});
+
+describe("the forms in the sidebar", () => {
+  const forms = async (who: { oid: string }) =>
+    (await sidebarGroups(prisma, who.oid)).flatMap((group) => group.items.flatMap((item) => (item.kind === "form" ? [{ group: group.label, ...item }] : [])));
+
+  it("should list only the owner's forms, each at the time its latest version was saved, with no spec in the row", async () => {
+    const [first] = (await upload("alice", "a.xlsx")) as [string];
+    await upload("bob", "b.xlsx");
+    await save(first, { ...SPEC, form: { ...SPEC.form, name: "Renamed" } });
+    const latest = await prisma.bulkScanSpecVersion.findUniqueOrThrow({
+      where: { specId_version: { specId: first, version: 2 } },
+      select: { createdAt: true }
+    });
+
+    const rows = await forms(ALICE);
+
+    expect(rows).toEqual([
+      {
+        group: "Today",
+        kind: "form",
+        id: first,
+        title: "Renamed",
+        lastActiveAt: latest.createdAt.toISOString(),
+        pinnedAt: null,
+        marked: false,
+        signedOff: false
+      }
+    ]);
+    expect((await forms(BOB)).map((row) => row.id)).not.toContain(first);
+  });
+
+  it("should mark a version signed off when the latest version is signed off", async () => {
+    const [id] = (await upload()) as [string];
+    await actions.signOffSpec(formOf({ id, version: "1" }));
+
+    expect((await forms(ALICE)).map((row) => row.signedOff)).toEqual([true]);
+  });
+
+  it("should find a form by its name and nobody else's when searching", async () => {
+    const [id] = (await upload()) as [string];
+    await upload("bob", "b.xlsx");
+
+    expect((await sidebarMatches(prisma, ALICE.oid, "t1")).map((match) => [match.kind, match.id])).toEqual([["form", id]]);
+    expect(await sidebarMatches(prisma, ALICE.oid, "nothing")).toEqual([]);
+  });
+
+  describe("telling the owner's tabs", () => {
+    let listener: Awaited<ReturnType<typeof connect>>;
+    let heard: NotifiedEvent[];
+
+    beforeEach(async () => {
+      heard = [];
+      listener = await connect();
+      listener.on("notification", (notification) => {
+        const event = decodeEvent(notification.payload);
+        if (event !== undefined) {
+          heard.push(event);
+        }
+      });
+      await listener.query(`LISTEN ${HUB_CHANNEL}`);
+    });
+
+    afterEach(async () => {
+      await listener.end();
+    });
+
+    const spec = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return heard.filter((event) => event.type === "bulk_scan_spec");
+    };
+
+    it("should send bulk_scan_spec to the owner when a form is uploaded, saved, signed off and deleted", async () => {
+      const [id] = (await upload()) as [string];
+      await save(id, SPEC);
+      await actions.signOffSpec(formOf({ id, version: "2" }));
+      await actions.deleteBulkScanSpec(formOf({ id }));
+
+      expect(await spec()).toEqual(Array(4).fill({ type: "bulk_scan_spec", owner_oid: ALICE.oid }));
+    });
+
+    it("should send nothing when a save is refused", async () => {
+      const [id] = (await upload()) as [string];
+      await spec();
+      heard = [];
+
+      await save(id, SPEC, "alice", 7);
+
+      expect(await spec()).toEqual([]);
+    });
   });
 });

@@ -5,6 +5,7 @@ import { useEffect, useId, useState } from "react";
 import { MAX_QUERY, searchTerms } from "@/assistant/search";
 import type { SidebarMatch } from "@/assistant/views";
 import { ChatMark } from "@/components/assistant/ChatMark";
+import { rowHref } from "@/components/assistant/rowHref";
 
 /**
  * Finding one of the person's own chats from the sidebar, by a word in its title or in anything said in it, or one of
@@ -101,7 +102,7 @@ export function ConversationSearch({ search = fetchMatches, children }: { search
   /** Opens what was found and empties the box, so the sidebar is back on its list with it marked as open. */
   function open(found: SidebarMatch): void {
     setQuery("");
-    router.push(found.kind === "feedback" ? `/assistant/feedback/${found.id}` : `/assistant/${found.id}`);
+    router.push(rowHref(found));
   }
 
   function onKeyDown(event: React.KeyboardEvent<HTMLInputElement>): void {
@@ -186,7 +187,9 @@ export function ConversationSearch({ search = fetchMatches, children }: { search
                   <ChatMark item={chat} />
                   <span className="min-w-0 truncate">{chat.title}</span>
                 </span>
-                {chat.kind === "feedback" || chat.snippet === null ? null : <span className="line-clamp-2 text-xs text-asst-faint">{chat.snippet}</span>}
+                {chat.kind === "feedback" || chat.kind === "form" || chat.snippet === null ? null : (
+                  <span className="line-clamp-2 text-xs text-asst-faint">{chat.snippet}</span>
+                )}
               </div>
             ))}
           </div>

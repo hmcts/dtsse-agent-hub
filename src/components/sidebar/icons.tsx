@@ -138,3 +138,13 @@ export function FeedbackIcon() {
     </Icon>
   );
 }
+
+/** A page with a turned corner and lines of fields: a paper form, which is what a Bulk Scan form specifies. */
+export function FormIcon() {
+  return (
+    <Icon>
+      <path d="M5.5 3.5h6L15.5 7.5v8a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-11a1 1 0 0 1 1-1Z" />
+      <path d="M11.5 3.5v4h4M7 10.5h6M7 13.5h4" />
+    </Icon>
+  );
+}

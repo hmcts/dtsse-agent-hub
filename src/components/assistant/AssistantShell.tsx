@@ -23,6 +23,7 @@ import type { AssistantGitIdentity } from "@/components/assistant/GitIdentitySet
 import { LiveLocalSessions } from "@/components/assistant/LiveLocalSessions";
 import { besideSidebar, SIDEBAR_DRAWER_MAX_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH } from "@/components/assistant/layout";
 import type { AssistantModelSetting } from "@/components/assistant/ModelSettings";
+import { rowHref } from "@/components/assistant/rowHref";
 import type { AssistantScheduleSetting } from "@/components/assistant/ScheduleSettings";
 import { type AssistantConnect, type AssistantPlugins, AssistantSettings } from "@/components/assistant/SettingsDialog";
 import type { AssistantSharing } from "@/components/assistant/SharingSettings";
@@ -31,6 +32,7 @@ import { ShortcutsDialog, useShellShortcuts } from "@/components/assistant/short
 import type { AssistantTemplates } from "@/components/assistant/TemplateSettings";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
 import { type StartChatAction, WorkflowsMenu } from "@/components/assistant/WorkflowsMenu";
+import { TickIcon } from "@/components/sidebar/icons";
 import type { ModelRoute } from "@/viewer/identity";
 import type { ActionResult } from "@/web/action";
 
@@ -361,9 +363,9 @@ export function AssistantShell({
                       return (
                         <li key={item.id} className="group relative">
                           <Link
-                            href={item.kind === "feedback" ? `/assistant/feedback/${item.id}` : `/assistant/${item.id}`}
+                            href={rowHref(item)}
                             aria-current={active ? "page" : undefined}
-                            className={`flex items-center gap-1.5 rounded-lg py-2 pl-2.5 text-sm ${actions === undefined ? "pr-2.5" : "pr-9"} ${
+                            className={`flex items-center gap-1.5 rounded-lg py-2 pl-2.5 text-sm ${actions === undefined || item.kind === "form" ? "pr-2.5" : "pr-9"} ${
                               active ? "bg-asst-active text-asst-text" : "text-asst-body hover:bg-asst-raised"
                             }`}
                           >
@@ -371,8 +373,9 @@ export function AssistantShell({
                             {/* The title is what gives way, so the marker beside it stays whole at any sidebar width. */}
                             <span className="min-w-0 truncate">{item.title}</span>
                             {item.kind === "feedback" && item.unread > 0 ? <UnreadBadge count={item.unread} /> : null}
+                            {item.kind === "form" && item.signedOff ? <SignedOffMark /> : null}
                           </Link>
-                          {actions === undefined ? null : (
+                          {actions === undefined || item.kind === "form" ? null : (
                             // A sibling of the link, not a child: an anchor may not hold a button.
                             <div className="absolute right-1 top-1 flex">
                               {item.kind === "feedback" ? (
@@ -494,6 +497,16 @@ export function AssistantShell({
       </div>
       {showingShortcuts ? <ShortcutsDialog onClose={() => setShowingShortcuts(false)} /> : null}
     </ShellContext.Provider>
+  );
+}
+
+/** That a form's latest version is signed off, which the row says beside the name. */
+function SignedOffMark() {
+  return (
+    <span className="ml-auto shrink-0 text-asst-muted">
+      <TickIcon />
+      <span className="sr-only">, signed off</span>
+    </span>
   );
 }
 

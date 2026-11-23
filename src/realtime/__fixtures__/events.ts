@@ -43,6 +43,7 @@ const NOTIFIED_EVENT_SAMPLES: { [T in NotifiedEvent["type"]]: readonly Extract<N
   assistant_pod_job: [{ type: "assistant_pod_job", job_id: "p-a", conversation_id: "c-a", owner_oid: "oid-a" }],
   assistant_docmosis_index: [{ type: "assistant_docmosis_index", request_id: "r-a", virtual_agent_id: "va-a", owner_oid: "oid-a" }],
   assistant_docmosis_library: [{ type: "assistant_docmosis_library", owner_oid: "oid-a" }],
+  bulk_scan_spec: [{ type: "bulk_scan_spec", owner_oid: "oid-a" }],
   feedback: [
     { type: "feedback", project_id: "fp-a", link_id: "fl-a" },
     // A change to the project itself rather than through one of its links.

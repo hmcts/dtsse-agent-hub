@@ -131,6 +131,28 @@ describe("bySidebarOrder", () => {
     ]);
   });
 
+  it("should put a Bulk Scan form among the chats by when its latest version was saved", () => {
+    const items = [
+      { ...item("chat-old", "2026-10-19T08:00:00.000Z"), kind: "cloud" },
+      { ...item("form", "2026-10-21T08:30:00.000Z"), kind: "form" },
+      { ...item("chat-new", "2026-10-21T08:00:00.000Z"), kind: "cloud" },
+      { ...item("form-old", "2026-08-01T08:00:00.000Z"), kind: "form" }
+    ];
+
+    const grouped = groupForSidebar(
+      [...items].sort(bySidebarOrder),
+      (entry) => new Date(entry.lastActiveAt),
+      (entry) => entry.pinnedAt !== null,
+      NOW
+    );
+
+    expect(grouped.map((group) => [group.label, group.items.map((entry) => entry.id)])).toEqual([
+      ["Today", ["form", "chat-new"]],
+      ["Previous 7 days", ["chat-old"]],
+      ["Older", ["form-old"]]
+    ]);
+  });
+
   it("should put a pinned project in Pinned beside the pinned chats, by when each was pinned", () => {
     const items = [
       { ...item("chat", "2026-10-21T08:00:00.000Z", "2026-10-20T08:00:00.000Z"), kind: "cloud" },

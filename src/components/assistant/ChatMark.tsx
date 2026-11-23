@@ -5,10 +5,13 @@ import { useLiveLocalSession } from "@/components/assistant/LiveLocalSessions";
 import { LocalMark } from "@/components/assistant/LocalMark";
 import { PodMark } from "@/components/assistant/PodMark";
 import { SessionMark } from "@/components/assistant/SessionMark";
-import { FeedbackIcon } from "@/components/sidebar/icons";
+import { FeedbackIcon, FormIcon } from "@/components/sidebar/icons";
 
 /** What `ChatMark` reads of a sidebar row or a search result. */
-export type MarkedItem = { kind: Exclude<SidebarKind, "feedback">; id: string; mark: ConversationMark } | { kind: "feedback"; id: string; marked: boolean };
+export type MarkedItem =
+  | { kind: Exclude<SidebarKind, "feedback" | "form">; id: string; mark: ConversationMark }
+  | { kind: "feedback"; id: string; marked: boolean }
+  | { kind: "form"; id: string; marked: boolean };
 
 /**
  * The mark beside an item's title, wherever the person's sidebar items are listed: the grouped list and the results
@@ -20,8 +23,15 @@ export type MarkedItem = { kind: Exclude<SidebarKind, "feedback">; id: string; m
  */
 export function ChatMark({ item }: { item: MarkedItem }) {
   const live = useLiveLocalSession(item.id);
-  if (item.kind === "feedback") {
-    return item.marked ? <SessionMark words="Feedback project" colour="text-asst-muted" working={false} icon={<FeedbackIcon />} /> : null;
+  if (item.kind === "feedback" || item.kind === "form") {
+    if (!item.marked) {
+      return null;
+    }
+    return item.kind === "feedback" ? (
+      <SessionMark words="Feedback project" colour="text-asst-muted" working={false} icon={<FeedbackIcon />} />
+    ) : (
+      <SessionMark words="Bulk Scan form" colour="text-asst-muted" working={false} icon={<FormIcon />} />
+    );
   }
   if (item.mark === null) {
     return null;

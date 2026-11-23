@@ -1,6 +1,7 @@
 import { isOwner } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import { isUuid } from "../agents/store.ts";
+import { notify } from "../realtime/notify.ts";
 import type { Database, Prisma, PrismaClient } from "../store/prisma.ts";
 
 /**
@@ -30,7 +31,7 @@ export interface SpecSummary {
   signedOff: boolean;
 }
 
-/** The owner's specs, newest first, each as its latest version. */
+/** The owner's specs, newest first, each as its latest version: what the sidebar lists, with no spec JSON read. */
 export async function listSpecs(db: Database, target: SpecTarget): Promise<SpecSummary[]> {
   allow(target);
   const rows = await db.bulkScanSpec.findMany({
@@ -49,6 +50,11 @@ export async function listSpecs(db: Database, target: SpecTarget): Promise<SpecS
       ? [{ id: row.id, name: row.name, version: latest.version, savedAt: latest.createdAt.toISOString(), signedOff: latest.signedOffAt !== null }]
       : [];
   });
+}
+
+/** Whether the owner has any spec, which is whether their sidebar has a form to mark. */
+export async function hasSpecs(db: Database, ownerOid: string): Promise<boolean> {
+  return (await db.bulkScanSpec.findFirst({ where: { ownerOid }, select: { id: true } })) !== null;
 }
 
 export interface VersionEntry {
@@ -124,6 +130,7 @@ export async function createSpecs(prisma: PrismaClient, target: SpecTarget, spec
       });
       ids.push(created.id);
     }
+    await notify(tx, { type: "bulk_scan_spec", owner_oid: target.ownerOid });
     return ids;
   });
 }
@@ -155,31 +162,40 @@ export async function saveVersion(prisma: PrismaClient, target: SpecTarget, id: 
     const version = newest + 1;
     await tx.bulkScanSpecVersion.create({ data: { specId: id, version, spec: next.spec, savedByOid: target.actorOid } });
     await tx.bulkScanSpec.update({ where: { id }, data: { name: next.name } });
+    await notify(tx, { type: "bulk_scan_spec", owner_oid: target.ownerOid });
     return version;
   });
 }
 
 /** Marks one version signed off by the actor now. A version signed off once keeps its first sign-off. */
-export async function signOffVersion(db: Database, target: SpecTarget, id: string, version: number): Promise<void> {
+export async function signOffVersion(prisma: PrismaClient, target: SpecTarget, id: string, version: number): Promise<void> {
   allow(target);
   if (!isUuid(id)) {
     throw new HttpError(404, GONE);
   }
-  const { count } = await db.bulkScanSpecVersion.updateMany({
-    where: { specId: id, version, signedOffAt: null, bulkScanSpec: { ownerOid: target.ownerOid } },
-    data: { signedOffByOid: target.actorOid, signedOffAt: new Date() }
+  await prisma.$transaction(async (tx) => {
+    const { count } = await tx.bulkScanSpecVersion.updateMany({
+      where: { specId: id, version, signedOffAt: null, bulkScanSpec: { ownerOid: target.ownerOid } },
+      data: { signedOffByOid: target.actorOid, signedOffAt: new Date() }
+    });
+    if (count === 0) {
+      throw new HttpError(409, "that version is already signed off, or no longer exists");
+    }
+    await notify(tx, { type: "bulk_scan_spec", owner_oid: target.ownerOid });
   });
-  if (count === 0) {
-    throw new HttpError(409, "that version is already signed off, or no longer exists");
-  }
 }
 
 /** Deletes one of the owner's specs with every version of it, and reports whether there was one. */
-export async function deleteSpec(db: Database, target: SpecTarget, id: string): Promise<boolean> {
+export async function deleteSpec(prisma: PrismaClient, target: SpecTarget, id: string): Promise<boolean> {
   allow(target);
   if (!isUuid(id)) {
     return false;
   }
-  const { count } = await db.bulkScanSpec.deleteMany({ where: { id, ownerOid: target.ownerOid } });
-  return count > 0;
+  return await prisma.$transaction(async (tx) => {
+    const { count } = await tx.bulkScanSpec.deleteMany({ where: { id, ownerOid: target.ownerOid } });
+    if (count > 0) {
+      await notify(tx, { type: "bulk_scan_spec", owner_oid: target.ownerOid });
+    }
+    return count > 0;
+  });
 }

@@ -114,6 +114,17 @@ describe("ConversationSearch", () => {
     expect(push).toHaveBeenCalledWith("/assistant/feedback/p1");
   });
 
+  it("should mark a Bulk Scan form among the results and open its editor when it is chosen", async () => {
+    const form: SidebarMatch = { kind: "form", id: "f1", title: "T210 claim form", lastActiveAt: "2026-10-24T09:00:00.000Z", marked: true };
+    search.mockResolvedValue([form]);
+    render_();
+
+    await type("t210");
+
+    fireEvent.click(screen.getByRole("option", { name: /^Bulk Scan form:\s*T210 claim form$/ }));
+    expect(push).toHaveBeenCalledWith("/assistant/bulk-scan/f1");
+  });
+
   it("should show a feedback project bare when the person's list holds one kind only", async () => {
     search.mockResolvedValue([{ kind: "feedback", id: "p1", title: "Claim journey", lastActiveAt: "2026-10-24T09:00:00.000Z", marked: false }]);
     render_();
