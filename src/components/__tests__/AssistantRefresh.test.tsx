@@ -4,7 +4,6 @@
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AssistantRefresh } from "@/components/assistant/AssistantRefresh";
-import { noteOwnSave } from "@/components/assistant/ownSave";
 
 /**
  * What the refresh does without a network. Its debounce and the events it listens for are covered beside the rest
@@ -12,7 +11,8 @@ import { noteOwnSave } from "@/components/assistant/ownSave";
  */
 
 const refresh = vi.fn();
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
+const route = vi.hoisted(() => ({ pathname: "/assistant" }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }), usePathname: () => route.pathname }));
 
 const hubHandlers = new Map<string, (data: unknown) => void>();
 vi.mock("@/components/live/HubStream", () => ({
@@ -20,6 +20,7 @@ vi.mock("@/components/live/HubStream", () => ({
 }));
 
 beforeEach(() => {
+  route.pathname = "/assistant";
   refresh.mockReset();
   hubHandlers.clear();
   vi.useFakeTimers();
@@ -99,16 +100,23 @@ describe("AssistantRefresh", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("should not refresh again for the announcement of this tab's own save, and should for the next", async () => {
+  it("should not refresh when a Bulk Scan form changed and its editor is the page", async () => {
+    route.pathname = "/assistant/bulk-scan/f1";
     render(<AssistantRefresh />);
-    noteOwnSave();
 
     hubHandlers.get("bulk_scan_spec")?.({});
     await settle();
+
     expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("should refresh when a Bulk Scan form changed and the page is the Bulk Scan list", async () => {
+    route.pathname = "/assistant/bulk-scan";
+    render(<AssistantRefresh />);
 
     hubHandlers.get("bulk_scan_spec")?.({});
     await settle();
+
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 });

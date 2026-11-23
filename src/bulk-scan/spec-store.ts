@@ -1,7 +1,9 @@
 import { isOwner } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import { isUuid } from "../agents/store.ts";
+import { nameHasTerms } from "../assistant/search-store.ts";
 import { notify } from "../realtime/notify.ts";
+import { clientPrisma } from "../store/client-namespace.ts";
 import type { Database, Prisma, PrismaClient } from "../store/prisma.ts";
 
 /**
@@ -57,29 +59,37 @@ export async function hasSpecs(db: Database, ownerOid: string): Promise<boolean>
   return (await db.bulkScanSpec.findFirst({ where: { ownerOid, versions: { some: {} } }, select: { id: true } })) !== null;
 }
 
-export interface SpecMatch {
+/** One spec as the sidebar lists it, at its latest version. */
+export interface SpecRow {
   id: string;
   name: string;
   savedAt: Date;
+  signedOff: boolean;
 }
 
-/**
- * Up to `limit` of the owner's specs whose name holds every one of `terms`, which are lower-case already, most recently
- * saved first, each at the time of its latest version.
- */
-export async function searchSpecs(db: Database, ownerOid: string, terms: readonly string[], limit: number): Promise<SpecMatch[]> {
-  if (terms.length === 0) {
-    return [];
-  }
-  return await db.$queryRaw<SpecMatch[]>`
-    SELECT s.id::text AS id, s.name, v.created_at AS "savedAt"
+/** As many forms as the sidebar reads of a person's chats. */
+export const SIDEBAR_FORM_LIMIT = 200;
+
+/** Up to `limit` of the owner's specs that meet `where`, each at its latest version, most recently saved first. */
+async function latestSpecs(db: Database, ownerOid: string, where: Prisma.Sql, limit: number): Promise<SpecRow[]> {
+  return await db.$queryRaw<SpecRow[]>`
+    SELECT s.id::text AS id, s.name, v.created_at AS "savedAt", v.signed_off_at IS NOT NULL AS "signedOff"
       FROM bulk_scan_spec s
-      JOIN LATERAL (SELECT created_at FROM bulk_scan_spec_version WHERE spec_id = s.id ORDER BY version DESC LIMIT 1) v ON true
-     WHERE s.owner_oid = ${ownerOid}
-       AND NOT EXISTS (SELECT 1 FROM unnest(${terms}::text[]) AS u(term) WHERE strpos(lower(s.name), u.term) = 0)
+      JOIN LATERAL (SELECT created_at, signed_off_at FROM bulk_scan_spec_version WHERE spec_id = s.id ORDER BY version DESC LIMIT 1) v ON true
+     WHERE s.owner_oid = ${ownerOid} AND ${where}
      ORDER BY v.created_at DESC, s.id
      LIMIT ${limit}
   `;
+}
+
+/** The forms the sidebar lists: the owner's, at most `SIDEBAR_FORM_LIMIT`, with no spec JSON read. */
+export async function sidebarSpecs(db: Database, ownerOid: string, limit = SIDEBAR_FORM_LIMIT): Promise<SpecRow[]> {
+  return await latestSpecs(db, ownerOid, clientPrisma().sql`true`, limit);
+}
+
+/** Up to `limit` of the owner's specs whose name holds every one of `terms`, which are lower-case already. */
+export async function searchSpecs(db: Database, ownerOid: string, terms: readonly string[], limit: number): Promise<SpecRow[]> {
+  return terms.length === 0 ? [] : await latestSpecs(db, ownerOid, nameHasTerms("s.name", terms), limit);
 }
 
 export interface VersionEntry {

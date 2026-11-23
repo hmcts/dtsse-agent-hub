@@ -853,7 +853,7 @@ The Bulk Scan builder lets a person pick the service and CCD case type a form ma
 
 **Code.** The code zip of any target carries `new-ccd-fields.json` (`{caseType, fields: [{id, type, label}]}`) when the form has new fields, and for a `config-generator` service `new-case-data-fields.java.txt`, `@CCD` fields in the style the services' own `CaseData` classes use, for the Assistant to place in the service.
 
-**The sidebar.** Each of the owner's forms is a row of the Assistant's sidebar, with its latest version's time and whether that version is signed off, and the sidebar's search matches a form by its name, up to 50 of them, most recently saved first. The form's pages are inside the Assistant's frame, with its row shown as the current one. A form added, saved, signed off or deleted sends the owner's open tabs `event: bulk_scan_spec` on `/api/ui/stream`, data `{}`, from inside the write's transaction; a tab reads the list again. Nobody else's tabs hear of it.
+**The sidebar.** Each of the owner's forms, the 200 most recently saved, is a row of the Assistant's sidebar, with its latest version's time and whether that version is signed off, and the sidebar's search matches a form by its name, up to 50 of them, most recently saved first. The form's pages are inside the Assistant's frame, with its row shown as the current one. A form added, saved, signed off or deleted sends the owner's open tabs `event: bulk_scan_spec` on `/api/ui/stream`, data `{}`, from inside the write's transaction; a tab reads the list again, except one showing a form's editor, which it would start afresh and so lose unsaved edits from. Nobody else's tabs hear of it.
 
 ## Docmosis template library
 

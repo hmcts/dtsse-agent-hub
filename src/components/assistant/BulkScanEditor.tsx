@@ -2,7 +2,7 @@
 
 import type { FormSpec } from "@hmcts-cft/bulk-scan-spec";
 import { useRouter } from "next/navigation";
-import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, useRef, useState } from "react";
 import { issuesByField, patchHeader } from "@/bulk-scan/edit";
 import type { BulkScanEditorView } from "@/bulk-scan/editor-view";
 import { identitiesOf, reconcileIdentities, reviewTotal } from "@/bulk-scan/outline";
@@ -13,7 +13,6 @@ import { BulkScanOutline, type Selection } from "@/components/assistant/BulkScan
 import { FOCUS, INPUT, Labelled } from "@/components/assistant/BulkScanParts";
 import { BulkScanSimulator } from "@/components/assistant/BulkScanSimulator";
 import { BulkScanVersions, type SignOffAction } from "@/components/assistant/BulkScanVersions";
-import { noteOwnSave } from "@/components/assistant/ownSave";
 import { PRIMARY } from "@/components/assistant/WelshParts";
 import { ukDate } from "@/web/format";
 
@@ -28,42 +27,19 @@ function firstSelection(spec: FormSpec): Selection | null {
   return s >= 0 ? { section: s, field: 0 } : spec.sections.length > 0 ? { section: 0, field: null } : null;
 }
 
-type EditorProps = Readonly<{ view: BulkScanEditorView; signOff: SignOffAction; podConversationId?: string | null }>;
-
 /**
- * One spec, started afresh from what was stored whenever the spec or its version changes: by a save, a change of
- * version or another form. `requested` is the version the address asks for, so a change in it is the person moving.
- * A different latest version under the same address is a refresh, which the stream sends when another tab saves, and
- * it never replaces edits that are not saved: they stay on the version they started from, and saving them is refused as
- * a conflict if that is no longer the latest.
+ * One spec: its form details, an outline of its fields beside the details of the one chosen, a save that makes the next
+ * version, and tabs for the simulator, the downloads and the sign-off, which all work on the version saved. The page
+ * keys this on the spec and version, so a save or a change of version starts it afresh from what was stored.
  */
-export function BulkScanEditor({ view, requested, ...rest }: EditorProps & Readonly<{ requested?: number }>) {
-  const [held, setHeld] = useState({ view, requested });
-  const unsaved = useRef(false);
-  const onDirtyChange = useCallback((dirty: boolean) => {
-    unsaved.current = dirty;
-  }, []);
-  let shown = view;
-  if (held.view !== view) {
-    const moved = view.id !== held.view.id || requested !== held.requested;
-    if (!unsaved.current || moved || view.version === held.view.version) {
-      setHeld({ view, requested });
-    } else {
-      shown = held.view;
-    }
-  }
-  return <EditorBody key={`${shown.id}:${shown.version}`} view={shown} onDirtyChange={onDirtyChange} {...rest} />;
-}
-
-/**
- * The spec's form details, an outline of its fields beside the details of the one chosen, a save that makes the next
- * version, and tabs for the simulator, the downloads and the sign-off, which all work on the version saved.
- */
-function EditorBody({ view, signOff, podConversationId = null, onDirtyChange }: EditorProps & Readonly<{ onDirtyChange: (dirty: boolean) => void }>) {
+export function BulkScanEditor({
+  view,
+  signOff,
+  podConversationId = null
+}: Readonly<{ view: BulkScanEditorView; signOff: SignOffAction; podConversationId?: string | null }>) {
   const router = useRouter();
   const [spec, setSpec] = useState<FormSpec>(view.spec);
   const [dirty, setDirty] = useState(false);
-  useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
   const [saving, setSaving] = useState(false);
   const [problems, setProblems] = useState<ReturnType<typeof issuesByField>>({ fields: new Map(), form: [] });
   const [error, setError] = useState<string | null>(null);
@@ -107,8 +83,6 @@ function EditorBody({ view, signOff, podConversationId = null, onDirtyChange }: 
       const body = (await response.json().catch(() => ({}))) as { version?: unknown; issues?: { path: string; message: string }[]; error?: unknown };
       if (response.ok && typeof body.version === "number") {
         setProblems({ fields: new Map(), form: [] });
-        setDirty(false);
-        noteOwnSave();
         router.push(`/assistant/bulk-scan/${view.id}`);
         router.refresh();
         return;

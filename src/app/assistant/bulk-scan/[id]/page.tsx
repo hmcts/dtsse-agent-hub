@@ -26,8 +26,10 @@ export default async function BulkScanSpecPage({
 }: Readonly<{ params: Promise<{ id: string }>; searchParams: Promise<{ version?: string | string[] }> }>) {
   const viewer = await requireViewer();
   const [{ id }, { version }] = await Promise.all([params, searchParams]);
-  const requested = versionOf(Array.isArray(version) ? version[0] : version);
-  const [view, podConversationId] = await Promise.all([bulkScanEditor(viewer, id, requested), bulkScanPodConversation(viewer)]);
+  const [view, podConversationId] = await Promise.all([
+    bulkScanEditor(viewer, id, versionOf(Array.isArray(version) ? version[0] : version)),
+    bulkScanPodConversation(viewer)
+  ]);
   if (!view) {
     notFound();
   }
@@ -35,7 +37,7 @@ export default async function BulkScanSpecPage({
     <AssistantFrame viewer={viewer} activeId={view.id}>
       <div className="mx-auto flex max-w-[1440px] flex-col gap-6 px-5 pb-10 pt-7">
         <h1 className="text-[22px] font-semibold tracking-tight">{view.name}</h1>
-        <BulkScanEditor view={view} requested={requested} signOff={signOffSpec} podConversationId={podConversationId} />
+        <BulkScanEditor key={`${view.id}:${view.version}`} view={view} signOff={signOffSpec} podConversationId={podConversationId} />
         <p className="text-[13px]">
           <Link href="/assistant/bulk-scan" className="text-asst-accent underline hover:text-asst-accent-hover">
             Back to Bulk Scan forms

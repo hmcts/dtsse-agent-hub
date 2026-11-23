@@ -10,7 +10,7 @@ import * as versionsRoute from "../../src/app/api/ui/assistant/bulk-scan/[id]/ve
 import * as uploadRoute from "../../src/app/api/ui/assistant/bulk-scan/route.ts";
 import { sidebarGroups, sidebarMatches } from "../../src/assistant/views.ts";
 import { MAX_SPEC_BYTES } from "../../src/bulk-scan/spec.ts";
-import { hasSpecs, listSpecs, readSpec, searchSpecs } from "../../src/bulk-scan/spec-store.ts";
+import { hasSpecs, listSpecs, readSpec, searchSpecs, sidebarSpecs } from "../../src/bulk-scan/spec-store.ts";
 import { decodeEvent, HUB_CHANNEL, type NotifiedEvent } from "../../src/realtime/events.ts";
 import { bulkScanEditor, bulkScanSpecs } from "../../src/web/data.ts";
 import { ALICE, BOB } from "./assistant-pod.ts";
@@ -444,6 +444,17 @@ describe("the forms in the sidebar", () => {
     const found = await searchSpecs(prisma, ALICE.oid, ["claim"], 2);
 
     expect(found.map((row) => row.name)).toEqual(["Claim three", "Claim two"]);
+  });
+
+  it("should read only the most recently saved forms when the person has more than the sidebar's limit", async () => {
+    for (const [index, name] of ["First", "Second", "Third"].entries()) {
+      const createdAt = new Date(Date.UTC(2026, 10, 1 + index));
+      await prisma.bulkScanSpec.create({
+        data: { ownerOid: ALICE.oid, name, versions: { create: { version: 1, spec: SPEC, savedByOid: ALICE.oid, createdAt } } }
+      });
+    }
+
+    expect((await sidebarSpecs(prisma, ALICE.oid, 2)).map((row) => row.name)).toEqual(["Third", "Second"]);
   });
 
   it("should find a form by its name and nobody else's when searching", async () => {

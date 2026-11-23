@@ -1,5 +1,6 @@
 import { canChangeFeedbackProject, feedbackProjectAccess } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
+import { nameHasTerms } from "../assistant/search-store.ts";
 import { clientPrisma } from "../store/client-namespace.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { teamProject } from "./store.ts";
@@ -101,7 +102,7 @@ export async function searchProjects(db: Database, viewerOid: string, terms: rea
     SELECT p.id::text AS id, p.name, ${lastActive()} AS "lastActiveAt"
       FROM feedback_project p
      WHERE ${onTeam(viewerOid)}
-       AND NOT EXISTS (SELECT 1 FROM unnest(${terms}::text[]) AS u(term) WHERE strpos(lower(p.name), u.term) = 0)
+       AND ${nameHasTerms("p.name", terms)}
      ORDER BY "lastActiveAt" DESC, p.id
      LIMIT ${limit}
   `;
