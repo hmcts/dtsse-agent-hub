@@ -12,7 +12,7 @@ import { type TempClaudeHome, tempClaudeHome } from "./__fixtures__/claude-home.
 import { createMockHub, type MockHubOptions, type RecordedCall } from "./__fixtures__/mock-hub.ts";
 import { type Api, ApiError, createApi } from "./api.ts";
 import { modelPath } from "./assistant/models.ts";
-import { tmuxName } from "./assistant/tmux.ts";
+import { type Tmux, tmuxName } from "./assistant/tmux.ts";
 import { type RunBridgeOptions, runBridge, sessionKind } from "./bridge.ts";
 import { readDirects } from "./directs.ts";
 import type { Env } from "./env.ts";
@@ -38,6 +38,9 @@ const DEV_USER = "u-me|Me Tester|me@example.com";
 const BYPASS = "--dangerously-skip-permissions";
 const VIRTUAL = { AGENT_HUB_VIRTUAL_AGENT_ID: "0f8a6a1e-1234-4000-8000-000000000001", AGENT_HUB_LAUNCH_TOKEN: "lt-abc123" };
 // A conversation id the bridge can name a tmux session after, as the supervisor names it.
+/** For a bridge a test starts by hand: nothing it delivers may reach a real tmux. */
+const NO_TMUX = { sendKeys: async () => {}, paste: async () => {} };
+
 const CONVERSATION = "0f8a6a1e-5555-4000-8000-000000000002";
 
 let home: TempClaudeHome;
@@ -111,7 +114,9 @@ const gaps = (calls: RecordedCall[]) => calls.slice(1).map((c, i) => (c.at ?? 0)
 const FAST_RECONNECT = { rapidCloseMs: 200 };
 const STREAM_MS = FAST_RECONNECT.rapidCloseMs + 200;
 
-type StartBridgeOptions = Omit<RunBridgeOptions, "sid" | "api" | "deliver"> & {
+type StartBridgeOptions = Omit<RunBridgeOptions, "sid" | "api" | "deliver" | "tmux"> & {
+  /** What a test types into a pane; `paste` is recorded with the socket's writes unless it gives its own. */
+  tmux?: Partial<Pick<Tmux, "sendKeys" | "paste">>;
   env?: Env;
   /** Stands in for some of the bridge's API calls; the setup's own registration goes to the mock hub as it is. */
   wrapApi?: (api: Api) => Api;
@@ -132,18 +137,29 @@ async function startBridge(
   ensureStateDir(sid);
   fs.writeFileSync(statePath(sid, "enabled"), "");
   writeJson(statePath(sid, "agent.json"), { agent_id: agentId, session_id: sid, name: sid, client_features: [...CLIENT_FEATURES], ...savedAgent });
+  const typed: string[] = [];
   const socketWrites: string[] = [];
   const deliver = async (_socketPath: string | null | undefined, _token: string | null | undefined, content: string) => {
     socketWrites.push(content);
   };
   const env = { ...process.env, AGENT_HUB_CLAUDE_PID: String(process.pid), CLAUDE_CODE_MESSAGING_TOKEN: "tok", ...extraEnv };
-  const running = runBridge({ sid, env, api: wrapApi ? wrapApi(api) : api, deliver, heartbeatMs: 100, ...bridgeOptions });
+  // A conversation's prompt is typed into its pane, so a test never reaches a real tmux: it is recorded with the socket's.
+  const tmux = {
+    sendKeys: async () => {},
+    paste: async (_name: string, text: string) => {
+      typed.push(text);
+      socketWrites.push(text);
+    },
+    ...bridgeOptions.tmux
+  };
+  const running = runBridge({ sid, env, api: wrapApi ? wrapApi(api) : api, deliver, heartbeatMs: 100, ...bridgeOptions, tmux });
   const streamOpens = () => hub.calls.filter((c) => c.method === "GET" && c.path === `/api/agent/${agentId}/stream`);
   return {
     hub,
     sid,
     agentId,
     socketWrites,
+    typed,
     streamOpens,
     logText: () => fs.readFileSync(statePath(sid, "log"), "utf8"),
     acks: (id: string) => hub.calls.filter((c) => c.path === `/api/agent/${agentId}/deliveries/${id}/ack`),
@@ -791,7 +807,7 @@ describe("runBridge", () => {
     writeJson(statePath(sid, "agent.json"), { agent_id: agentId, session_id: sid, name: sid });
     const env: Env = { ...process.env, CLAUDE_CODE_MESSAGING_TOKEN: "tok" };
     delete env.AGENT_HUB_CLAUDE_PID;
-    const running = runBridge({ sid, env, api, deliver: async () => {}, heartbeatMs: 100 });
+    const running = runBridge({ sid, env, api, deliver: async () => {}, heartbeatMs: 100, tmux: NO_TMUX });
 
     try {
       await waitUntil(() => fs.readFileSync(statePath(sid, "log"), "utf8").includes("no Claude pid found yet"), "the missing pid to be logged");
@@ -1145,7 +1161,8 @@ describe("runBridge", () => {
         deliver: async (_s, _t, c) => {
           socketWrites.push(c);
         },
-        heartbeatMs: 100
+        heartbeatMs: 100,
+        tmux: NO_TMUX
       });
 
       try {
@@ -1183,6 +1200,7 @@ describe("runBridge", () => {
 
       // Assert
       const [one, two] = bridge.socketWrites as [string, string];
+      expect(bridge.typed).toEqual(bridge.socketWrites);
       expect(one).toBe(`${contextOpen(first.id)}\n${ANSWER_HERE}\nProduct area: Possession claims.\n${CONTEXT_CLOSE}\n\nwhat is a possession claim?`);
       expect(two).toMatch(/\nProduct area: Core Case Data\.\n/);
       expect(two).toMatch(/switched the product context from Possession claims to Core Case Data/);
@@ -1214,6 +1232,7 @@ describe("runBridge", () => {
 
       // Assert
       const [one, two] = bridge.socketWrites as [string, string];
+      expect(bridge.typed).toEqual(bridge.socketWrites);
       expect(one).toBe(`${contextOpen(missing.id)}\n${ANSWER_HERE}\n${CONTEXT_CLOSE}\n\nno frame`);
       expect(two).toBe(`${contextOpen(unreadable.id)}\n${ANSWER_HERE}\n${CONTEXT_CLOSE}\n\na frame that is not an object`);
       expect(readDirects(bridge.sid)).toEqual([]);

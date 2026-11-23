@@ -260,6 +260,42 @@ describe("createTmux", () => {
     ]);
   });
 
+  it("should paste a multi-line prompt as one bracketed paste with its line breaks kept, then press Enter, when asked to type it", async () => {
+    // Arrange
+    const { args, exec } = recorder();
+
+    // Act
+    await createTmux({ exec }).paste("c-1", "line one\nline two");
+
+    // Assert
+    expect(args).toEqual([
+      ["set-buffer", "-b", "ah-c-1", "--", "line one\nline two"],
+      ["paste-buffer", "-p", "-r", "-d", "-b", "ah-c-1", "-t", "c-1"],
+      ["send-keys", "-t", "c-1", "Enter"]
+    ]);
+  });
+
+  it("should name the failing tmux step, and press nothing, when the buffer cannot be set or pasted", async () => {
+    // Arrange
+    const { exec } = recorder({ code: 1, stderr: "no server\n" });
+
+    // Act & Assert
+    await expect(createTmux({ exec }).paste("c-1", "hi")).rejects.toThrow("tmux set-buffer exited 1: no server");
+  });
+
+  it("should name paste-buffer and press nothing when the buffer is set but cannot be pasted", async () => {
+    // Arrange
+    const args: string[][] = [];
+    const exec: TmuxExec = async (a) => {
+      args.push(a);
+      return a[0] === "paste-buffer" ? { code: 1, stdout: "", stderr: "can't find pane\n" } : { code: 0, stdout: "", stderr: "" };
+    };
+
+    // Act & Assert
+    await expect(createTmux({ exec }).paste("c-1", "hi")).rejects.toThrow("tmux paste-buffer exited 1: can't find pane");
+    expect(args.map((a) => a[0])).toEqual(["set-buffer", "paste-buffer"]);
+  });
+
   // The supervisor logs a refused `send-keys`, and that log is only honest if this throws: keys are how a session is
   // told to exit or to end a turn, so `send-keys` reporting success for keys that never arrived would have the
   // supervisor say it interrupted a turn that is still running.

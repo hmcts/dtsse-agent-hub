@@ -125,6 +125,8 @@ export type Tmux = {
   has: (name: string) => Promise<boolean>;
   start: (opts: StartSessionOptions) => Promise<void>;
   sendKeys: (name: string, ...keys: string[]) => Promise<void>;
+  /** Pastes `text` into the pane as one bracketed paste, then presses Enter: what typing a prompt by hand does. */
+  paste: (name: string, text: string) => Promise<void>;
   kill: (name: string) => Promise<void>;
 };
 
@@ -132,6 +134,13 @@ export type CreateTmuxOptions = {
   env?: NodeJS.ProcessEnv;
   exec?: TmuxExec;
 };
+
+/** A tmux command's refusal, as the error every caller logs: its exit code and what it said. */
+function refusal(command: string, r: TmuxResult): Error {
+  const said = r.stderr.trim();
+  const detail = said ? `: ${said}` : "";
+  return new Error(`tmux ${command} exited ${r.code}${detail}`);
+}
 
 export function createTmux({ env = process.env, exec = runTmux }: CreateTmuxOptions = {}): Tmux {
   const tmux = (args: string[]) => exec(args, { env });
@@ -166,6 +175,19 @@ export function createTmux({ env = process.env, exec = runTmux }: CreateTmuxOpti
       if (r.code !== 0) {
         throw new Error(`tmux send-keys exited ${r.code}${r.stderr.trim() ? `: ${r.stderr.trim()}` : ""}`);
       }
+    },
+    async paste(name, text) {
+      const buffer = `ah-${name}`;
+      const set = await tmux(["set-buffer", "-b", buffer, "--", text]);
+      if (set.code !== 0) {
+        throw refusal("set-buffer", set);
+      }
+      // -p brackets the paste so newlines are text, not Enter; -r keeps them as LF; -d drops the buffer afterwards.
+      const pasted = await tmux(["paste-buffer", "-p", "-r", "-d", "-b", buffer, "-t", name]);
+      if (pasted.code !== 0) {
+        throw refusal("paste-buffer", pasted);
+      }
+      await this.sendKeys(name, "Enter");
     },
     async kill(name) {
       await tmux(["kill-session", "-t", name]);

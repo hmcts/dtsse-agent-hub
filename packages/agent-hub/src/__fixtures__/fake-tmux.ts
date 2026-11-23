@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 import type { StartSessionOptions, Tmux } from "../assistant/tmux.ts";
 
-export type TmuxCall = ["start", StartSessionOptions] | ["send-keys", ...string[]] | ["kill", string];
+export type TmuxCall = ["start", StartSessionOptions] | ["send-keys", ...string[]] | ["paste", string, string] | ["kill", string];
 
 export type FakeTmux = Tmux & {
   alive: Set<string>;
@@ -30,6 +30,9 @@ export function fakeTmux(): FakeTmux {
     },
     sendKeys: async (name, ...keys) => {
       calls.push(["send-keys", name, ...keys]);
+    },
+    paste: async (name, text) => {
+      calls.push(["paste", name, text]);
     },
     kill: async (name) => {
       calls.push(["kill", name]);
