@@ -15,7 +15,6 @@ import {
   importTransformSheet,
   isModelKey,
   modelByKey,
-  readCcdDefinition,
   readsKeys,
   readWorkbookBytes,
   type Scenario,
@@ -39,23 +38,19 @@ import { zipFiles } from "./zip.ts";
  * and the saved spec: no person's credentials, so no job in their pod. Pure, and `spec-store.ts` is the Postgres half.
  */
 
-export const MAX_BULK_SCAN_FILE_BYTES = 5 * 1024 * 1024;
 /** A saved spec's JSON: the D8 form, 91 field rows, is under 400 KiB. */
-/** A CCD definition uploaded with a form: a CaseField.json is about 120 KiB, and the proxy buffers 6 MiB of a request, which the form PDF takes most of. */
-export const MAX_CCD_DEFINITION_BYTES = 1024 * 1024;
 export const MAX_SPEC_BYTES = 3 * 1024 * 1024;
 export const MAX_SPEC_NAME = 200;
-export const MAX_CASE_TYPE_ID = 100;
 
-/** The case type's CCD definition that came with a form PDF, and the case type id the person typed for it. */
-export interface CcdUpload {
-  bytes?: Uint8Array;
-  caseType?: string;
-  /** The case type the person picked, whose fields their pod fetched: the product that defines it and how it configures CCD. */
-  picked?: { product: string; config?: "config-generator" | "json" | "hybrid"; fields: CcdField[] };
+/** The case type a person picked, whose fields their pod fetched: the product that defines it and how it configures CCD. */
+export interface PickedCaseType {
+  caseType: string;
+  product: string;
+  config?: "config-generator" | "json" | "hybrid";
+  fields: CcdField[];
 }
 
-/** The case fields a pod job found, as the browser sends them back with an upload or a change of case type. */
+/** The case fields a pod job found, as the browser sends them back with an upload. */
 export function parseCcdFields(json: unknown): CcdField[] {
   const parsed = CCD_FIELD_ROWS.safeParse(json);
   if (!parsed.success) {
@@ -70,22 +65,12 @@ export interface Imported {
 }
 
 /**
- * Reads an uploaded form PDF, Exela SIP or HMCTS transformation sheet into one spec per form it holds. A PDF's CCD fields are
- * proposed from `ccd`, the case type's definition, when one comes with it.
+ * Reads an uploaded form PDF, Exela SIP or HMCTS transformation sheet into one spec per form it holds, with `caseType`
+ * as each form's CCD case type id. A PDF's fields are matched against `picked`, the case type the person chose.
  */
-export async function importUpload(fileName: string, bytes: Uint8Array, ccd?: CcdUpload): Promise<Imported> {
+export async function importUpload(fileName: string, bytes: Uint8Array, caseType?: string, picked?: PickedCaseType): Promise<Imported> {
   if (isPdf(bytes)) {
-    if (ccd?.picked && ccd.bytes) {
-      throw new HttpError(400, "give the case type's fields or a definition file, not both");
-    }
-    const definition = ccd?.bytes
-      ? await readCcdDefinition(ccd.bytes, ccd.caseType).catch((error: unknown) => {
-          throw new HttpError(422, error instanceof Error ? error.message : "that CCD definition could not be read");
-        })
-      : undefined;
-    const caseType = definition?.caseType ?? ccd?.caseType;
-    const fields = ccd?.picked?.fields ?? definition?.fields;
-    const result = await fromPdf({ pdf: fileName, bytes, ...(fields ? { ccdFields: fields } : {}), ...(caseType ? { caseType } : {}) }).catch(
+    const result = await fromPdf({ pdf: fileName, bytes, ...(picked ? { ccdFields: picked.fields } : {}), ...(caseType ? { caseType } : {}) }).catch(
       (error: unknown) => {
         console.error(`a form PDF could not be read: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`);
         return undefined;
@@ -97,7 +82,6 @@ export async function importUpload(fileName: string, bytes: Uint8Array, ccd?: Cc
     if (result.needsReview) {
       throw new HttpError(422, `${result.needsReview.reason}, so no field could be read from it. Ask your assistant to read its pages and draft the spec`);
     }
-    const { picked } = ccd ?? {};
     const forms = picked
       ? result.bundle.forms.map((spec) => ({
           ...spec,
@@ -105,9 +89,6 @@ export async function importUpload(fileName: string, bytes: Uint8Array, ccd?: Cc
         }))
       : result.bundle.forms;
     return { kind: "pdf", forms };
-  }
-  if (ccd) {
-    throw new HttpError(400, "a CCD definition goes with a form PDF, to propose its CCD fields");
   }
   if (!isXlsx(bytes)) {
     throw new HttpError(400, "choose a form PDF, an Exela SIP or a transformation sheet (.xlsx)");
@@ -121,13 +102,18 @@ export async function importUpload(fileName: string, bytes: Uint8Array, ccd?: Cc
     if (forms.length === 0) {
       throw new HttpError(422, "that SIP has no filled-in form tab");
     }
-    return openable({ kind: "sip", forms });
+    return openable({ kind: "sip", forms: withCaseType(forms, caseType) });
   }
   const { spec } = readSheet(() => importTransformSheet(selectSheet(workbook, undefined)));
   if (spec.sections.every((s) => s.fields.length === 0)) {
     throw new HttpError(422, "no field rows were found in the first sheet: is it a transformation sheet?");
   }
-  return openable({ kind: "transformation sheet", forms: [spec] });
+  return openable({ kind: "transformation sheet", forms: withCaseType([spec], caseType) });
+}
+
+/** The forms with the CCD case type the person typed as their header's, when one was typed. */
+function withCaseType(forms: FormSpec[], caseType: string | undefined): FormSpec[] {
+  return caseType ? forms.map((f) => ({ ...f, form: { ...f.form, ccdCaseTypeId: caseType } })) : forms;
 }
 
 /** An importer's refusal of a sheet that is not laid out as it expects, as the 422 that says where. */
@@ -192,6 +178,16 @@ export function checkSpec(raw: unknown): { ok: true; spec: FormSpec } | { ok: fa
   );
   if (regexIssues.length > 0) {
     return { ok: false, issues: regexIssues };
+  }
+  const lengthIssues = parsed.data.sections.flatMap((section, s) =>
+    section.fields.flatMap((field, f) =>
+      field.minLength !== undefined && field.maxLength !== undefined && field.minLength > field.maxLength
+        ? [{ path: `sections.${s}.fields.${f}.minLength`, message: `the minimum length ${field.minLength} is above the maximum ${field.maxLength}` }]
+        : []
+    )
+  );
+  if (lengthIssues.length > 0) {
+    return { ok: false, issues: lengthIssues };
   }
   const keyIssues = keyShapeIssues(parsed.data);
   if (keyIssues.length > 0) {
@@ -310,18 +306,12 @@ export function codeDownload(spec: FormSpec, target: Target, javaPackage: string
   }
 }
 
-/** An uploaded file's name as shown back: the last path part, safe characters only, ending `.pdf` or `.xlsx`. */
+/** An uploaded file's name as shown back (as the browser gave it, not URL-encoded): the last path part, safe characters only, ending `.pdf` or `.xlsx`. */
 export function uploadFileName(raw: unknown): string | null {
   if (typeof raw !== "string") {
     return null;
   }
-  let name: string;
-  try {
-    name = decodeURIComponent(raw);
-  } catch {
-    return null;
-  }
-  const base = (name.split(/[\\/]/).pop() ?? "")
+  const base = (raw.split(/[\\/]/).pop() ?? "")
     .replace(/[^\p{L}\p{N} ._()-]/gu, "_")
     .replace(/\s+/g, " ")
     .trim()

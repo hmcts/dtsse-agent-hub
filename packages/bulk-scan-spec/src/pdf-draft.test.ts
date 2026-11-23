@@ -42,6 +42,39 @@ describe("draftFields", () => {
     expect(fields.find((d) => d.field.id === "2.2")?.field.label).toBe("Court name");
   });
 
+  it("should take an undotted number as a question only when a box is just below it, not as numbered guidance", async () => {
+    const fields = await draftOf({
+      texts: [
+        { text: "1. Use black ink", x: 28, y: 740 },
+        { text: "Notes end here", x: 28, y: 600 },
+        { text: "2. What is your main language?", x: 28, y: 400 }
+      ],
+      textBoxes: [
+        { name: "first", x: 57, y: 500 },
+        { name: "second", x: 57, y: 360 }
+      ]
+    });
+    expect(fields.map((d) => d.field.id)).toEqual([undefined, "2"]);
+  });
+
+  it("should keep a route's words without the comma that led into them", async () => {
+    const [group] = await draftOf({
+      texts: [
+        { text: "1.1 What is your main language?", x: 28, y: 710 },
+        { text: "English, go to question 3", x: 77, y: 683 },
+        { text: "Welsh, go to question 3", x: 77, y: 653 }
+      ],
+      checkboxes: [
+        { name: "a", x: 57, y: 680 },
+        { name: "b", x: 57, y: 650 }
+      ]
+    });
+    expect(group?.choices?.map((c) => [c.label, c.route?.text])).toEqual([
+      ["English", "go to question 3"],
+      ["Welsh", "go to question 3"]
+    ]);
+  });
+
   it("should end a checkbox group at a text box", async () => {
     const fields = await draftOf({
       texts: [

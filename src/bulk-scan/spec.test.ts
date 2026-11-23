@@ -130,23 +130,9 @@ describe("uploads", () => {
     expect((await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"))).forms).toEqual([SPEC]);
   });
 
-  it("should propose CCD fields from the definition that comes with a PDF, and name the case type it holds", async () => {
+  it("should name the case type the person typed in a PDF's form header", async () => {
     pdf.result = { bundle: { forms: [SPEC] }, checklist: [] };
-    const rows = [{ CaseTypeID: "CriminalInjuriesCompensation", ID: "cicCaseFullName", FieldType: "Text" }];
-    await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"), { bytes: new TextEncoder().encode(JSON.stringify(rows)) });
-    expect(pdf.input).toMatchObject({ ccdFields: [{ id: "cicCaseFullName", label: "", type: "Text" }], caseType: "CriminalInjuriesCompensation" });
-  });
-
-  it("should take the case type the person typed when the definition's own are blank", async () => {
-    pdf.result = { bundle: { forms: [SPEC] }, checklist: [] };
-    const rows = [{ CaseTypeID: "", ID: "cicCaseFullName", FieldType: "Text" }];
-    await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"), { bytes: new TextEncoder().encode(JSON.stringify(rows)), caseType: "CIC" });
-    expect(pdf.input).toMatchObject({ ccdFields: [{ id: "cicCaseFullName", label: "", type: "Text" }], caseType: "CIC" });
-  });
-
-  it("should name the typed case type even with no definition", async () => {
-    pdf.result = { bundle: { forms: [SPEC] }, checklist: [] };
-    await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"), { caseType: "CIC" });
+    await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"), "CIC");
     expect(pdf.input).toMatchObject({ caseType: "CIC" });
     expect(pdf.input).not.toHaveProperty("ccdFields");
   });
@@ -155,18 +141,15 @@ describe("uploads", () => {
     pdf.result = { bundle: { forms: [SPEC] }, checklist: [] };
     const fields = parseCcdFields([{ ID: "cicCaseFullName", Label: "Full name", FieldType: "Text" }]);
 
-    const { forms } = await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"), {
+    const { forms } = await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"), "CriminalInjuriesCompensation", {
       caseType: "CriminalInjuriesCompensation",
-      picked: { product: "sptribs", config: "config-generator", fields }
+      product: "sptribs",
+      config: "config-generator",
+      fields
     });
 
     expect(pdf.input).toMatchObject({ ccdFields: [{ id: "cicCaseFullName", label: "Full name", type: "Text" }], caseType: "CriminalInjuriesCompensation" });
     expect(forms[0]?.form).toMatchObject({ ccdProduct: "sptribs", ccdConfig: "config-generator" });
-  });
-
-  it("should refuse fields that come with a definition file as well", async () => {
-    const picked = { product: "sptribs", fields: [] };
-    expect((await refusal(importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"), { bytes: new TextEncoder().encode("[]"), picked }))).status).toBe(400);
   });
 
   it("should refuse fields that are not what the CCD job answers", () => {
@@ -174,10 +157,11 @@ describe("uploads", () => {
     expect(() => parseCcdFields("x")).toThrow("not in the shape");
   });
 
-  it("should refuse a CCD definition that cannot be read, or that comes with a spreadsheet", async () => {
-    const definition = { bytes: new TextEncoder().encode("hello") };
-    expect((await refusal(importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"), definition))).status).toBe(422);
-    expect((await refusal(importUpload("x.xlsx", await bytesOf(generateTransformWorkbook(SPEC)), definition))).status).toBe(400);
+  it("should set the case type on a spreadsheet's forms when one is typed", async () => {
+    const imported = await importUpload("t.xlsx", await bytesOf(generateTransformWorkbook(SPEC)), "CIC");
+    expect(imported.forms.map((f) => f.form.ccdCaseTypeId)).toEqual(["CIC"]);
+    const sip = await importUpload("sip.xlsx", await bytesOf(generateSipWorkbook({ forms: [SPEC] })), "CIC");
+    expect(sip.forms.map((f) => f.form.ccdCaseTypeId)).toEqual(["CIC"]);
   });
 
   it("should refuse a PDF with no form fields, saying why", async () => {
@@ -194,10 +178,10 @@ describe("uploads", () => {
 
 describe("file and spec names", () => {
   it("should keep the last path part with safe characters, for a pdf or xlsx only", () => {
-    expect(uploadFileName(encodeURIComponent("C:\\docs\\My form (1).PDF"))).toBe("My form (1).PDF");
-    expect(uploadFileName("a%2Fb%3Cc.xlsx")).toBe("b_c.xlsx");
+    expect(uploadFileName("C:\\docs\\My form (1).PDF")).toBe("My form (1).PDF");
+    expect(uploadFileName("a<b.xlsx")).toBe("a_b.xlsx");
+    expect(uploadFileName("Fee 100% form.pdf")).toBe("Fee 100_ form.pdf");
     expect(uploadFileName("notes.txt")).toBeNull();
-    expect(uploadFileName("%E0%A4%A")).toBeNull();
     expect(uploadFileName(undefined)).toBeNull();
   });
 
@@ -220,6 +204,14 @@ describe("checking a spec", () => {
     const checked = checkSpec(bad);
     expect(checked.ok).toBe(false);
     expect(!checked.ok && checked.issues.map((i) => i.path)).toEqual(["sections.0.fields.2"]);
+  });
+
+  it("should refuse a minimum length above the maximum, on the field's own row", () => {
+    const bad = JSON.parse(JSON.stringify(SPEC));
+    bad.sections[0].fields[0].minLength = 9;
+    bad.sections[0].fields[0].maxLength = 3;
+    const checked = checkSpec(bad);
+    expect(!checked.ok && checked.issues).toEqual([{ path: "sections.0.fields.0.minLength", message: "the minimum length 9 is above the maximum 3" }]);
   });
 
   it("should refuse a key the engine cannot use", () => {

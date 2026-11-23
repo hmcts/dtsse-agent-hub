@@ -48,6 +48,16 @@ describe("bulk scan upload", () => {
     expect(body.has("definition")).toBe(false);
   });
 
+  it("should refuse a form that is too large before sending anything", () => {
+    render(<BulkScanUpload />);
+
+    choose(/^Form:/, Object.defineProperty(new File(["x"], "a.pdf"), "size", { value: 5 * 1024 * 1024 + 1 }));
+    start();
+
+    expect(screen.getByRole("alert").textContent).toContain("too large");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("should ask for a form before sending anything", () => {
     render(<BulkScanUpload />);
 

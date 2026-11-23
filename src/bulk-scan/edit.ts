@@ -39,9 +39,11 @@ function withTypedCcd(field: Field): Field {
     return rest;
   }
   if (match.status === "new" && match.newField) {
-    return { ...field, ccdMatch: { ...match, newField: { ...match.newField, id } } };
+    return { ...field, ccdMatch: { ...match, newField: { ...match.newField, id }, chosenBy: "person" } };
   }
-  return match.status === "unsure" ? { ...field, ccdMatch: { status: "existing" } } : field;
+  return match.status === "unsure"
+    ? { ...field, ccdMatch: { status: "existing", chosenBy: "person" } }
+    : { ...field, ccdMatch: { ...match, chosenBy: "person" } };
 }
 
 /** The spec with one field replaced by what `change` makes of it. */
@@ -173,7 +175,7 @@ function moved<T>(items: readonly T[], from: number, by: -1 | 1): T[] {
   return [...rest.slice(0, to), item, ...rest.slice(to)];
 }
 
-/** A new field is an optional text field with an empty key, which `checkSpec` refuses until it has one. */
+/** A new field is a mandatory text field with an empty key, which `checkSpec` refuses until it has one. */
 export function blankField(): Field {
   return { role: "field", label: "", inputType: "text", mandatory: "mandatory", keys: [""], ccd: [], rules: [], todo: [] };
 }

@@ -66,14 +66,14 @@ function mapGroup(spec: FormSpec, sectionIndex: number, fieldIndex: number, chan
 
 /** An unsure row decided as one of its candidates, which is then an existing field. */
 export function chooseCandidate(spec: FormSpec, sectionIndex: number, fieldIndex: number, id: string): FormSpec {
-  return mapGroup(spec, sectionIndex, fieldIndex, (field) => ({ ...field, ccd: [id], ccdMatch: { status: "existing" } }));
+  return mapGroup(spec, sectionIndex, fieldIndex, (field) => ({ ...field, ccd: [id], ccdMatch: { status: "existing", chosenBy: "person" } }));
 }
 
 /** An unsure row decided as a new field, with the id and type proposed for it. */
 export function chooseNew(spec: FormSpec, sectionIndex: number, fieldIndex: number): FormSpec {
   return mapGroup(spec, sectionIndex, fieldIndex, (field) => {
     const proposed = field.ccdMatch?.newField;
-    return proposed ? { ...field, ccd: [proposed.id], ccdMatch: { status: "new", newField: proposed } } : field;
+    return proposed ? { ...field, ccd: [proposed.id], ccdMatch: { status: "new", newField: proposed, chosenBy: "person" } } : field;
   });
 }
 
@@ -85,7 +85,7 @@ export function editNewField(spec: FormSpec, sectionIndex: number, fieldIndex: n
       return field;
     }
     const next = { id: patch.id ?? current.id, type: patch.type ?? current.type };
-    return { ...field, ccd: [next.id], ccdMatch: { ...field.ccdMatch, newField: next } };
+    return { ...field, ccd: [next.id], ccdMatch: { ...field.ccdMatch, newField: next, chosenBy: "person" } };
   });
 }
 

@@ -1,14 +1,14 @@
 import type { Line } from "./pdf-extract.ts";
 
-/** The margin note a form prints beside question `id` ("Note 1.1" and the lines under it), joined into one sentence. */
-export function noteFor(id: string, lines: Line[]): string | undefined {
-  const head = lines.find((l) => l.text === `Note ${id}`);
+/** The margin note a form prints beside question `id` on `page` ("Note 1.1" and the lines under it up to the next note), joined into one sentence. */
+export function noteFor(id: string, lines: Line[], page: number): string | undefined {
+  const head = lines.find((l) => l.page === page && l.text === `Note ${id}`);
   if (!head) {
     return undefined;
   }
   const taken: Line[] = [];
   for (const l of lines.filter((c) => c.page === head.page && c.y < head.y && Math.abs(c.x0 - head.x0) <= 3).sort((a, b) => b.y - a.y)) {
-    if ((taken.at(-1)?.y ?? head.y) - l.y > 20) {
+    if ((taken.at(-1)?.y ?? head.y) - l.y > 20 || /^Note\b/.test(l.text)) {
       break;
     }
     taken.push(l);

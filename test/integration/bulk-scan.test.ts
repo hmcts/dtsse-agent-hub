@@ -92,6 +92,12 @@ describe("starting a spec", () => {
     expect((await readSpec(prisma, own(ALICE), id as string))?.versions).toMatchObject([{ version: 1, savedBy: ALICE.name, signedOffBy: null }]);
   });
 
+  it("should take a file whose name has a percent sign in it, which is not a URL-encoded name", async () => {
+    const ids = await upload("alice", "Fee 100% form.xlsx");
+
+    expect(ids).toHaveLength(1);
+  });
+
   it("should refuse a file that is not a PDF or spreadsheet, a name that is neither, and a request from outside the hub's pages", async () => {
     const bad = await uploadRoute.POST(as("alice", "/api/ui/assistant/bulk-scan", { method: "POST", body: uploadForm("t.xlsx", "hello") }));
     const noName = await uploadRoute.POST(as("alice", "/api/ui/assistant/bulk-scan", { method: "POST", body: uploadForm("t.txt", "hello") }));
@@ -101,18 +107,15 @@ describe("starting a spec", () => {
     expect(await prisma.bulkScanSpec.count()).toBe(0);
   });
 
-  it("should refuse a CCD definition sent with a spreadsheet, and one over the size limit", async () => {
+  it("should name the case type typed with an upload in the spec's header", async () => {
     const bytes = new Uint8Array((await generateTransformWorkbook(SPEC).xlsx.writeBuffer()) as ArrayBuffer);
-    const withDefinition = uploadForm("t1.xlsx", bytes);
-    withDefinition.set("definition", new File(["[]"], "CaseField.json"));
-    const tooBig = uploadForm("t1.xlsx", bytes);
-    tooBig.set("definition", new File([new Uint8Array(1024 * 1024 + 1)], "CaseField.zip"));
+    const body = uploadForm("t1.xlsx", bytes);
+    body.set("caseType", "CriminalInjuriesCompensation");
 
-    const refused = await uploadRoute.POST(as("alice", "/api/ui/assistant/bulk-scan", { method: "POST", body: withDefinition }));
-    const large = await uploadRoute.POST(as("alice", "/api/ui/assistant/bulk-scan", { method: "POST", body: tooBig }));
+    const response = await uploadRoute.POST(as("alice", "/api/ui/assistant/bulk-scan", { method: "POST", body }));
+    const [id] = (await jsonOf<{ ids: string[] }>(response)).ids;
 
-    expect([refused.status, large.status]).toEqual([400, 400]);
-    expect(await prisma.bulkScanSpec.count()).toBe(0);
+    expect((await readSpec(prisma, own(ALICE), id as string))?.spec).toMatchObject({ form: { ccdCaseTypeId: "CriminalInjuriesCompensation" } });
   });
 
   it("should be unavailable where virtual agents are off", async () => {
@@ -366,11 +369,11 @@ describe("starting a spec from a case type picked in the workspace", () => {
     expect(first).toMatchObject({ ccd: ["applicant1FirstName"], ccdMatch: { status: "existing" } });
   });
 
-  it("should refuse fields that are not what the CCD job answers, and fields with a definition file", async () => {
+  it("should refuse fields that are not what the CCD job answers, and fields with no case type named", async () => {
     const bad = await pdfUpload([{ ID: "a" }]);
-    const both = await pdfUpload([], { definition: new File(["[]"], "CaseField.json") });
+    const unnamed = await pdfUpload([{ ID: "a", FieldType: "Text" }], { caseType: "" });
 
-    expect([bad.status, both.status]).toEqual([400, 400]);
+    expect([bad.status, unnamed.status]).toEqual([400, 400]);
     expect(await prisma.bulkScanSpec.count()).toBe(0);
   });
 });

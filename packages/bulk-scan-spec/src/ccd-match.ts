@@ -310,8 +310,11 @@ function proposedId(subject: Subject, prefix: string, taken: Set<string>): strin
   return id;
 }
 
+/** An id a person set, typed or chose, or one that came with the form: not one the matcher proposed against some case type. */
+const isKept = (field: Field): boolean => field.ccd.length > 0 && (field.ccdMatch === undefined || field.ccdMatch.chosenBy === "person");
+
 export interface MatchOptions {
-  /** Leave the CCD ids a field already has alone and only say whether they exist. */
+  /** Leave the ids a person set, typed or chose alone and only say whether they exist; ids the matcher proposed are matched again. */
   keepSet?: boolean;
 }
 
@@ -329,7 +332,7 @@ export function matchCcd(spec: FormSpec, fields: CcdField[], options: MatchOptio
   const out = new Map<number, { ccd: string[]; match: CcdMatch }>();
 
   const decisions = subjects.map((subject) => {
-    const set = options.keepSet ? (refs[subject.members.find((m) => (refs[m] as Ref).field.ccd.length > 0) ?? -1]?.field.ccd ?? []) : [];
+    const set = options.keepSet ? (refs[subject.members.find((m) => isKept((refs[m] as Ref).field)) ?? -1]?.field.ccd ?? []) : [];
     const ranked = rank(subject, top, prefixWords, lead);
     return { subject, set, ranked };
   });
@@ -359,12 +362,14 @@ export function matchCcd(spec: FormSpec, fields: CcdField[], options: MatchOptio
       ccd = set;
       const here = set.every((id) => known.has(id));
       const prior = subject.members.map((m) => (refs[m] as Ref).field.ccdMatch?.newField).find(Boolean);
+      const chosen = subject.members.some((m) => (refs[m] as Ref).field.ccdMatch?.chosenBy === "person") ? ({ chosenBy: "person" } as const) : {};
       match = here
-        ? { status: "existing" }
+        ? { status: "existing", ...chosen }
         : {
             status: "new",
             newField: { id: set[0] as string, type: prior?.type ?? proposedType(subject, types) },
-            reason: "this id is not a field of the case type"
+            reason: "this id is not a field of the case type",
+            ...chosen
           };
     } else if (best?.fits && claimed.get(best.field.id) === i) {
       ccd = [best.field.id];

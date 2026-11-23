@@ -24,10 +24,29 @@ describe("withCaseType", () => {
   });
 
   it("should leave a CCD id the person set alone and only refresh its status against the new case type", () => {
-    const set = field("Anything", { ccd: ["applicantEmail"], ccdMatch: { status: "new", newField: { id: "applicantEmail", type: "Text" } } });
+    const set = field("Anything", {
+      ccd: ["applicantEmail"],
+      ccdMatch: { status: "new", newField: { id: "applicantEmail", type: "Text" }, chosenBy: "person" }
+    });
     const result = withCaseType(spec(set), CHOICE, FIELDS);
 
     expect(rows(result)[0]).toMatchObject({ ccd: ["applicantEmail"], ccdMatch: { status: "existing" } });
+  });
+
+  it("should match again the ids the matcher proposed and keep the ones the person chose, when the case type changes", () => {
+    const first = withCaseType(spec(field("First name"), field("Email address"), field("Place of birth")), CHOICE, FIELDS);
+    const chosen = chooseCandidate(first, 0, 1, "applicantEmailTwo");
+    const other = [
+      { id: "firstName", label: "First name", type: "Text" },
+      { id: "applicantEmailTwo", label: "Email address", type: "Email" },
+      { id: "placeOfBirth", label: "Place of birth", type: "Text" }
+    ];
+
+    const result = rows(withCaseType(chosen, { product: "pcs", caseType: "PCS" }, other));
+
+    expect(result.map((f) => f.ccd)).toEqual([["firstName"], ["applicantEmailTwo"], ["placeOfBirth"]]);
+    expect(result[1]?.ccdMatch).toEqual({ status: "existing", chosenBy: "person" });
+    expect(result[0]?.ccdMatch).not.toHaveProperty("chosenBy");
   });
 
   it("should drop the configuration of the case type it replaces when the new one has none", () => {
@@ -65,7 +84,7 @@ describe("deciding an unsure row", () => {
   it("should take typing a CCD id in the row as choosing it", () => {
     const typed = patchField(unsure(), 0, 0, { ccd: ["applicantEmail"] });
 
-    expect(rows(typed)[0]?.ccdMatch).toEqual({ status: "existing" });
+    expect(rows(typed)[0]?.ccdMatch).toEqual({ status: "existing", chosenBy: "person" });
   });
 
   it("should apply a choice to every row of an address, which share one decision", () => {

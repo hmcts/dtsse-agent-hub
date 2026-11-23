@@ -134,7 +134,19 @@ function choiceOf(label: string, slot: number, ticked: boolean): Choice {
     return { label, slot, ticked };
   }
   const kind = (m[1] ?? "").toLowerCase() === "section" ? "section" : "question";
-  return { label: label.slice(0, m.index).trim(), slot, ticked, route: { kind, id: m[2] ?? "", text: m[0].replace(/^[\s>.:\-–—]+/, "").trim() } };
+  return { label: label.slice(0, m.index).trim(), slot, ticked, route: { kind, id: m[2] ?? "", text: m[0].replace(/^[\s>.,:\-–—]+/, "").trim() } };
+}
+
+/** How far below an undotted number a box may start for the number to be a question's rather than numbered guidance. */
+const NUMBERED_REACH = 60;
+
+/** A section heading, or a numbered question: a dotted id such as 2.1 always is, an undotted "3." only when a box is just below it. */
+function isMarker(line: Line, widgets: Widget[]): boolean {
+  if (SECTION.test(line.text)) {
+    return true;
+  }
+  const id = ANCHOR.exec(line.text)?.[1];
+  return id !== undefined && (id.includes(".") || widgets.some((w) => w.page === line.page && w.rect[3] <= line.y + 2 && line.y - w.rect[3] <= NUMBERED_REACH));
 }
 
 /** The top of a question line, raised to the top of any box on the same row so that the question comes before it. */
@@ -147,9 +159,7 @@ function rowTop(line: Line, widgets: Widget[]): number {
 function place(content: PdfContent): Place[] {
   type Event = { page: number; y: number; order: number; line?: Line; widget?: Widget };
   const events: Event[] = [
-    ...content.lines
-      .filter((l) => SECTION.test(l.text) || ANCHOR.test(l.text))
-      .map((line) => ({ page: line.page, y: rowTop(line, content.widgets), order: 0, line })),
+    ...content.lines.filter((l) => isMarker(l, content.widgets)).map((line) => ({ page: line.page, y: rowTop(line, content.widgets), order: 0, line })),
     ...content.widgets.map((widget) => ({ page: widget.page, y: top(widget), order: 1, widget }))
   ];
   events.sort((a, b) => a.page - b.page || b.y - a.y || a.order - b.order || (a.widget?.rect[0] ?? 0) - (b.widget?.rect[0] ?? 0));
@@ -271,7 +281,7 @@ export function draftFields(content: PdfContent): DraftField[] {
         : first.label || first.widget.tooltip || first.widget.name;
       const lengths = rows.map((p) => p.widget.maxLength);
       const maxLength = lengths.every((n) => n !== undefined) ? lengths.reduce((sum: number, n) => sum + (n ?? 0), 0) : undefined;
-      const note = id && !date ? noteFor(id, content.lines) : undefined;
+      const note = id && !date ? noteFor(id, content.lines, first.widget.page) : undefined;
       drafts.push({
         ...base,
         ...(note ? { note } : {}),

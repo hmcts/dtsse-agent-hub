@@ -22,7 +22,7 @@ import { importTransformSheet } from "./transform-import.ts";
 const USAGE = `usage:
   import   --transform <xlsx> [--sheet <name>] --out <spec.json>
   import   --sip <xlsx> --out <spec.json>
-  from-pdf --pdf <form.pdf> [--house-style <spec.json> | --house-style <code file or dir> --pattern <p>] [--ccd <definition dir, CaseField.json, zip or xlsx> [--case-type <CaseTypeID>]] --out <draft.json>
+  from-pdf --pdf <form.pdf> [--house-style <spec.json> | --house-style <code file or dir> --pattern <p>] [--ccd <definition dir or CaseField.json> [--case-type <CaseTypeID>]] --out <draft.json>
   generate --spec <spec.json> [--sip <out.xlsx> [--template <sip.xlsx>]] [--transform <out.xlsx>] [--form <n>]
   drift    (--spec <spec.json> | --transform <xlsx> [--sheet <name>]) --pattern ${PATTERNS.join("|")} --code <file|dir> [--form <n>]
   codegen  --spec <spec.json> --target ${TARGETS.join("|")}|all --out <dir> [--package <java base package>] [--prefix <class prefix>] [--jurisdiction <J>] [--form <n>]
@@ -127,7 +127,7 @@ async function runFromPdf(opts: Map<string, string>): Promise<void> {
   const out = need(opts, "out");
   const ccd = opts.get("ccd");
   const keys = houseKeys(opts);
-  const definition = ccd ? await loadCcdDefinition(ccd, opts.get("case-type")) : undefined;
+  const definition = ccd ? loadCcdDefinition(ccd, opts.get("case-type")) : undefined;
   const caseType = definition?.caseType ?? opts.get("case-type");
   const result = await fromPdf({
     pdf: need(opts, "pdf"),
