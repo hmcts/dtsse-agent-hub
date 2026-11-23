@@ -135,6 +135,12 @@ export type CreateTmuxOptions = {
   exec?: TmuxExec;
 };
 
+/** A tmux command's refusal, as the error every caller logs: its exit code and what it said. */
+function refusal(command: string, r: TmuxResult): Error {
+  const said = r.stderr.trim();
+  return new Error(`tmux ${command} exited ${r.code}${said ? `: ${said}` : ""}`);
+}
+
 export function createTmux({ env = process.env, exec = runTmux }: CreateTmuxOptions = {}): Tmux {
   const tmux = (args: string[]) => exec(args, { env });
   return {
@@ -171,14 +177,16 @@ export function createTmux({ env = process.env, exec = runTmux }: CreateTmuxOpti
     },
     async paste(name, text) {
       const buffer = `ah-${name}`;
-      const set = await tmux(["set-buffer", "-b", buffer, "--", text]);
-      if (set.code !== 0) {
-        throw new Error(`tmux set-buffer exited ${set.code}${set.stderr.trim() ? `: ${set.stderr.trim()}` : ""}`);
-      }
       // -p brackets the paste so newlines are text, not Enter; -r keeps them as LF; -d drops the buffer afterwards.
-      const pasted = await tmux(["paste-buffer", "-p", "-r", "-d", "-b", buffer, "-t", name]);
-      if (pasted.code !== 0) {
-        throw new Error(`tmux paste-buffer exited ${pasted.code}${pasted.stderr.trim() ? `: ${pasted.stderr.trim()}` : ""}`);
+      const steps = [
+        ["set-buffer", ["set-buffer", "-b", buffer, "--", text]],
+        ["paste-buffer", ["paste-buffer", "-p", "-r", "-d", "-b", buffer, "-t", name]]
+      ] as const;
+      for (const [command, args] of steps) {
+        const r = await tmux([...args]);
+        if (r.code !== 0) {
+          throw refusal(command, r);
+        }
       }
       await this.sendKeys(name, "Enter");
     },
