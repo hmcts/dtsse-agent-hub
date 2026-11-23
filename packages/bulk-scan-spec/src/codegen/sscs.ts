@@ -31,6 +31,10 @@ export function sscsSchema(spec: FormSpec): unknown {
     if (m.maxLength) {
       property.maxLength = m.maxLength;
     }
+    if (m.minLength) {
+      // A blank is never a wrong value here, so the minimum applies to a value that is there.
+      property.anyOf = [{ maxLength: 0 }, { minLength: m.minLength }];
+    }
     properties[m.key] = property;
   }
   return {

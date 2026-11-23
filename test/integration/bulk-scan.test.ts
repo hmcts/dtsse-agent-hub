@@ -61,9 +61,15 @@ function as(persona: string, path: string, init: { method?: string; body?: BodyI
 
 const context = (id: string) => ({ params: Promise.resolve({ id }) });
 
+function uploadForm(name: string, content: BlobPart): FormData {
+  const form = new FormData();
+  form.set("form", new File([content], name));
+  return form;
+}
+
 async function upload(persona = "alice", name = "t1.xlsx"): Promise<string[]> {
   const bytes = new Uint8Array((await generateTransformWorkbook(SPEC).xlsx.writeBuffer()) as ArrayBuffer);
-  const response = await uploadRoute.POST(as(persona, "/api/ui/assistant/bulk-scan", { method: "POST", body: bytes, headers: { "x-file-name": name } }));
+  const response = await uploadRoute.POST(as(persona, "/api/ui/assistant/bulk-scan", { method: "POST", body: uploadForm(name, bytes) }));
   expect(response.status).toBe(201);
   return (await jsonOf<{ ids: string[] }>(response)).ids;
 }
@@ -86,10 +92,25 @@ describe("starting a spec", () => {
   });
 
   it("should refuse a file that is not a PDF or spreadsheet, a name that is neither, and a request from outside the hub's pages", async () => {
-    const bad = await uploadRoute.POST(as("alice", "/api/ui/assistant/bulk-scan", { method: "POST", body: "hello", headers: { "x-file-name": "t.xlsx" } }));
-    const noName = await uploadRoute.POST(as("alice", "/api/ui/assistant/bulk-scan", { method: "POST", body: "hello", headers: { "x-file-name": "t.txt" } }));
+    const bad = await uploadRoute.POST(as("alice", "/api/ui/assistant/bulk-scan", { method: "POST", body: uploadForm("t.xlsx", "hello") }));
+    const noName = await uploadRoute.POST(as("alice", "/api/ui/assistant/bulk-scan", { method: "POST", body: uploadForm("t.txt", "hello") }));
+    const noForm = await uploadRoute.POST(as("alice", "/api/ui/assistant/bulk-scan", { method: "POST", body: "hello" }));
 
-    expect([bad.status, noName.status]).toEqual([400, 400]);
+    expect([bad.status, noName.status, noForm.status]).toEqual([400, 400, 400]);
+    expect(await prisma.bulkScanSpec.count()).toBe(0);
+  });
+
+  it("should refuse a CCD definition sent with a spreadsheet, and one over the size limit", async () => {
+    const bytes = new Uint8Array((await generateTransformWorkbook(SPEC).xlsx.writeBuffer()) as ArrayBuffer);
+    const withDefinition = uploadForm("t1.xlsx", bytes);
+    withDefinition.set("definition", new File(["[]"], "CaseField.json"));
+    const tooBig = uploadForm("t1.xlsx", bytes);
+    tooBig.set("definition", new File([new Uint8Array(1024 * 1024 + 1)], "CaseField.zip"));
+
+    const refused = await uploadRoute.POST(as("alice", "/api/ui/assistant/bulk-scan", { method: "POST", body: withDefinition }));
+    const large = await uploadRoute.POST(as("alice", "/api/ui/assistant/bulk-scan", { method: "POST", body: tooBig }));
+
+    expect([refused.status, large.status]).toEqual([400, 400]);
     expect(await prisma.bulkScanSpec.count()).toBe(0);
   });
 

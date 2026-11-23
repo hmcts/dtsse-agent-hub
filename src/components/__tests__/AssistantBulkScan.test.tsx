@@ -32,23 +32,40 @@ afterEach(() => {
 const reply = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
 
 describe("bulk scan upload", () => {
-  const choose = (file: File) => fireEvent.change(screen.getByLabelText(/PDF or spreadsheet/), { target: { files: [file] } });
+  const choose = (label: RegExp, file: File) => fireEvent.change(screen.getByLabelText(label), { target: { files: [file] } });
+  const start = () => fireEvent.click(screen.getByRole("button", { name: "Start the form" }));
 
-  it("should send the file with its name and open the first spec when it is read", async () => {
+  it("should send the form with the definition and case type typed and open the first spec when it is read", async () => {
     fetchMock.mockResolvedValue(reply(201, { ids: ["abc", "def"] }));
     render(<BulkScanUpload />);
 
-    choose(new File(["x"], "My form.xlsx"));
+    choose(/^Form:/, new File(["x"], "My form.pdf"));
+    choose(/CCD definition/, new File(["[]"], "CaseField.json"));
+    fireEvent.change(screen.getByLabelText(/Case type id/), { target: { value: "CriminalInjuriesCompensation" } });
+    start();
 
     await waitFor(() => expect(push).toHaveBeenCalledWith("/assistant/bulk-scan/abc"));
-    expect(fetchMock.mock.calls[0]?.[1].headers["x-file-name"]).toBe("My%20form.xlsx");
+    const body = fetchMock.mock.calls[0]?.[1].body as FormData;
+    expect((body.get("form") as File).name).toBe("My form.pdf");
+    expect((body.get("definition") as File).name).toBe("CaseField.json");
+    expect(body.get("caseType")).toBe("CriminalInjuriesCompensation");
+  });
+
+  it("should ask for a form before sending anything", () => {
+    render(<BulkScanUpload />);
+
+    start();
+
+    expect(screen.getByRole("alert").textContent).toBe("Choose the form to upload.");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("should show the reason when the file is refused", async () => {
     fetchMock.mockResolvedValue(reply(422, { error: "the PDF has no AcroForm fields" }));
     render(<BulkScanUpload />);
 
-    choose(new File(["x"], "a.pdf"));
+    choose(/^Form:/, new File(["x"], "a.pdf"));
+    start();
 
     expect((await screen.findByRole("alert")).textContent).toBe("the PDF has no AcroForm fields");
     expect(push).not.toHaveBeenCalled();
@@ -58,9 +75,10 @@ describe("bulk scan upload", () => {
     fetchMock.mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce(reply(500, {}));
     render(<BulkScanUpload />);
 
-    choose(new File(["x"], "a.pdf"));
+    choose(/^Form:/, new File(["x"], "a.pdf"));
+    start();
     expect((await screen.findByRole("alert")).textContent).toContain("Check your connection");
-    choose(new File(["x"], "a.pdf"));
+    start();
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("could not be uploaded"));
   });
 });
@@ -292,6 +310,8 @@ describe("bulk scan editor", () => {
 
     fireEvent.change(screen.getByLabelText("Label of 1.2"), { target: { value: "Full name" } });
     fireEvent.change(screen.getByLabelText("Maximum length of 1.2"), { target: { value: "40" } });
+    fireEvent.change(screen.getByLabelText("Minimum length of 1.2"), { target: { value: "5" } });
+    fireEvent.change(screen.getByLabelText("Case type (CCD case type id)"), { target: { value: "CriminalInjuriesCompensation" } });
     fireEvent.change(screen.getByLabelText("Keys of 1.2"), { target: { value: "name, other" } });
     fireEvent.blur(screen.getByLabelText("Keys of 1.2"));
     fireEvent.change(screen.getByLabelText("CCD ids of 1.2"), { target: { value: "ccdName" } });
@@ -301,8 +321,8 @@ describe("bulk scan editor", () => {
 
     await waitFor(() => expect(push).toHaveBeenCalledWith("/assistant/bulk-scan/s1"));
     const sent = JSON.parse(fetchMock.mock.calls[0]?.[1].body).spec;
-    expect(sent.form.formType).toBe("T2");
-    expect(sent.sections[0].fields[1]).toMatchObject({ label: "Full name", maxLength: 40, keys: ["name", "other"], ccd: ["ccdName"] });
+    expect(sent.form).toMatchObject({ formType: "T2", ccdCaseTypeId: "CriminalInjuriesCompensation" });
+    expect(sent.sections[0].fields[1]).toMatchObject({ label: "Full name", maxLength: 40, minLength: 5, keys: ["name", "other"], ccd: ["ccdName"] });
   });
 
   it("should mark the rows the schema refused, and keep the person's edits", async () => {
@@ -384,6 +404,22 @@ describe("typing into the editor", () => {
     await user.click(screen.getByRole("button", { name: "Save as a new version" }));
 
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body).spec.sections[0].fields[1].maxLength).toBe(42);
+  });
+
+  it("should show a hint in each empty row input, and name each row's controls for a screen reader and a tooltip", () => {
+    render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
+
+    for (const [label, hint] of [
+      ["Minimum length of 1.2", "min length"],
+      ["Maximum length of 1.2", "max length"],
+      ["Regex of 1.2", "regex (e.g. ^[XG]\\d+$)"]
+    ] as const) {
+      expect((screen.getByLabelText(label) as HTMLInputElement).placeholder).toBe(hint);
+    }
+    const down = screen.getByRole("button", { name: "Move 1.2 down" });
+    expect(down.getAttribute("title")).toBe("Move 1.2 down");
+    expect(screen.getByRole("button", { name: "Remove 1.2" }).getAttribute("title")).toBe("Remove 1.2");
+    expect(screen.getByRole("button", { name: "Move section 1 up" }).getAttribute("title")).toBe("Move section 1 up");
   });
 
   it("should send the version the edit started from, and refuse to save an older version over the later ones", async () => {

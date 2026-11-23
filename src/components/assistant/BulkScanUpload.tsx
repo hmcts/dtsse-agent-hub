@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useId, useState } from "react";
+import { type FormEvent, useId, useState } from "react";
 import { FIELD } from "@/components/assistant/WelshParts";
 
 /** Starts a spec from a form PDF, an Exela SIP or an HMCTS transformation sheet, and opens it. */
@@ -10,20 +10,30 @@ export function BulkScanUpload() {
   const inputId = useId();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [form, setForm] = useState<File | null>(null);
+  const [definition, setDefinition] = useState<File | null>(null);
+  const [caseType, setCaseType] = useState("");
 
-  async function upload(file: File): Promise<void> {
+  async function upload(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (form === null) {
+      setError("Choose the form to upload.");
+      return;
+    }
+    const body = new FormData();
+    body.set("form", form);
+    if (definition !== null) {
+      body.set("definition", definition);
+    }
+    body.set("caseType", caseType);
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch("/api/ui/assistant/bulk-scan", {
-        method: "POST",
-        headers: { "content-type": "application/octet-stream", "x-file-name": encodeURIComponent(file.name) },
-        body: file
-      });
-      const body = (await response.json().catch(() => ({}))) as { ids?: unknown; error?: unknown };
-      const first = Array.isArray(body.ids) ? body.ids[0] : undefined;
+      const response = await fetch("/api/ui/assistant/bulk-scan", { method: "POST", body });
+      const result = (await response.json().catch(() => ({}))) as { ids?: unknown; error?: unknown };
+      const first = Array.isArray(result.ids) ? result.ids[0] : undefined;
       if (!response.ok || typeof first !== "string") {
-        setError(typeof body.error === "string" ? body.error : "That file could not be uploaded. Try again.");
+        setError(typeof result.error === "string" ? result.error : "That file could not be uploaded. Try again.");
         return;
       }
       router.push(`/assistant/bulk-scan/${first}`);
@@ -43,23 +53,50 @@ export function BulkScanUpload() {
         Upload the form's PDF to draft its fields, or an Exela SIP or an HMCTS transformation sheet to carry on from one. A PDF needs fillable form fields: for
         a scanned one, ask your assistant to draft it.
       </p>
-      <label htmlFor={inputId} className="text-[13px] text-asst-muted">
-        PDF or spreadsheet (.pdf, .xlsx)
-      </label>
-      <input
-        id={inputId}
-        type="file"
-        accept=".pdf,.xlsx"
-        disabled={busy}
-        className={`${FIELD} max-w-md`}
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          if (file) {
-            void upload(file);
-          }
-          event.target.value = "";
-        }}
-      />
+      <form method="post" onSubmit={(event) => void upload(event)} className="flex flex-col gap-2">
+        <label htmlFor={inputId} className="text-[13px] text-asst-muted">
+          Form: PDF or spreadsheet (.pdf, .xlsx)
+        </label>
+        <input
+          id={inputId}
+          name="form"
+          type="file"
+          accept=".pdf,.xlsx"
+          disabled={busy}
+          onChange={(event) => setForm(event.target.files?.[0] ?? null)}
+          className={`${FIELD} max-w-md`}
+        />
+        <label htmlFor={`${inputId}-definition`} className="text-[13px] text-asst-muted">
+          The service's CCD definition, to propose CCD fields and the case type (optional, for a PDF; up to 1 MiB): a CaseField.json, a zip of its definitions
+          folder or a definition spreadsheet
+        </label>
+        <input
+          id={`${inputId}-definition`}
+          name="definition"
+          type="file"
+          accept=".json,.zip,.xlsx"
+          disabled={busy}
+          onChange={(event) => setDefinition(event.target.files?.[0] ?? null)}
+          className={`${FIELD} max-w-md`}
+        />
+        <label htmlFor={`${inputId}-case-type`} className="text-[13px] text-asst-muted">
+          Case type id, when the definition does not name one or holds several (optional)
+        </label>
+        <input
+          id={`${inputId}-case-type`}
+          name="caseType"
+          type="text"
+          maxLength={100}
+          placeholder="CriminalInjuriesCompensation"
+          value={caseType}
+          onChange={(event) => setCaseType(event.target.value)}
+          disabled={busy}
+          className={`${FIELD} max-w-md`}
+        />
+        <button type="submit" disabled={busy} className="w-fit rounded-lg border border-asst-line px-3 py-1.5 text-[13px] font-medium">
+          Start the form
+        </button>
+      </form>
       {busy ? <p className="text-[13px] text-asst-muted">Reading it…</p> : null}
       {error === null ? null : (
         <p role="alert" className="text-[13px] text-asst-error">

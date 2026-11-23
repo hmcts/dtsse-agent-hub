@@ -12,6 +12,7 @@ import {
   importTransformSheet,
   isModelKey,
   modelByKey,
+  readCcdDefinition,
   readsKeys,
   readWorkbookBytes,
   type Scenario,
@@ -36,21 +37,41 @@ import { zipFiles } from "./zip.ts";
 
 export const MAX_BULK_SCAN_FILE_BYTES = 5 * 1024 * 1024;
 /** A saved spec's JSON: the D8 form, 91 field rows, is under 400 KiB. */
+/** A CCD definition uploaded with a form: a CaseField.json is about 120 KiB, and the proxy buffers 6 MiB of a request, which the form PDF takes most of. */
+export const MAX_CCD_DEFINITION_BYTES = 1024 * 1024;
 export const MAX_SPEC_BYTES = 3 * 1024 * 1024;
 export const MAX_SPEC_NAME = 200;
+export const MAX_CASE_TYPE_ID = 100;
+
+/** The case type's CCD definition that came with a form PDF, and the case type id the person typed for it. */
+export interface CcdUpload {
+  bytes?: Uint8Array;
+  caseType?: string;
+}
 
 export interface Imported {
   kind: "pdf" | "sip" | "transformation sheet";
   forms: FormSpec[];
 }
 
-/** Reads an uploaded form PDF, Exela SIP or HMCTS transformation sheet into one spec per form it holds. */
-export async function importUpload(fileName: string, bytes: Uint8Array): Promise<Imported> {
+/**
+ * Reads an uploaded form PDF, Exela SIP or HMCTS transformation sheet into one spec per form it holds. A PDF's CCD fields are
+ * proposed from `ccd`, the case type's definition, when one comes with it.
+ */
+export async function importUpload(fileName: string, bytes: Uint8Array, ccd?: CcdUpload): Promise<Imported> {
   if (isPdf(bytes)) {
-    const result = await fromPdf({ pdf: fileName, bytes }).catch((error: unknown) => {
-      console.error(`a form PDF could not be read: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`);
-      return undefined;
-    });
+    const definition = ccd?.bytes
+      ? await readCcdDefinition(ccd.bytes, ccd.caseType).catch((error: unknown) => {
+          throw new HttpError(422, error instanceof Error ? error.message : "that CCD definition could not be read");
+        })
+      : undefined;
+    const caseType = definition?.caseType ?? ccd?.caseType;
+    const result = await fromPdf({ pdf: fileName, bytes, ...(definition ? { ccdIds: definition.fields } : {}), ...(caseType ? { caseType } : {}) }).catch(
+      (error: unknown) => {
+        console.error(`a form PDF could not be read: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`);
+        return undefined;
+      }
+    );
     if (!result) {
       throw new HttpError(400, "that PDF could not be read");
     }
@@ -58,6 +79,9 @@ export async function importUpload(fileName: string, bytes: Uint8Array): Promise
       throw new HttpError(422, `${result.needsReview.reason}, so no field could be read from it. Ask your assistant to read its pages and draft the spec`);
     }
     return { kind: "pdf", forms: result.bundle.forms };
+  }
+  if (ccd) {
+    throw new HttpError(400, "a CCD definition goes with a form PDF, to propose its CCD fields");
   }
   if (!isXlsx(bytes)) {
     throw new HttpError(400, "choose a form PDF, an Exela SIP or a transformation sheet (.xlsx)");

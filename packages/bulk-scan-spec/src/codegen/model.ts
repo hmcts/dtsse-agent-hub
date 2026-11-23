@@ -15,6 +15,7 @@ export interface KeyModel {
   allowed: string[];
   blankAllowed: boolean;
   maxLength?: number;
+  minLength?: number;
   regex?: string;
   /** Other keys of the same XoR group. */
   groupWith: string[];
@@ -75,6 +76,7 @@ export function keyModels(spec: FormSpec): KeyModel[] {
         allowed: set?.allowed ?? [],
         blankAllowed: set?.blankAllowed ?? true,
         maxLength: field.maxLength,
+        minLength: field.minLength,
         regex: field.regex,
         groupWith: options.filter((o) => o !== key)
       };
@@ -450,9 +452,9 @@ export function violatesFormat(model: KeyModel, value: string | undefined): bool
   return !!pattern && !!value && !new RegExp(anchoredPattern(pattern)).test(value);
 }
 
-/** Whether a value is longer than the key's maximum length, which the validators and the SSCS schema all enforce. */
+/** Whether a non-empty value is longer than the key's maximum length or shorter than its minimum, which the validators and the SSCS schema all enforce. */
 export function violatesLength(model: KeyModel, value: string | undefined): boolean {
-  return !!model.maxLength && !!value && value.length > model.maxLength;
+  return !!value && ((!!model.maxLength && value.length > model.maxLength) || (!!model.minLength && value.length < model.minLength));
 }
 
 /** A string matching a regular expression, built for the constructs form patterns use; undefined if it cannot be built or does not match. */

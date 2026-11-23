@@ -65,11 +65,18 @@ describe("patching a spec", () => {
     expect(spec.sections[0]?.fields[1]?.label).toBe("");
   });
 
-  it("should drop an id, regex or maximum length that is emptied", () => {
-    const next = patchField(spec, 0, 0, { id: "", regex: "", maxLength: undefined });
+  it("should drop an id, regex, minimum or maximum length that is emptied", () => {
+    const next = patchField(patchField(spec, 0, 0, { minLength: 2 }), 0, 0, { id: "", regex: "", maxLength: undefined, minLength: undefined });
+    expect(next.sections[0]?.fields[0]).not.toHaveProperty("minLength");
     expect(next.sections[0]?.fields[0]).not.toHaveProperty("id");
     expect(next.sections[0]?.fields[0]).not.toHaveProperty("regex");
     expect(next.sections[0]?.fields[0]).not.toHaveProperty("maxLength");
+  });
+
+  it("should set the form's case type and drop it when emptied", () => {
+    const set = patchHeader(spec, { ccdCaseTypeId: "CriminalInjuriesCompensation" });
+    expect(set.form.ccdCaseTypeId).toBe("CriminalInjuriesCompensation");
+    expect(patchHeader(set, { ccdCaseTypeId: "" }).form).not.toHaveProperty("ccdCaseTypeId");
   });
 
   it("should set the form's name and drop a PO box that is emptied", () => {
@@ -120,11 +127,11 @@ const keysOf = (s: FormSpec, section: number) => s.sections[section]?.fields.map
 const first = (s: FormSpec) => s.sections[0]?.fields[0] as FormSpec["sections"][number]["fields"][number];
 
 describe("adding, removing and reordering", () => {
-  it("should add an optional text field with an empty key at the end of the section when a field is added", () => {
+  it("should add a mandatory text field with an empty key at the end of the section when a field is added", () => {
     const next = addField(spec, 0);
     expect(next.sections[0]?.fields).toHaveLength(3);
     expect(next.sections[0]?.fields[2]).toEqual(blankField());
-    expect(blankField()).toMatchObject({ inputType: "text", mandatory: "optional", keys: [""] });
+    expect(blankField()).toMatchObject({ inputType: "text", mandatory: "mandatory", keys: [""] });
     expect(next.sections[1]).toBe(spec.sections[1]);
   });
 

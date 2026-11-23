@@ -76,6 +76,12 @@ export function BulkScanEditor({ view, signOff }: Readonly<{ view: BulkScanEdito
             className="w-56"
           />
           <HeaderField label="PO box" value={spec.form.poBox ?? ""} onChange={(poBox) => change(patchHeader(spec, { poBox }))} className="w-40" />
+          <HeaderField
+            label="Case type (CCD case type id)"
+            value={spec.form.ccdCaseTypeId ?? ""}
+            onChange={(caseType) => change(patchHeader(spec, { ccdCaseTypeId: caseType }))}
+            className="w-64"
+          />
         </div>
       </section>
 
@@ -85,7 +91,7 @@ export function BulkScanEditor({ view, signOff }: Readonly<{ view: BulkScanEdito
             {`Review checklist (${checklist.length} guesses, lowest confidence first)`}
           </h2>
           <p className="text-[13px] text-asst-body">
-            Each of these was guessed from the PDF. The mandatory column, validation and rules are not proposed at all. Mark one done once you have checked it.
+            Each of these was guessed from the PDF. Rules are not proposed at all. Mark one done once you have checked it.
           </p>
           <ul className="flex max-h-[240px] list-disc flex-col gap-1 overflow-y-auto pl-5 text-[13px]">
             {checklist.map((line) => (

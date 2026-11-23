@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { makePdf, SAMPLE_FORM } from "./__fixtures__/make-pdf.ts";
+import { fisTransformYaml } from "./codegen/fis.ts";
 import { fromPdf } from "./from-pdf.ts";
+import type { FormSpec } from "./schema.ts";
 import { allFields, bundleSchema } from "./schema.ts";
 
 const HOUSE = ["soleOrApplicant1FirstName", "applicationForDivorce", "applicationForDissolution", "soleOrApplicant1Solicitor"];
@@ -53,6 +55,22 @@ describe("fromPdf on a form with fields", () => {
     const order = bundle.forms[0]?.pageOrder ?? [];
     expect(order.map((p) => p.page)).toEqual([1, 2]);
     expect(order[1]?.keys).toEqual(expect.arrayContaining(["courtName", "card", "cheque"]));
+  });
+});
+
+describe("fromPdf with a case type", () => {
+  it("should name the case type in the form's header when one is given, and leave it out otherwise", async () => {
+    const pdf = await makePdf("sample", SAMPLE_FORM);
+    expect((await fromPdf({ pdf, caseType: "CriminalInjuriesCompensation" })).bundle.forms[0]?.form.ccdCaseTypeId).toBe("CriminalInjuriesCompensation");
+    expect((await fromPdf({ pdf })).bundle.forms[0]?.form).not.toHaveProperty("ccdCaseTypeId");
+  });
+});
+
+describe("fromPdf case type in the fis transform", () => {
+  it("should come out as the CASE_TYPE_ID of the fis transform YAML when a case type is given", async () => {
+    const { bundle } = await fromPdf({ pdf: await makePdf("sample", SAMPLE_FORM), caseType: "CriminalInjuriesCompensation" });
+    const form = { ...(bundle.forms[0] as FormSpec), form: { ...(bundle.forms[0] as FormSpec).form, formType: "T210" } };
+    expect(fisTransformYaml(form).yaml).toContain("CASE_TYPE_ID: CriminalInjuriesCompensation");
   });
 });
 

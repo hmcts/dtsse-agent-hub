@@ -69,7 +69,8 @@ export function sampleValue(model: KeyModel): string {
   const pattern = formatPattern(model);
   const guess = defaultSample(model);
   const usual = pattern && !new RegExp(anchoredPattern(pattern)).test(guess) ? (sampleFromRegex(pattern) ?? guess) : guess;
-  const fitted = pattern || !model.maxLength ? usual : usual.slice(0, model.maxLength);
+  const sliced = pattern || !model.maxLength ? usual : usual.slice(0, model.maxLength);
+  const fitted = pattern || !model.minLength ? sliced : sliced.padEnd(model.minLength, "x");
   return firstFitting(model, [fitted, ...(pattern ? [sampleFromRegex(pattern)] : []).filter((s): s is string => s !== undefined), ...SHORT_SAMPLES]);
 }
 
@@ -266,7 +267,12 @@ export function expectedFor(spec: FormSpec, data: Data): Scenario["expected"] {
       note("warning", `${m.key} does not match its format`);
     }
     if (violatesLength(m, data[m.key])) {
-      note("warning", `${m.key} is longer than ${m.maxLength} characters`);
+      note(
+        "warning",
+        m.maxLength && (data[m.key] ?? "").length > m.maxLength
+          ? `${m.key} is longer than ${m.maxLength} characters`
+          : `${m.key} is shorter than ${m.minLength} characters`
+      );
     }
   }
   for (const g of exclusiveGroups(spec)) {

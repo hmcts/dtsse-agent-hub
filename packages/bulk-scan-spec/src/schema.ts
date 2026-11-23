@@ -86,7 +86,7 @@ export type Emit = z.infer<typeof emitSchema>;
 
 export const reviewSchema = z.object({
   /** What was guessed. */
-  about: z.enum(["key", "type", "group", "ccd"]),
+  about: z.enum(["key", "type", "group", "ccd", "mandatory", "regex"]),
   reason: z.string(),
   confidence: z.enum(["low", "medium", "high"])
 });
@@ -117,6 +117,7 @@ export const fieldSchema = z
     defaultValue: z.string().optional(),
     businessRules: z.string().optional(),
     maxLength: z.number().int().positive().optional(),
+    minLength: z.number().int().positive().optional(),
     /** The SIP's "Input Pattern / Validation" column. */
     pattern: z.string().optional(),
     regex: z.string().optional(),
@@ -164,7 +165,6 @@ export const formHeaderSchema = z.object({
   poBox: z.string().optional(),
   supplier: z.string().optional(),
   serviceName: z.string().optional(),
-  caseType: z.string().optional(),
   description: z.string().optional(),
   volumes: z.string().optional(),
   paymentHandling: z.string().optional(),

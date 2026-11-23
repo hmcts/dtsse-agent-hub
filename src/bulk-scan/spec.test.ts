@@ -25,7 +25,7 @@ import {
   versionOf
 } from "./spec.ts";
 
-const pdf = vi.hoisted(() => ({ result: undefined as unknown }));
+const pdf = vi.hoisted(() => ({ result: undefined as unknown, input: undefined as unknown }));
 const sip = vi.hoisted(() => ({ fail: false }));
 vi.mock("@hmcts-cft/bulk-scan-spec", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@hmcts-cft/bulk-scan-spec")>();
@@ -39,7 +39,8 @@ vi.mock("@hmcts-cft/bulk-scan-spec", async (importOriginal) => {
       }
       return actual.importSip(workbook as never);
     },
-    fromPdf: async () => {
+    fromPdf: async (input: unknown) => {
+      pdf.input = input;
       if (pdf.result === undefined) {
         throw new Error("unreadable");
       }
@@ -126,6 +127,33 @@ describe("uploads", () => {
   it("should take the forms a PDF's draft holds", async () => {
     pdf.result = { bundle: { forms: [SPEC] }, checklist: [] };
     expect((await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"))).forms).toEqual([SPEC]);
+  });
+
+  it("should propose CCD fields from the definition that comes with a PDF, and name the case type it holds", async () => {
+    pdf.result = { bundle: { forms: [SPEC] }, checklist: [] };
+    const rows = [{ CaseTypeID: "CriminalInjuriesCompensation", ID: "cicCaseFullName", FieldType: "Text" }];
+    await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"), { bytes: new TextEncoder().encode(JSON.stringify(rows)) });
+    expect(pdf.input).toMatchObject({ ccdIds: ["cicCaseFullName"], caseType: "CriminalInjuriesCompensation" });
+  });
+
+  it("should take the case type the person typed when the definition's own are blank", async () => {
+    pdf.result = { bundle: { forms: [SPEC] }, checklist: [] };
+    const rows = [{ CaseTypeID: "", ID: "cicCaseFullName", FieldType: "Text" }];
+    await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"), { bytes: new TextEncoder().encode(JSON.stringify(rows)), caseType: "CIC" });
+    expect(pdf.input).toMatchObject({ ccdIds: ["cicCaseFullName"], caseType: "CIC" });
+  });
+
+  it("should name the typed case type even with no definition", async () => {
+    pdf.result = { bundle: { forms: [SPEC] }, checklist: [] };
+    await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"), { caseType: "CIC" });
+    expect(pdf.input).toMatchObject({ caseType: "CIC" });
+    expect(pdf.input).not.toHaveProperty("ccdIds");
+  });
+
+  it("should refuse a CCD definition that cannot be read, or that comes with a spreadsheet", async () => {
+    const definition = { bytes: new TextEncoder().encode("hello") };
+    expect((await refusal(importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"), definition))).status).toBe(422);
+    expect((await refusal(importUpload("x.xlsx", await bytesOf(generateTransformWorkbook(SPEC)), definition))).status).toBe(400);
   });
 
   it("should refuse a PDF with no form fields, saying why", async () => {

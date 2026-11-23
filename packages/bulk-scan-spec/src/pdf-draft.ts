@@ -1,5 +1,26 @@
+import { noteFor } from "./hints.ts";
 import type { Line, PdfContent, Widget } from "./pdf-extract.ts";
 import type { Field } from "./schema.ts";
+
+/** Where a checkbox option's label says to go next, as in "No > go to Section 5". */
+export interface Route {
+  kind: "section" | "question";
+  /** The section number or the question id. */
+  id: string;
+  /** The route as the form words it, for the reviewer. */
+  text: string;
+}
+
+/** One option of a checkbox or radio field: the key slot it ticks, and where the form sends the person who picks it. */
+export interface Choice {
+  /** The option's own words with the route removed. */
+  label: string;
+  /** Index into the field's keys. */
+  slot: number;
+  /** Whether picking this option ticks its key; "No" of a Yes/No pair leaves the pair's one key unticked. */
+  ticked: boolean;
+  route?: Route;
+}
 
 /** One field of the draft before keys and CCD ids are proposed. `slotLabels` has one entry per key the field will carry. */
 export interface DraftField {
@@ -12,6 +33,10 @@ export interface DraftField {
   slotLabels: string[];
   /** The number of boxes in an XoR group, which a Yes/No pair keeps although it has one key. */
   groupSize?: number;
+  /** The margin note the form prints beside the question, which may state the format an answer takes. */
+  note?: string;
+  /** The options of a checkbox or radio field, one per box. */
+  choices?: Choice[];
   /** Why the field was grouped or typed as it was; empty when the PDF states it outright. */
   reasons: { about: "group" | "type"; reason: string; confidence: "low" | "medium" | "high" }[];
 }
@@ -25,9 +50,10 @@ interface Place {
   label: string;
 }
 
+const ROUTE = /\s*[>.,:\-–—]*\s*go to (section|question)\s+(\d+[a-z]?(?:\.\d+)*)\.?\s*$/i;
 const DATE_WORD = /^(day|month|year|dd|mm|yyyy)$/i;
-const ANCHOR = /^(\d{1,2}(?:\.\d{1,2})+)\.?\s+(\S.*)$/;
-const SECTION = /^Section\s+(\d+)\b[\s:–—.-]*(.*)$/i;
+const ANCHOR = /^(\d{1,2}(?:\.\d{1,2})+|\d{1,2}(?=\.\s))\.?\s+(\S.*)$/;
+const SECTION = /^Section\s+(\d+[a-z]?)\b[\s:–—.-]*(.*)$/i;
 /** A checkbox further than this (top to top) from the previous one starts a new group. */
 const GROUP_GAP = 60;
 const ROW_TOLERANCE = 4;
@@ -100,6 +126,15 @@ function stripAnchor(text: string): string {
 /** A bracketed second line under a section heading, such as "(the sole applicant or applicant 1)". */
 function subtitleOf(heading: Line, lines: Line[]): string {
   return lines.find((l) => l.page === heading.page && l.y < heading.y && heading.y - l.y <= 25 && l.text.startsWith("("))?.text ?? "";
+}
+
+function choiceOf(label: string, slot: number, ticked: boolean): Choice {
+  const m = ROUTE.exec(label);
+  if (!m) {
+    return { label, slot, ticked };
+  }
+  const kind = (m[1] ?? "").toLowerCase() === "section" ? "section" : "question";
+  return { label: label.slice(0, m.index).trim(), slot, ticked, route: { kind, id: m[2] ?? "", text: m[0].replace(/^[\s>.:\-–—]+/, "").trim() } };
 }
 
 /** The top of a question line, raised to the top of any box on the same row so that the question comes before it. */
@@ -219,7 +254,7 @@ export function draftFields(content: PdfContent): DraftField[] {
     }
     const base = { page: first.widget.page, sectionId: first.sectionId, sectionTitle: first.sectionTitle, question: first.anchorText };
     const id = idFor(first);
-    const common = { ...(id ? { id } : {}), role: "field" as const, mandatory: "optional" as const, ccd: [], todo: [], rules: [] };
+    const common = { ...(id ? { id } : {}), role: "field" as const, mandatory: "mandatory" as const, ccd: [], todo: [], rules: [] };
     if (first.widget.kind === "text") {
       const date = dateRun(places, index);
       const rows = date ? [first] : textRows(places, index);
@@ -236,8 +271,10 @@ export function draftFields(content: PdfContent): DraftField[] {
         : first.label || first.widget.tooltip || first.widget.name;
       const lengths = rows.map((p) => p.widget.maxLength);
       const maxLength = lengths.every((n) => n !== undefined) ? lengths.reduce((sum: number, n) => sum + (n ?? 0), 0) : undefined;
+      const note = id && !date ? noteFor(id, content.lines) : undefined;
       drafts.push({
         ...base,
+        ...(note ? { note } : {}),
         slotLabels: date ? date.map((p) => `${label} ${p.label}`) : [label],
         reasons: date ? [{ about: "type", reason: "three boxes labelled day, month and year", confidence: "medium" }] : [],
         field: {
@@ -257,10 +294,12 @@ export function draftFields(content: PdfContent): DraftField[] {
     }
     const question = stripAnchor(labelAbove(first.widget, content.lines) ?? "") || first.anchorText || first.label || first.widget.tooltip || first.widget.name;
     const yesNo = members.length === 2 && /^yes\b/i.test(members[0]?.label ?? "") && /^no\b/i.test(members[1]?.label ?? "");
+    const choices = members.map((p, n) => choiceOf(p.label, yesNo ? 0 : n, !yesNo || n === 0));
     drafts.push({
       ...base,
       question,
-      slotLabels: yesNo ? [question] : members.map((p) => p.label),
+      choices,
+      slotLabels: yesNo ? [question] : choices.map((c) => c.label),
       reasons:
         members.length < 2
           ? []

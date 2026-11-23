@@ -20,7 +20,7 @@ import { evaluateRules, keyModels } from "../codegen/model.ts";
 import { fieldSchema as fsR8, formSpecSchema as fssR8 } from "../schema.ts";
 import { nfdivFiles as nf2, nfdivFiles as nf9, nfdivFiles, nfdivFiles as nfP, nfdivFiles as nfR8 } from "./java.ts";
 import { partitionRules as prR8 } from "./model.ts";
-import { expectedFor as efR8, expectedFor, unsatisfiedSamples as usR8 } from "./scenarios.ts";
+import { expectedFor as efR8, expectedFor, unsatisfiedSamples as usR8, validData } from "./scenarios.ts";
 import { sscsSchema as sscs9 } from "./sscs.ts";
 
 describe("generated Java chains", () => {
@@ -309,5 +309,22 @@ describe("maximum length", () => {
     expect(expectedFor(s, { code: "abc" }).validation).toBe("success");
     expect(fileText(nfdivFiles(s, JAVA), "nfdiv/validation/OcrValidator.java")).toContain('LENGTH_LIMITS.put("code", 3)');
     expect(JSON.stringify(sscs9(s))).toContain('"maxLength":3');
+  });
+});
+
+describe("minimum length", () => {
+  const minimal = () => spec([{ id: "1.1", keys: ["code"], minLength: 3 }]);
+
+  it("should warn about a value under the minimum when the validator, the expectation and the SSCS schema all enforce it", () => {
+    const s = minimal();
+    expect(expectedFor(s, { code: "ab" }).validation).toBe("warning");
+    expect(expectedFor(s, { code: "abc" }).validation).toBe("success");
+    expect(expectedFor(s, { code: "" }).validation).toBe("success");
+    expect(fileText(nfdivFiles(s, JAVA), "nfdiv/validation/OcrValidator.java")).toContain('LENGTH_MINIMUMS.put("code", 3)');
+    expect(JSON.stringify(sscs9(s))).toContain('"anyOf":[{"maxLength":0},{"minLength":3}]');
+  });
+
+  it("should give a valid sample at least the minimum long", () => {
+    expect(validData(minimal()).code?.length).toBeGreaterThanOrEqual(3);
   });
 });
