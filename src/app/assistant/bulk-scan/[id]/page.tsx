@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { signOffSpec } from "@/app/_actions/bulk-scan";
@@ -7,6 +8,11 @@ import { requireViewer } from "@/viewer/current";
 import { bulkScanEditor } from "@/web/data";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({ params }: Readonly<{ params: Promise<{ id: string }> }>): Promise<Metadata> {
+  const view = await bulkScanEditor(await requireViewer(), (await params).id, versionOf(undefined));
+  return { title: view ? view.name : "Bulk Scan form" };
+}
 
 /** One of the person's Bulk Scan specs at its latest version, or `?version=n`. Anyone else's reads as missing. */
 export default async function BulkScanSpecPage({

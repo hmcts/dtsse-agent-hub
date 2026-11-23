@@ -1,7 +1,10 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { requireViewer } from "@/viewer/current";
 
 export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = { title: "Scheduled" };
 
 /** The Scheduled page: prompts a person's assistant runs on a schedule. It says what is coming until that is built. */
 export default async function ScheduledPage() {

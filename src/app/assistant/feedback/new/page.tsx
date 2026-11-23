@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { createFeedbackProject, probeFeedbackLink } from "@/app/_actions/feedback";
 import { FeedbackWizard, type WizardActions } from "@/components/feedback/dev/FeedbackWizard";
 import { FeedbackHeader } from "@/components/feedback/dev/ProjectList";
@@ -6,6 +7,8 @@ import { requireViewer } from "@/viewer/current";
 import { FeedbackFrame, requireFeedback } from "../frame";
 
 export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = { title: "New feedback project" };
 
 const ACTIONS: WizardActions = { probe: probeFeedbackLink, create: createFeedbackProject };
 

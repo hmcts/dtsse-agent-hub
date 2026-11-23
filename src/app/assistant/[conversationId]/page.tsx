@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import {
@@ -79,6 +80,12 @@ const ACTIONS: ChatActions = {
   restoreDeck: restoreDeckVersion,
   saveDeck
 };
+
+/** The tab title: "CFT - " and the conversation's name. A missing one gets the default and the page answers not found. */
+export async function generateMetadata({ params }: { params: Promise<{ conversationId: string }> }): Promise<Metadata> {
+  const view = await assistantConversation(await requireViewer(), (await params).conversationId);
+  return view === undefined ? {} : { title: view.title };
+}
 
 /** One of the viewer's conversations. Anyone else's, or one deleted, is not found. */
 export default async function ConversationPage({

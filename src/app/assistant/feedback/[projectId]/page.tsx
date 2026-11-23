@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { markFeedbackProjectSeen } from "@/app/_actions/feedback";
 import { projectTab } from "@/components/feedback/dev/look";
@@ -11,6 +12,11 @@ import { PROJECT_ACTIONS } from "../actions";
 import { FeedbackFrame, requireFeedback } from "../frame";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({ params }: Readonly<{ params: Promise<{ projectId: string }> }>): Promise<Metadata> {
+  const data = await feedbackProjectPage(await requireViewer(), (await params).projectId);
+  return data === undefined ? { title: "Feedback project" } : { title: data.project.name };
+}
 
 /** One feedback project, for its owner and team; `?tab=` picks the section. Anyone else's is not found. */
 export default async function FeedbackProjectPage({
