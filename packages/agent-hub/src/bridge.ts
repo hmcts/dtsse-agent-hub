@@ -404,11 +404,10 @@ export async function runBridge({
       try {
         const skills = skillNames();
         const content = chooseEnvelope(message, delivery, { skills, attachments, previousProduct });
-        // A conversation's prompt is the owner's own words, so with `AGENT_HUB_TYPE_PROMPTS=1` it is typed into the pane
-        // as input rather than handed over Claude Code's cross-session socket, which frames everything it carries as a
-        // peer's. Off by default: it needs trying on a real pod, and the socket is what acknowledges delivery.
+        // A conversation's prompt is the owner's own words, so it is typed into the pane as input rather than handed over
+        // Claude Code's cross-session socket, which frames everything it carries as a peer's.
         const conversationId = env.AGENT_HUB_CONVERSATION_ID;
-        if (delivery.kind === "conversation" && conversationId && env.AGENT_HUB_TYPE_PROMPTS === "1") {
+        if (delivery.kind === "conversation" && conversationId) {
           await tmux.paste(tmuxName(conversationId), content);
         } else {
           await deliver(info.socketPath, env.CLAUDE_CODE_MESSAGING_TOKEN, content);
@@ -431,7 +430,7 @@ export async function runBridge({
         log(sid, `delivered direct #${message.id}`);
       } catch (e) {
         // Unacked, so the service resends it on the next connection.
-        log(sid, `socket delivery of #${message.id} failed: ${(e as Error).message}`);
+        log(sid, `delivery of #${message.id} failed: ${(e as Error).message}`);
         return;
       }
     }

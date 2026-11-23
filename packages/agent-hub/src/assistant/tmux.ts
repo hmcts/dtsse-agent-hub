@@ -175,8 +175,8 @@ export function createTmux({ env = process.env, exec = runTmux }: CreateTmuxOpti
       if (set.code !== 0) {
         throw new Error(`tmux set-buffer exited ${set.code}${set.stderr.trim() ? `: ${set.stderr.trim()}` : ""}`);
       }
-      // -p brackets the paste so newlines are text, not Enter; -d drops the buffer afterwards.
-      const pasted = await tmux(["paste-buffer", "-p", "-d", "-b", buffer, "-t", name]);
+      // -p brackets the paste so newlines are text, not Enter; -r keeps them as LF; -d drops the buffer afterwards.
+      const pasted = await tmux(["paste-buffer", "-p", "-r", "-d", "-b", buffer, "-t", name]);
       if (pasted.code !== 0) {
         throw new Error(`tmux paste-buffer exited ${pasted.code}${pasted.stderr.trim() ? `: ${pasted.stderr.trim()}` : ""}`);
       }

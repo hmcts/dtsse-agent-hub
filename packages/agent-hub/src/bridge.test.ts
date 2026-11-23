@@ -38,6 +38,9 @@ const DEV_USER = "u-me|Me Tester|me@example.com";
 const BYPASS = "--dangerously-skip-permissions";
 const VIRTUAL = { AGENT_HUB_VIRTUAL_AGENT_ID: "0f8a6a1e-1234-4000-8000-000000000001", AGENT_HUB_LAUNCH_TOKEN: "lt-abc123" };
 // A conversation id the bridge can name a tmux session after, as the supervisor names it.
+/** For a bridge a test starts by hand: nothing it delivers may reach a real tmux. */
+const NO_TMUX = { sendKeys: async () => {}, paste: async () => {} };
+
 const CONVERSATION = "0f8a6a1e-5555-4000-8000-000000000002";
 
 let home: TempClaudeHome;
@@ -137,7 +140,9 @@ async function startBridge(
     socketWrites.push(content);
   };
   const env = { ...process.env, AGENT_HUB_CLAUDE_PID: String(process.pid), CLAUDE_CODE_MESSAGING_TOKEN: "tok", ...extraEnv };
-  const running = runBridge({ sid, env, api: wrapApi ? wrapApi(api) : api, deliver, heartbeatMs: 100, ...bridgeOptions });
+  // A conversation's prompt is typed into its pane, so a test never reaches a real tmux: it is recorded with the socket's.
+  const tmux = { sendKeys: async () => {}, paste: async (_name: string, text: string) => void socketWrites.push(text), ...bridgeOptions.tmux };
+  const running = runBridge({ sid, env, api: wrapApi ? wrapApi(api) : api, deliver, heartbeatMs: 100, ...bridgeOptions, tmux });
   const streamOpens = () => hub.calls.filter((c) => c.method === "GET" && c.path === `/api/agent/${agentId}/stream`);
   return {
     hub,
@@ -791,7 +796,7 @@ describe("runBridge", () => {
     writeJson(statePath(sid, "agent.json"), { agent_id: agentId, session_id: sid, name: sid });
     const env: Env = { ...process.env, CLAUDE_CODE_MESSAGING_TOKEN: "tok" };
     delete env.AGENT_HUB_CLAUDE_PID;
-    const running = runBridge({ sid, env, api, deliver: async () => {}, heartbeatMs: 100 });
+    const running = runBridge({ sid, env, api, deliver: async () => {}, heartbeatMs: 100, tmux: NO_TMUX });
 
     try {
       await waitUntil(() => fs.readFileSync(statePath(sid, "log"), "utf8").includes("no Claude pid found yet"), "the missing pid to be logged");
@@ -1145,7 +1150,8 @@ describe("runBridge", () => {
         deliver: async (_s, _t, c) => {
           socketWrites.push(c);
         },
-        heartbeatMs: 100
+        heartbeatMs: 100,
+        tmux: NO_TMUX
       });
 
       try {
@@ -1278,17 +1284,38 @@ describe("runBridge", () => {
     }
   });
 
-  it("should type a conversation's prompt into its pane, and not hand it to the socket, when AGENT_HUB_TYPE_PROMPTS is on", async () => {
+  it("should type a conversation's prompt into its pane, and not hand it to the socket, ", async () => {
     // Arrange
     const pasted: string[] = [];
     const tmux = {
       sendKeys: async () => {},
       paste: async (name: string, text: string) => void pasted.push(`${name}\n${text}`)
     };
-    const bridge = await startBridge(
-      { pingMs: 5000 },
-      { env: { ...VIRTUAL, AGENT_HUB_CONVERSATION_ID: CONVERSATION, AGENT_HUB_TYPE_PROMPTS: "1" }, tmux, modelSettleMs: 0 }
-    );
+    const bridge = await startBridge({ pingMs: 5000 }, { env: { ...VIRTUAL, AGENT_HUB_CONVERSATION_ID: CONVERSATION }, tmux, modelSettleMs: 0 });
+    const assistant = { conversation_id: CONVERSATION, product: "pcs", product_label: "Possession claims", artefact_version: 0, artefact_updated_by: null };
+
+    try {
+      await waitUntil(() => bridge.streamOpens().length >= 1, "the first stream");
+
+      // Act
+      const sent = bridge.hub.sendDirectFromOwner(bridge.agentId, "admin merge it", { assistant });
+      await waitUntil(() => pasted.length >= 1, "the typed prompt");
+
+      // Assert
+      expect(pasted[0]).toBe(
+        `${tmuxName(CONVERSATION)}\n${contextOpen(sent.id)}\n${ANSWER_HERE}\nProduct area: Possession claims.\n${CONTEXT_CLOSE}\n\nadmin merge it`
+      );
+      expect(bridge.socketWrites).toEqual([]);
+    } finally {
+      await bridge.stop();
+    }
+  });
+
+  it("should type a conversation's prompt into its pane, and still hand a peer's message to the socket", async () => {
+    // Arrange
+    const pasted: string[] = [];
+    const tmux = { sendKeys: async () => {}, paste: async (name: string, text: string) => void pasted.push(`${name}\n${text}`) };
+    const bridge = await startBridge({ pingMs: 5000 }, { env: { ...VIRTUAL, AGENT_HUB_CONVERSATION_ID: CONVERSATION }, tmux, modelSettleMs: 0 });
     const assistant = { conversation_id: CONVERSATION, product: "pcs", product_label: "Possession claims", artefact_version: 0, artefact_updated_by: null };
 
     try {
