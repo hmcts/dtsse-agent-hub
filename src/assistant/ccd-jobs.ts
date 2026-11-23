@@ -31,6 +31,8 @@ export const CCD_JOB_ERRORS = [
 
 export const CASE_TYPE_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/;
 export const PRODUCT = /^[a-z][a-z0-9-]{0,39}$/;
+/** A repository's path in the workspace: two to four segments, such as `apps/sptribs/sptribs-case-api`. */
+export const REPO_PATH = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,59}(\/[A-Za-z0-9][A-Za-z0-9_.-]{0,59}){1,3}$/;
 
 export const CCD_CASE_TYPES = definePodJobKind({
   kind: "ccd.case-types",
@@ -41,7 +43,8 @@ export const CCD_CASE_TYPES = definePodJobKind({
         product: z.string().regex(PRODUCT),
         service: z.string().max(100),
         case_type: z.string().regex(CASE_TYPE_ID),
-        config: z.enum(CCD_CONFIGS).nullable().catch(null)
+        config: z.enum(CCD_CONFIGS).nullable().catch(null),
+        repo: z.string().regex(REPO_PATH).optional().catch(undefined)
       }),
       MAX_LISTED_CASE_TYPES,
       { message: `at most ${MAX_LISTED_CASE_TYPES} case types` }

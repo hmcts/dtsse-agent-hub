@@ -204,6 +204,8 @@ export const formHeaderSchema = z.object({
   /** The workspace product that defines the case type, and how it configures CCD; the picker sets both. */
   ccdProduct: z.string().optional(),
   ccdConfig: z.enum(CCD_CONFIGS).optional(),
+  /** The workspace path of the repository that holds the picked case type, such as `apps/sptribs/sptribs-case-api`. */
+  ccdRepo: z.string().optional(),
   /** The ids of the picked case type's fields, to check a typed id against. */
   ccdFieldIds: z.array(z.string()).optional(),
   /** What the form was started from, which decides whether a case type's match may propose fields for rows with no id: a sheet's unmapped rows are deliberate. */

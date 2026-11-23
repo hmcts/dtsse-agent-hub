@@ -14,6 +14,7 @@ export interface CaseTypeChoice {
   product: string;
   caseType: string;
   config?: CcdConfig | null;
+  repo?: string;
 }
 
 export interface CaseTypeOptions {
@@ -23,11 +24,18 @@ export interface CaseTypeOptions {
 
 /** The form header set to a case type, with its fields' ids kept to check a typed id against. */
 export function withCaseTypeHeader(spec: FormSpec, choice: CaseTypeChoice, fields: readonly Pick<CcdField, "id">[]): FormSpec {
-  const { ccdConfig: _config, ...form } = spec.form;
+  const { ccdConfig: _config, ccdRepo: _repo, ...form } = spec.form;
   const ccdFieldIds = [...new Set(fields.map((f) => f.id))].sort(byCode);
   return {
     ...spec,
-    form: { ...form, ccdCaseTypeId: choice.caseType, ccdProduct: choice.product, ccdFieldIds, ...(choice.config ? { ccdConfig: choice.config } : {}) }
+    form: {
+      ...form,
+      ccdCaseTypeId: choice.caseType,
+      ccdProduct: choice.product,
+      ccdFieldIds,
+      ...(choice.config ? { ccdConfig: choice.config } : {}),
+      ...(choice.repo ? { ccdRepo: choice.repo } : {})
+    }
   };
 }
 
@@ -55,7 +63,7 @@ export function withCaseType(spec: FormSpec, choice: CaseTypeChoice, fields: Ccd
 
 /** The spec with no case type: its fields lose their status and the ids the matcher proposed, and keep the ids a person set or chose and those that came with the form. */
 export function withoutCaseType(spec: FormSpec): FormSpec {
-  const { ccdCaseTypeId: _id, ccdProduct: _product, ccdConfig: _config, ccdFieldIds: _ids, ...form } = spec.form;
+  const { ccdCaseTypeId: _id, ccdProduct: _product, ccdConfig: _config, ccdRepo: _repo, ccdFieldIds: _ids, ...form } = spec.form;
   return withoutCcdReviews({
     ...spec,
     form,

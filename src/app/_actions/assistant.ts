@@ -29,9 +29,13 @@ import { hasPod } from "@/assistant/pods";
 import { MAX_ARTEFACT_MARKDOWN, MAX_ARTEFACT_TITLE } from "@/assistant/schemas";
 import { sendToConversation } from "@/assistant/send";
 import { requestWake, stopAnswer } from "@/assistant/session-store";
-import { attachUploads, uploadNames } from "@/assistant/upload-store";
+import { attachUploads, storeUploadBytes, uploadNames } from "@/assistant/upload-store";
 import { attachedBody, MAX_ATTACHMENTS_PER_MESSAGE } from "@/assistant/uploads";
 import { needsWake } from "@/assistant/wake";
+import { handoffPrompt, isHandoffTarget, isSignedOff, NO_FORM_TYPE, NOT_SIGNED_OFF } from "@/bulk-scan/handoff";
+import { handoffFiles } from "@/bulk-scan/handoff-files";
+import { loadSpec } from "@/bulk-scan/load";
+import { DEFAULT_JAVA_PACKAGE, versionOf } from "@/bulk-scan/spec";
 import type { ThreadMessage } from "@/messages/direct-thread";
 import { MAX_BODY } from "@/messages/limits";
 import { prisma } from "@/store/prisma";
@@ -171,6 +175,59 @@ export async function startConversation(input: { product: unknown; body: unknown
     }
     const conversation = await createConversation(prisma, viewer.oid, { product: input.product, title: text(input.title) });
     await send(viewer.oid, conversation, body);
+    revalidatePath("/assistant");
+    return { ok: true, id: conversation.id };
+  });
+}
+
+/**
+ * Hands a signed-off Bulk Scan form to the Assistant: a new conversation whose first message asks for the service's pull
+ * request and carries the form's generated code, spec and transformation sheet. Only the owner's own signed-off version
+ * goes: `loadSpec` reports anyone else's form as missing, and a version that is saved but not signed off is refused.
+ * The files are stored before the message, and the message claims them in its own transaction, so a refused send leaves
+ * no half-attached message; the empty conversation it leaves is the one `sweepUploads` removes.
+ */
+export async function handToAssistant(form: FormData): Promise<ActionResult<{ id: string }>> {
+  return await runAction<{ id: string }>("hand to assistant", async () => {
+    if (!virtualAgentsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    if ((await assistantChatGate(viewer)) === "blocked") {
+      return BLOCKED;
+    }
+    const target = text(form.get("target"));
+    if (!isHandoffTarget(target)) {
+      return { ok: false, error: "choose the code pattern the service uses" };
+    }
+    const version = versionOf(text(form.get("version")));
+    if (version === undefined) {
+      return { ok: false, error: "choose a version to hand over" };
+    }
+    const { record, spec } = await loadSpec(prisma, { actorOid: viewer.oid, ownerOid: viewer.oid }, text(form.get("id")), version);
+    if (!isSignedOff(record.versions, version)) {
+      return { ok: false, error: NOT_SIGNED_OFF };
+    }
+    if (spec.form.formType.trim() === "") {
+      return { ok: false, error: NO_FORM_TYPE };
+    }
+    const javaPackage = text(form.get("package")) || DEFAULT_JAVA_PACKAGE;
+    const { files, names } = await handoffFiles(spec, target, javaPackage);
+    const prompt = handoffPrompt({ spec, version, target, javaPackage, names });
+    const conversation = await createConversation(prisma, viewer.oid, { product: "bulk-scan", title: `Hand over ${spec.form.name || spec.form.formType}` });
+    const uploadIds: string[] = [];
+    for (const file of files) {
+      uploadIds.push(
+        await storeUploadBytes(prisma, {
+          conversationId: conversation.id,
+          ownerOid: viewer.oid,
+          fileName: file.fileName,
+          mediaType: file.contentType,
+          bytes: file.bytes
+        })
+      );
+    }
+    await send(viewer.oid, conversation, prompt, uploadIds);
     revalidatePath("/assistant");
     return { ok: true, id: conversation.id };
   });

@@ -73,7 +73,7 @@ const view = (over: object = {}) =>
 
 function setup(over: object = {}) {
   const user = userEvent.setup();
-  render(<BulkScanEditor view={view(over)} signOff={vi.fn()} />);
+  render(<BulkScanEditor view={view(over)} signOff={vi.fn()} handToAssistant={vi.fn()} />);
   return user;
 }
 
@@ -225,6 +225,7 @@ describe("finding fields", () => {
           }
         })}
         signOff={vi.fn()}
+        handToAssistant={vi.fn()}
       />
     );
     await user.click(screen.getByRole("button", { name: /^Needs review/ }));
@@ -314,7 +315,7 @@ describe("what stays with a section or field", () => {
 
   it("should show the next field's own allowed values when the field before it is removed", async () => {
     const user = userEvent.setup();
-    render(<BulkScanEditor view={twin()} signOff={vi.fn()} />);
+    render(<BulkScanEditor view={twin()} signOff={vi.fn()} handToAssistant={vi.fn()} />);
     expect((screen.getByLabelText("k value 2") as HTMLInputElement).value).toBe("a2");
     await user.click(screen.getByRole("button", { name: "Remove 1.1" }));
 
@@ -324,7 +325,7 @@ describe("what stays with a section or field", () => {
 
   it("should collapse only the section pressed when two sections share an id", async () => {
     const user = userEvent.setup();
-    render(<BulkScanEditor view={twin()} signOff={vi.fn()} />);
+    render(<BulkScanEditor view={twin()} signOff={vi.fn()} handToAssistant={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: "Collapse section 1" }));
 
     expect(screen.getByRole("button", { name: "Expand section 1" })).toBeTruthy();
@@ -333,7 +334,7 @@ describe("what stays with a section or field", () => {
 
   it("should keep a section collapsed when its id is edited", async () => {
     const user = userEvent.setup();
-    render(<BulkScanEditor view={twin()} signOff={vi.fn()} />);
+    render(<BulkScanEditor view={twin()} signOff={vi.fn()} handToAssistant={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: "Collapse section 1" }));
     await user.click(screen.getByRole("button", { name: /^1 A/ }));
     await user.type(screen.getByLabelText("Section ID"), "9");
@@ -388,6 +389,7 @@ describe("identical markers", () => {
           }
         })}
         signOff={vi.fn()}
+        handToAssistant={vi.fn()}
       />
     );
     expect(screen.getAllByText(/same/)).toHaveLength(2);
@@ -455,6 +457,7 @@ describe("the open field's heading", () => {
           }
         })}
         signOff={vi.fn()}
+        handToAssistant={vi.fn()}
       />
     );
     expect(screen.getByRole("heading", { level: 2, name: "Solo" })).toBeTruthy();

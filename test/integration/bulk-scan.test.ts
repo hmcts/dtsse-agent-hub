@@ -8,8 +8,10 @@ import * as downloadRoute from "../../src/app/api/ui/assistant/bulk-scan/[id]/do
 import * as simulateRoute from "../../src/app/api/ui/assistant/bulk-scan/[id]/simulate/route.ts";
 import * as versionsRoute from "../../src/app/api/ui/assistant/bulk-scan/[id]/versions/route.ts";
 import * as uploadRoute from "../../src/app/api/ui/assistant/bulk-scan/route.ts";
+import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
+import { findConversation } from "../../src/assistant/conversation-store.ts";
 import { MAX_SPEC_BYTES } from "../../src/bulk-scan/spec.ts";
-import { listSpecs, readSpec } from "../../src/bulk-scan/spec-store.ts";
+import { createSpecs, listSpecs, readSpec } from "../../src/bulk-scan/spec-store.ts";
 import { bulkScanEditor, bulkScanSpecs } from "../../src/web/data.ts";
 import { ALICE, BOB } from "./assistant-pod.ts";
 import { connect, insertUser, prisma, resetDatabase } from "./database.ts";
@@ -20,6 +22,7 @@ vi.mock("next/cache", async () => (await import("./web-session.ts")).nextCacheMo
 
 const { actAs, revalidated } = await import("./web-session.ts");
 const actions = await import("../../src/app/_actions/bulk-scan.ts");
+const assistantActions = await import("../../src/app/_actions/assistant.ts");
 
 const client = await connect();
 afterAll(async () => {
@@ -384,5 +387,120 @@ describe("starting a spec from a case type picked in the workspace", () => {
 
     expect([bad.status, unnamed.status]).toEqual([400, 400]);
     expect(await prisma.bulkScanSpec.count()).toBe(0);
+  });
+});
+
+describe("handing a version to the Assistant", () => {
+  const WITH_NEW_FIELD = formSpecSchema.parse({
+    form: {
+      name: "T210 Application",
+      formType: "T210",
+      ccdCaseTypeId: "CIC",
+      ccdProduct: "sptribs",
+      ccdConfig: "config-generator",
+      ccdRepo: "apps/sptribs/sptribs-case-api"
+    },
+    sections: [
+      {
+        id: "1",
+        title: "About",
+        fields: [
+          { id: "1.1", label: "First name", keys: ["firstName"], mandatory: "mandatory", ccd: ["applicantFirstName"] },
+          {
+            id: "1.2",
+            label: "Nickname",
+            keys: ["nickname"],
+            ccd: ["applicantNickname"],
+            ccdMatch: { status: "new", newField: { id: "applicantNickname", type: "Text" } }
+          }
+        ]
+      }
+    ]
+  });
+
+  async function spec(): Promise<string> {
+    const [id] = await createSpecs(prisma, own(ALICE), [{ name: "T210 Application", spec: WITH_NEW_FIELD }]);
+    return id as string;
+  }
+
+  const handed = (id: string, over: Record<string, string> = {}) => assistantActions.handToAssistant(formOf({ id, version: "1", target: "nfdiv", ...over }));
+
+  beforeEach(async () => {
+    await ensureAssistant(prisma, { oid: ALICE.oid, modelRoute: "own-licence" });
+    await ensureAssistant(prisma, { oid: BOB.oid, modelRoute: "own-licence" });
+  });
+
+  it("should start the owner's conversation with the generated files and the prepared prompt on its first message when the version is signed off", async () => {
+    const id = await spec();
+    await actions.signOffSpec(formOf({ id, version: "1" }));
+
+    const result = await handed(id);
+
+    expect(result).toMatchObject({ ok: true, id: expect.any(String) });
+    const conversationId = (result as { id: string }).id;
+    const conversation = await prisma.assistantConversation.findUniqueOrThrow({ where: { id: conversationId }, select: { ownerOid: true, product: true } });
+    expect(conversation).toEqual({ ownerOid: ALICE.oid, product: "bulk-scan" });
+    const message = await prisma.message.findFirstOrThrow({ select: { id: true, body: true } });
+    expect(message.body).toContain("The service repo is apps/sptribs/sptribs-case-api, which holds the CCD case type CIC.");
+    const uploads = await prisma.assistantUpload.findMany({
+      where: { conversationId },
+      orderBy: { createdAt: "asc" },
+      select: { fileName: true, messageId: true, state: true, ownerOid: true }
+    });
+    expect(uploads.map((u) => u.fileName)).toHaveLength(4);
+    expect(uploads.map((u) => u.fileName)).toEqual(
+      expect.arrayContaining(["T210-nfdiv.zip", "T210-spec.json", "T210-transformation.xlsx", "new-ccd-fields.json"])
+    );
+    expect(new Set(uploads.map((u) => u.messageId))).toEqual(new Set([message.id]));
+    expect(new Set(uploads.map((u) => `${u.state}/${u.ownerOid}`))).toEqual(new Set([`stored/${ALICE.oid}`]));
+  });
+
+  it("should refuse a version that is saved but not signed off, and create nothing", async () => {
+    const id = await spec();
+
+    const result = await handed(id);
+
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("Sign off this version first") });
+    expect(await prisma.assistantConversation.count()).toBe(0);
+    expect(await prisma.assistantUpload.count()).toBe(0);
+  });
+
+  it("should refuse a signed-off version with no form type, and create nothing", async () => {
+    const [id] = await createSpecs(prisma, own(ALICE), [{ name: "No type", spec: { ...WITH_NEW_FIELD, form: { ...WITH_NEW_FIELD.form, formType: "" } } }]);
+    await actions.signOffSpec(formOf({ id: id as string, version: "1" }));
+
+    expect(await handed(id as string)).toEqual({ ok: false, error: "Set the form type (document_sub_type) in Form details first." });
+    expect(await prisma.assistantConversation.count()).toBe(0);
+  });
+
+  it("should refuse a spec the person does not own, and leave it with no conversation, for the owner and for them", async () => {
+    const id = await spec();
+    await actions.signOffSpec(formOf({ id, version: "1" }));
+    actAs("bob");
+
+    const result = await handed(id);
+
+    expect(result).toMatchObject({ ok: false });
+    expect(await prisma.assistantConversation.count()).toBe(0);
+    expect(await prisma.assistantUpload.count()).toBe(0);
+  });
+
+  it("should keep the conversation and its files from anyone but the owner", async () => {
+    const id = await spec();
+    await actions.signOffSpec(formOf({ id, version: "1" }));
+    const conversationId = ((await handed(id)) as { id: string }).id;
+
+    expect(await findConversation(prisma, BOB.oid, conversationId)).toBeUndefined();
+    expect(await findConversation(prisma, ALICE.oid, conversationId)).toBeDefined();
+    actAs("bob");
+    expect(await assistantActions.sendAssistantMessage({ conversationId, body: "hello" })).toMatchObject({ ok: false });
+  });
+
+  it("should refuse a target that is not a service pattern", async () => {
+    const id = await spec();
+    await actions.signOffSpec(formOf({ id, version: "1" }));
+
+    expect(await handed(id, { target: "envelopes" })).toMatchObject({ ok: false });
+    expect(await prisma.assistantConversation.count()).toBe(0);
   });
 });

@@ -49,6 +49,7 @@ export interface UploadedCaseType {
   caseType: string;
   product: string;
   config?: CcdConfig;
+  repo?: string;
   fields: CcdField[];
 }
 
@@ -116,7 +117,8 @@ function withPicked(forms: FormSpec[], picked: UploadedCaseType | undefined): Fo
 const choiceOf = (picked: UploadedCaseType): CaseTypeChoice => ({
   caseType: picked.caseType,
   product: picked.product,
-  ...(picked.config ? { config: picked.config } : {})
+  ...(picked.config ? { config: picked.config } : {}),
+  ...(picked.repo ? { repo: picked.repo } : {})
 });
 
 function withSource(forms: FormSpec[], source: "pdf" | "sip" | "sheet"): FormSpec[] {
@@ -311,13 +313,26 @@ export async function transformDownload(spec: FormSpec): Promise<Download> {
   return { fileName: `${stem(spec)}-transformation.xlsx`, contentType: XLSX, bytes: new Uint8Array((await book.xlsx.writeBuffer()) as ArrayBuffer) };
 }
 
-/** What one codegen target writes for the form, zipped. A form without a usable form type is refused with the engine's own words. */
-export function codeDownload(spec: FormSpec, target: Target, javaPackage: string): Download {
+type OutputFile = ReturnType<typeof generateTarget>[number];
+
+/** The spec itself, as saved: what the generated code and sheets were made from. */
+export function specJsonDownload(spec: FormSpec): Download {
+  return { fileName: `${stem(spec)}-spec.json`, contentType: "application/json", bytes: new TextEncoder().encode(`${JSON.stringify(spec, null, 2)}\n`) };
+}
+
+/** The new case fields' list, which the code zip also carries; empty when the form needs none. */
+export function newFieldsDownload(spec: FormSpec): Download | undefined {
+  const file = newCcdFieldFiles(spec).find((f) => f.path === "new-ccd-fields.json");
+  return file ? { fileName: "new-ccd-fields.json", contentType: "application/json", bytes: new TextEncoder().encode(file.content) } : undefined;
+}
+
+/** Everything one codegen target writes for the form, and the form's new case fields; `extra` is written beside them. A form without a usable form type is refused with the engine's own words. */
+export function codeDownload(spec: FormSpec, target: Target, javaPackage: string, extra: (spec: FormSpec) => OutputFile[] = () => []): Download {
   if (!JAVA_PACKAGE.test(javaPackage)) {
     throw new HttpError(400, "the Java package is lower-case words joined by dots, such as uk.gov.hmcts.divorce.bulkscan");
   }
   try {
-    const files = [...generateTarget(target, spec, { basePackage: javaPackage }), ...newCcdFieldFiles(spec)];
+    const files = [...generateTarget(target, spec, { basePackage: javaPackage }), ...newCcdFieldFiles(spec), ...extra(spec)];
     return {
       fileName: `${stem(spec)}-${target}.zip`,
       contentType: "application/zip",

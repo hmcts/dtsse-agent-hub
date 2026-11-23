@@ -5,9 +5,11 @@ import { useRouter } from "next/navigation";
 import { type KeyboardEvent, useRef, useState } from "react";
 import { issuesByField, patchHeader } from "@/bulk-scan/edit";
 import type { BulkScanEditorView } from "@/bulk-scan/editor-view";
+import { isSignedOff } from "@/bulk-scan/handoff";
 import { identitiesOf, reconcileIdentities, reviewTotal } from "@/bulk-scan/outline";
 import { BulkScanDetail } from "@/components/assistant/BulkScanDetail";
 import { BulkScanDownloads } from "@/components/assistant/BulkScanDownloads";
+import { BulkScanHandoff, type HandToAssistantAction } from "@/components/assistant/BulkScanHandoff";
 import { BulkScanHeaderCaseType } from "@/components/assistant/BulkScanHeaderCaseType";
 import { BulkScanOutline, type Selection } from "@/components/assistant/BulkScanOutline";
 import { FOCUS, INPUT, Labelled } from "@/components/assistant/BulkScanParts";
@@ -35,8 +37,9 @@ function firstSelection(spec: FormSpec): Selection | null {
 export function BulkScanEditor({
   view,
   signOff,
+  handToAssistant,
   podConversationId = null
-}: Readonly<{ view: BulkScanEditorView; signOff: SignOffAction; podConversationId?: string | null }>) {
+}: Readonly<{ view: BulkScanEditorView; signOff: SignOffAction; handToAssistant: HandToAssistantAction; podConversationId?: string | null }>) {
   const router = useRouter();
   const [spec, setSpec] = useState<FormSpec>(view.spec);
   const [dirty, setDirty] = useState(false);
@@ -173,7 +176,17 @@ export function BulkScanEditor({
         )}
       </div>
       <div role="tabpanel" id="bulk-scan-panel-Download" aria-labelledby="bulk-scan-tab-Download" hidden={tab !== "Download"}>
-        <BulkScanDownloads specId={view.id} version={view.version} targets={view.targets} />
+        <div className="flex flex-col gap-6">
+          <BulkScanDownloads specId={view.id} version={view.version} targets={view.targets} />
+          <BulkScanHandoff
+            specId={view.id}
+            version={view.version}
+            signedOff={isSignedOff(view.versions, view.version)}
+            formType={view.spec.form.formType}
+            ccdProduct={view.spec.form.ccdProduct}
+            handToAssistant={handToAssistant}
+          />
+        </div>
       </div>
       <div role="tabpanel" id="bulk-scan-panel-Versions" aria-labelledby="bulk-scan-tab-Versions" hidden={tab !== "Versions"}>
         <BulkScanVersions specId={view.id} viewing={view.version} versions={view.versions} signOff={signOff} />

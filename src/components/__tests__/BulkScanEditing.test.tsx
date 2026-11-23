@@ -64,7 +64,7 @@ type User = ReturnType<typeof userEvent.setup>;
 
 async function setup() {
   const user = userEvent.setup();
-  render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
+  render(<BulkScanEditor view={VIEW} signOff={vi.fn()} handToAssistant={vi.fn()} />);
   return user;
 }
 
@@ -612,7 +612,7 @@ const VIEW2 = {
 
 async function setup2() {
   const user = userEvent.setup();
-  render(<BulkScanEditor view={VIEW2} signOff={vi.fn()} />);
+  render(<BulkScanEditor view={VIEW2} signOff={vi.fn()} handToAssistant={vi.fn()} />);
   return user;
 }
 

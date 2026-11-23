@@ -1,7 +1,7 @@
 import { CCD_CONFIGS } from "@hmcts-cft/bulk-scan-spec/schema";
 import type { NextRequest } from "next/server";
 import { errorResponse, json } from "@/agent-api/http";
-import { MAX_FIELDS_BYTES, PRODUCT } from "@/assistant/ccd-jobs";
+import { MAX_FIELDS_BYTES, PRODUCT, REPO_PATH } from "@/assistant/ccd-jobs";
 import { readBytes } from "@/assistant/upload-body";
 import { describeBytes } from "@/assistant/uploads";
 import { MAX_BULK_SCAN_FILE_BYTES, MAX_CASE_TYPE_ID, MAX_UPLOAD_BODY_BYTES } from "@/bulk-scan/limits";
@@ -47,7 +47,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     if (caseType.length > MAX_CASE_TYPE_ID) {
       return errorResponse(400, "the case type id is too long");
     }
-    const picked = pickedCaseType(caseType, form?.get("product"), form?.get("config"), form?.get("fields"));
+    const picked = pickedCaseType(caseType, form?.get("product"), form?.get("config"), form?.get("repo"), form?.get("fields"));
     if (picked instanceof Response) {
       return picked;
     }
@@ -63,7 +63,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 }
 
 /** The case type the person picked, with the fields their pod fetched for it; none when no fields came, and a refusal when they are not what the job answers. */
-function pickedCaseType(caseType: string, product: unknown, config: unknown, fields: unknown): UploadedCaseType | Response | undefined {
+function pickedCaseType(caseType: string, product: unknown, config: unknown, repo: unknown, fields: unknown): UploadedCaseType | Response | undefined {
   if (typeof fields !== "string" || fields === "") {
     return undefined;
   }
@@ -83,5 +83,11 @@ function pickedCaseType(caseType: string, product: unknown, config: unknown, fie
     return errorResponse(400, "the case type's fields are not JSON");
   }
   const found = CCD_CONFIGS.find((c) => c === config);
-  return { caseType, product, ...(found ? { config: found } : {}), fields: parseCcdFields(rows) };
+  return {
+    caseType,
+    product,
+    ...(found ? { config: found } : {}),
+    ...(typeof repo === "string" && REPO_PATH.test(repo) ? { repo } : {}),
+    fields: parseCcdFields(rows)
+  };
 }

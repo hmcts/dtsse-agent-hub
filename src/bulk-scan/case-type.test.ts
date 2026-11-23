@@ -69,6 +69,14 @@ describe("withCaseType", () => {
 
     expect(withCaseType(first, { product: "pcs", caseType: "PCS" }, FIELDS).form.ccdConfig).toBeUndefined();
   });
+
+  it("should record the repo of the case type, and drop it when the case type that replaces it has none", () => {
+    const first = withCaseType(spec(field("First name")), { ...CHOICE, repo: "apps/nfdiv/nfdiv-case-api" }, FIELDS);
+
+    expect(first.form.ccdRepo).toBe("apps/nfdiv/nfdiv-case-api");
+    expect(withCaseType(first, { product: "pcs", caseType: "PCS" }, FIELDS).form.ccdRepo).toBeUndefined();
+    expect(withoutCaseType(first).form.ccdRepo).toBeUndefined();
+  });
 });
 
 describe("withoutCaseType", () => {
