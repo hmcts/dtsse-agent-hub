@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { type FormEvent, useId, useState } from "react";
-import { MAX_BULK_SCAN_FILE_BYTES, MAX_CCD_DEFINITION_BYTES } from "@/bulk-scan/limits";
+import { MAX_BULK_SCAN_FILE_BYTES, MAX_CASE_TYPE_ID, mebibytes } from "@/bulk-scan/limits";
 import { FIELD } from "@/components/assistant/WelshParts";
 
 /** Starts a spec from a form PDF, an Exela SIP or an HMCTS transformation sheet, and opens it. */
@@ -12,7 +12,6 @@ export function BulkScanUpload() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<File | null>(null);
-  const [definition, setDefinition] = useState<File | null>(null);
   const [caseType, setCaseType] = useState("");
 
   async function upload(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -21,15 +20,12 @@ export function BulkScanUpload() {
       setError("Choose the form to upload.");
       return;
     }
-    if (form.size > MAX_BULK_SCAN_FILE_BYTES || (definition?.size ?? 0) > MAX_CCD_DEFINITION_BYTES) {
-      setError("Those files are too large: the form may be up to 4.5 MiB and the CCD definition up to 1 MiB.");
+    if (form.size > MAX_BULK_SCAN_FILE_BYTES) {
+      setError(`That file is too large: a form may be up to ${mebibytes(MAX_BULK_SCAN_FILE_BYTES)}.`);
       return;
     }
     const body = new FormData();
     body.set("form", form);
-    if (definition !== null) {
-      body.set("definition", definition);
-    }
     body.set("caseType", caseType);
     setBusy(true);
     setError(null);
@@ -71,27 +67,14 @@ export function BulkScanUpload() {
           onChange={(event) => setForm(event.target.files?.[0] ?? null)}
           className={`${FIELD} max-w-md`}
         />
-        <label htmlFor={`${inputId}-definition`} className="text-[13px] text-asst-muted">
-          The service's CCD definition, to propose CCD fields and the case type (optional, for a PDF; up to 1 MiB): a CaseField.json, a zip of its definitions
-          folder or a definition spreadsheet
-        </label>
-        <input
-          id={`${inputId}-definition`}
-          name="definition"
-          type="file"
-          accept=".json,.zip,.xlsx"
-          disabled={busy}
-          onChange={(event) => setDefinition(event.target.files?.[0] ?? null)}
-          className={`${FIELD} max-w-md`}
-        />
         <label htmlFor={`${inputId}-case-type`} className="text-[13px] text-asst-muted">
-          Case type id, when the definition does not name one or holds several (optional)
+          CCD case type id (optional)
         </label>
         <input
           id={`${inputId}-case-type`}
           name="caseType"
           type="text"
-          maxLength={100}
+          maxLength={MAX_CASE_TYPE_ID}
           placeholder="CriminalInjuriesCompensation"
           value={caseType}
           onChange={(event) => setCaseType(event.target.value)}

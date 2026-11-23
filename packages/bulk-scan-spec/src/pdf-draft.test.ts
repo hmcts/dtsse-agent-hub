@@ -59,6 +59,24 @@ describe("draftFields", () => {
     expect(fields.map((d) => d.field.id)).toEqual([undefined, "2"]);
   });
 
+  it("should keep a route's words without the comma that led into them", async () => {
+    const [group] = await draftOf({
+      texts: [
+        { text: "1.1 What is your main language?", x: 28, y: 710 },
+        { text: "English, go to question 3", x: 77, y: 683 },
+        { text: "Welsh, go to question 3", x: 77, y: 653 }
+      ],
+      checkboxes: [
+        { name: "a", x: 57, y: 680 },
+        { name: "b", x: 57, y: 650 }
+      ]
+    });
+    expect(group?.choices?.map((c) => [c.label, c.route?.text])).toEqual([
+      ["English", "go to question 3"],
+      ["Welsh", "go to question 3"]
+    ]);
+  });
+
   it("should end a checkbox group at a text box", async () => {
     const fields = await draftOf({
       texts: [

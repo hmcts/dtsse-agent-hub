@@ -47,10 +47,18 @@ export function parseEmits(description: string): Emit[] {
   return emits;
 }
 
-/** What a capture emits for a field the spec author has not enumerated: a tick box gives true or false, anything else free text. */
+/** What a capture emits for a field the spec author has not enumerated: a Yes and No pair gives Yes, No or blank, any other tick box true or false, anything else free text. */
 export function defaultEmits(field: Field): Emit[] {
   if (field.role !== "field") {
     return [];
+  }
+  const [only] = field.keys;
+  if (field.inputType === "checkbox" && only !== undefined && field.keys.length === 1 && field.group?.size === 2) {
+    return [
+      { when: "if yes", key: only, value: "Yes" },
+      { when: "if no", key: only, value: "No" },
+      { when: "if empty", key: only, value: "" }
+    ];
   }
   return field.keys.flatMap((key): Emit[] =>
     field.inputType === "checkbox"

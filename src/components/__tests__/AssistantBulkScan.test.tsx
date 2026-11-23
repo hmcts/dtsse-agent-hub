@@ -35,28 +35,24 @@ describe("bulk scan upload", () => {
   const choose = (label: RegExp, file: File) => fireEvent.change(screen.getByLabelText(label), { target: { files: [file] } });
   const start = () => fireEvent.click(screen.getByRole("button", { name: "Start the form" }));
 
-  it("should send the form with the definition and case type typed and open the first spec when it is read", async () => {
+  it("should send the form with the case type typed and open the first spec when it is read", async () => {
     fetchMock.mockResolvedValue(reply(201, { ids: ["abc", "def"] }));
     render(<BulkScanUpload />);
 
     choose(/^Form:/, new File(["x"], "My form.pdf"));
-    choose(/CCD definition/, new File(["[]"], "CaseField.json"));
-    fireEvent.change(screen.getByLabelText(/Case type id/), { target: { value: "CriminalInjuriesCompensation" } });
+    fireEvent.change(screen.getByLabelText(/CCD case type id/), { target: { value: "CriminalInjuriesCompensation" } });
     start();
 
     await waitFor(() => expect(push).toHaveBeenCalledWith("/assistant/bulk-scan/abc"));
     const body = fetchMock.mock.calls[0]?.[1].body as FormData;
     expect((body.get("form") as File).name).toBe("My form.pdf");
-    expect((body.get("definition") as File).name).toBe("CaseField.json");
     expect(body.get("caseType")).toBe("CriminalInjuriesCompensation");
   });
 
-  it("should refuse files that are too large together before sending anything", () => {
+  it("should refuse a form that is too large before sending anything", () => {
     render(<BulkScanUpload />);
-    const big = (bytes: number, name: string) => Object.defineProperty(new File(["x"], name), "size", { value: bytes });
 
-    choose(/^Form:/, big(4 * 1024 * 1024, "a.pdf"));
-    choose(/CCD definition/, big(1024 * 1024 + 1, "CaseField.json"));
+    choose(/^Form:/, Object.defineProperty(new File(["x"], "a.pdf"), "size", { value: 5 * 1024 * 1024 + 1 }));
     start();
 
     expect(screen.getByRole("alert").textContent).toContain("too large");
