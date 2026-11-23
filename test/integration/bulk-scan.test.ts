@@ -92,7 +92,7 @@ describe("starting a spec", () => {
     expect((await readSpec(prisma, own(ALICE), id as string))?.versions).toMatchObject([{ version: 1, savedBy: ALICE.name, signedOffBy: null }]);
   });
 
-  it("should take a file whose name has a percent sign in it, which is not a URL-encoded name", async () => {
+  it("should take a file when its name has a percent sign in it, which is not a URL-encoded name", async () => {
     const ids = await upload("alice", "Fee 100% form.xlsx");
 
     expect(ids).toHaveLength(1);
@@ -107,7 +107,7 @@ describe("starting a spec", () => {
     expect(await prisma.bulkScanSpec.count()).toBe(0);
   });
 
-  it("should name the case type typed with an upload in the spec's header", async () => {
+  it("should name the case type in the spec's header when one is typed with an upload", async () => {
     const bytes = new Uint8Array((await generateTransformWorkbook(SPEC).xlsx.writeBuffer()) as ArrayBuffer);
     const body = uploadForm("t1.xlsx", bytes);
     body.set("caseType", "CriminalInjuriesCompensation");

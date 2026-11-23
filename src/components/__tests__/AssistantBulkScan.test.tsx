@@ -48,7 +48,7 @@ describe("bulk scan upload", () => {
     expect(body.has("definition")).toBe(false);
   });
 
-  it("should refuse a form that is too large before sending anything", () => {
+  it("should refuse a form before sending anything when it is too large", () => {
     render(<BulkScanUpload />);
 
     choose(/^Form:/, Object.defineProperty(new File(["x"], "a.pdf"), "size", { value: 5 * 1024 * 1024 + 1 }));
@@ -58,7 +58,7 @@ describe("bulk scan upload", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("should ask for a form before sending anything", () => {
+  it("should ask for a form before sending anything when none is chosen", () => {
     render(<BulkScanUpload />);
 
     start();
@@ -413,7 +413,7 @@ describe("typing into the editor", () => {
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body).spec.sections[0].fields[1].maxLength).toBe(42);
   });
 
-  it("should show a hint in each empty row input, and name each row's controls for a screen reader and a tooltip", () => {
+  it("should show a hint in each row input and name the row's controls for a screen reader and a tooltip when the inputs are empty", () => {
     render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
 
     for (const [label, hint] of [

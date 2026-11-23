@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { makePdf, SAMPLE_FORM } from "./__fixtures__/make-pdf.ts";
 import { ROUTED_FORM } from "./__fixtures__/t210-routes.ts";
 import { isQuestion, keyModels } from "./codegen/model.ts";
-import { emitsOf } from "./emits.ts";
 import { fromPdf } from "./from-pdf.ts";
 import type { Field, FormSpec } from "./schema.ts";
 import { allFields } from "./schema.ts";
@@ -53,7 +52,7 @@ describe("mandatory, optional and conditional fields of a PDF draft", () => {
     );
   });
 
-  it("should follow a go to question route and read a Yes and No pair's one key as the answer", async () => {
+  it("should follow a go to question route and read a Yes and No pair's one key as the answer when 5.1 routes Yes to 5.2", async () => {
     const fields = await fieldsOf(ROUTED_FORM);
     const [answer] = byId(fields, "5.1").keys;
     expect(byId(fields, "5.1")).toMatchObject({ mandatory: "mandatory" });
@@ -63,7 +62,7 @@ describe("mandatory, optional and conditional fields of a PDF draft", () => {
     });
   });
 
-  it("should make a field after the skipped sections mandatory again", async () => {
+  it("should make a field mandatory again when it comes after the skipped sections", async () => {
     expect(byId(await fieldsOf(ROUTED_FORM), "6.1")).toMatchObject({ mandatory: "mandatory" });
   });
 
@@ -88,14 +87,14 @@ describe("mandatory, optional and conditional fields of a PDF draft", () => {
     expect(fields.flatMap(markers).filter((m) => m.reason.includes("must check"))).toHaveLength(1);
   });
 
-  it("should make every field of a form with no routes and no notes mandatory", async () => {
+  it("should make every field mandatory when the form has no routes and no notes", async () => {
     const fields = await fieldsOf(SAMPLE_FORM);
     expect(fields.every((f) => f.mandatory === "mandatory")).toBe(true);
   });
 });
 
 describe("a format stated in a margin note", () => {
-  it("should propose a regex from a note saying the answer begins with a letter, citing the sentence", async () => {
+  it("should propose a regex, citing the sentence, when a note says the answer begins with a letter", async () => {
     const reference = byId(await fieldsOf(ROUTED_FORM), "1.1");
     expect(reference.regex).toBe("^[XG].*");
     expect(reference.review).toContainEqual({
@@ -105,7 +104,7 @@ describe("a format stated in a margin note", () => {
     });
   });
 
-  it("should propose no regex for a question with no note", async () => {
+  it("should propose no regex when the question has no note", async () => {
     expect(byId(await fieldsOf(ROUTED_FORM), "6.1").regex).toBeUndefined();
   });
 });
@@ -140,7 +139,7 @@ describe("routes in the SSCS1 style", () => {
     }
   ];
 
-  it("should follow a go to route to a section with a letter, and one to an undotted question number", async () => {
+  it("should follow a go to route when it names a lettered section or an undotted question number", async () => {
     const fields = await fieldsOf(SSCS_STYLE);
     const phone = fields.find((f) => f.label === "Phone number for the hearing") as Field;
     expect(phone).toMatchObject({ mandatory: "conditional", required: { label: "'I want to take part in the hearing' is ticked" } });
@@ -151,13 +150,13 @@ describe("routes in the SSCS1 style", () => {
 });
 
 describe("tick boxes", () => {
-  it("should give a Yes and No pair the Yes and No values the D8 sheet lists, so No is an answer to a mandatory question", async () => {
+  it("should give a Yes and No pair the Yes and No values the D8 sheet lists when it is drafted, so No is an answer to a mandatory question", async () => {
     const { bundle } = await fromPdf({ pdf: await makePdf("sample", SAMPLE_FORM) });
     const form = bundle.forms[0] as FormSpec;
     const pair = form.sections.flatMap((s) => s.fields).find((f) => f.label === "Do you have a solicitor?") as Field;
     expect(pair).toMatchObject({ mandatory: "mandatory", keys: [expect.any(String)] });
     const [key] = pair.keys as [string];
-    expect(emitsOf(pair)).toEqual([
+    expect(pair.emits).toEqual([
       { when: "if yes", key, value: "Yes" },
       { when: "if no", key, value: "No" },
       { when: "if empty", key, value: "" }
@@ -189,29 +188,48 @@ describe("tick boxes", () => {
   });
 });
 
-describe("a field reached only by one answer of a Yes and No pair", () => {
-  const PAIR: Parameters<typeof makePdf>[1] = [
+/** One routing question with Yes and No options, then two two-line sections with a text box each. */
+function routedForm(t: {
+  question: string;
+  yes: string;
+  no: string;
+  second: [string, string];
+  third: [string, string];
+  boxes: [string, string];
+}): Parameters<typeof makePdf>[1] {
+  return [
     {
       texts: [
         { text: "Section 1 - Start", x: 28, y: 750 },
-        { text: "1.1 Do you have a solicitor?", x: 28, y: 725 },
-        { text: "Yes > go to Section 3", x: 77, y: 698 },
-        { text: "No > go to Section 2", x: 77, y: 668 },
-        { text: "Section 2 - Your own details", x: 28, y: 620 },
-        { text: "2.1 Your name", x: 28, y: 595 },
-        { text: "Section 3 - Solicitor details", x: 28, y: 520 },
-        { text: "3.1 Solicitor name", x: 28, y: 495 }
+        { text: t.question, x: 28, y: 725 },
+        { text: t.yes, x: 77, y: 698 },
+        { text: t.no, x: 77, y: 668 },
+        { text: t.second[0], x: 28, y: 620 },
+        { text: t.second[1], x: 28, y: 595 },
+        { text: t.third[0], x: 28, y: 520 },
+        { text: t.third[1], x: 28, y: 495 }
       ],
       checkboxes: [
         { name: "yes", x: 57, y: 695 },
         { name: "no", x: 57, y: 665 }
       ],
       textBoxes: [
-        { name: "own", x: 57, y: 565 },
-        { name: "sol", x: 57, y: 465 }
+        { name: t.boxes[0], x: 57, y: 565 },
+        { name: t.boxes[1], x: 57, y: 465 }
       ]
     }
   ];
+}
+
+describe("a field reached only by one answer of a Yes and No pair", () => {
+  const PAIR = routedForm({
+    question: "1.1 Do you have a solicitor?",
+    yes: "Yes > go to Section 3",
+    no: "No > go to Section 2",
+    second: ["Section 2 - Your own details", "2.1 Your name"],
+    third: ["Section 3 - Solicitor details", "3.1 Solicitor name"],
+    boxes: ["own", "sol"]
+  });
 
   it("should require it when the answer is the literal No, which a blank answer is not", async () => {
     const fields = await fieldsOf(PAIR);
@@ -225,31 +243,56 @@ describe("a field reached only by one answer of a Yes and No pair", () => {
 });
 
 describe("a route that cannot be followed", () => {
-  it("should find a section whatever the case of its letter", async () => {
-    const pages: Parameters<typeof makePdf>[1] = [
-      {
-        texts: [
-          { text: "Section 1 - Start", x: 28, y: 750 },
-          { text: "1.1 Will you take part?", x: 28, y: 725 },
-          { text: "Yes. Go to Section 6A", x: 77, y: 698 },
-          { text: "No. Go to Section 7", x: 77, y: 668 },
-          { text: "Section 6a - Hearing details", x: 28, y: 620 },
-          { text: "6.1 Phone number", x: 28, y: 595 },
-          { text: "Section 7 - End", x: 28, y: 520 },
-          { text: "7.1 Comments", x: 28, y: 495 }
-        ],
-        checkboxes: [
-          { name: "yes", x: 57, y: 695 },
-          { name: "no", x: 57, y: 665 }
-        ],
-        textBoxes: [
-          { name: "phone", x: 57, y: 565 },
-          { name: "comments", x: 57, y: 465 }
-        ]
-      }
-    ];
+  it("should find a section when the route's letter is in another case", async () => {
+    const pages = routedForm({
+      question: "1.1 Will you take part?",
+      yes: "Yes. Go to Section 6A",
+      no: "No. Go to Section 7",
+      second: ["Section 6a - Hearing details", "6.1 Phone number"],
+      third: ["Section 7 - End", "7.1 Comments"],
+      boxes: ["phone", "comments"]
+    });
     const fields = await fieldsOf(pages);
     expect(byId(fields, "6.1")).toMatchObject({ mandatory: "conditional" });
     expect(fields.flatMap(markers).filter((m) => m.reason.includes("must check"))).toEqual([]);
+  });
+});
+
+describe("a note saying a field applies if yes or if no", () => {
+  const page = (second: string): Parameters<typeof makePdf>[1] => [
+    {
+      texts: [
+        { text: "1.1 Do you have a solicitor?", x: 28, y: 725 },
+        { text: "Yes", x: 77, y: 698 },
+        { text: "No", x: 77, y: 668 },
+        { text: second, x: 28, y: 620 }
+      ],
+      checkboxes: [
+        { name: "yes", x: 57, y: 695 },
+        { name: "no", x: 57, y: 665 }
+      ],
+      textBoxes: [{ name: "second", x: 57, y: 585 }]
+    }
+  ];
+
+  it("should make the field required when the question before it was answered Yes, not optional", async () => {
+    const fields = await fieldsOf(page("1.2 Solicitor name (if yes)"));
+    const [answer] = byId(fields, "1.1").keys;
+    expect(byId(fields, "1.2")).toMatchObject({
+      mandatory: "conditional",
+      required: { label: "'Do you have a solicitor?' is answered Yes", when: { [answer as string]: "Yes" } }
+    });
+  });
+
+  it("should make the field required when the question before it was answered No", async () => {
+    const fields = await fieldsOf(page("1.2 Reason (if no)"));
+    const [answer] = byId(fields, "1.1").keys;
+    expect(byId(fields, "1.2")).toMatchObject({ mandatory: "conditional", required: { when: { [answer as string]: "No" } } });
+  });
+
+  it("should leave the field mandatory, with a marker to check, when no Yes and No question comes before it", async () => {
+    const fields = await fieldsOf([{ texts: [{ text: "1.1 Solicitor name (if yes)", x: 28, y: 725 }], textBoxes: [{ name: "only", x: 57, y: 690 }] }]);
+    expect(byId(fields, "1.1")).toMatchObject({ mandatory: "mandatory" });
+    expect(markers(byId(fields, "1.1"))[0]?.reason).toContain("must check");
   });
 });

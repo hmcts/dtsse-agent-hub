@@ -1,10 +1,11 @@
 import { basename, extname } from "node:path";
 import type { CcdField } from "./ccd-match.ts";
 import { matchCcd } from "./ccd-match.ts";
+import { yesNoEmits } from "./emits.ts";
 import { formatFromNote } from "./hints.ts";
 import { proposeKeys } from "./key-proposal.ts";
 import { decideMandatory } from "./mandatory.ts";
-import { draftFields } from "./pdf-draft.ts";
+import { draftFields, isYesNoPair } from "./pdf-draft.ts";
 import type { PdfContent } from "./pdf-extract.ts";
 import { extractPdf } from "./pdf-extract.ts";
 import type { Bundle, Field, FormSpec, Section } from "./schema.ts";
@@ -49,6 +50,7 @@ The PDF has no fillable form fields, so no field could be read from it. Open the
 - checkboxes of one question are one field with a \`group\` of kind \`xor\`; the field's \`keys\` are the group's option keys
 - a camelCase \`keys\` entry for each box, in the style of the service's existing keys
 - \`pageOrder\`: for each page, the keys on it
+- \`mandatory\` on every field: "mandatory" unless the form marks it "(optional)" or "(if …)" (then "optional"), or a "> go to" route skips the field's section or question (then "conditional", with \`required\`: \`"label": "'<option>' is ticked", "when": "<option key>": "ticked": true \`). A field with no mark and no route is mandatory
 - every guess gets an entry in the field's \`review\` list: \`{ "about": "key" | "type" | "group" | "ccd" | "mandatory" | "regex", "reason": "...", "confidence": "low" | "medium" | "high" }\`
 - remove \`needsReview\` from the draft once it is filled in, and check it with \`generate\` or any other command that reads a spec
 
@@ -121,6 +123,7 @@ export async function fromPdf(input: FromPdfInput): Promise<FromPdfResult> {
     const field: Field = {
       ...d.field,
       mandatory: decision.mandatory,
+      ...(isYesNoPair(d) && mine[0] ? { emits: yesNoEmits(mine[0].key) } : {}),
       ...(format ? { regex: format.regex } : {}),
       ...(decision.required ? { required: decision.required } : {}),
       keys: mine.map((k) => k.key),

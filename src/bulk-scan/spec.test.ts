@@ -130,7 +130,7 @@ describe("uploads", () => {
     expect((await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"))).forms).toEqual([SPEC]);
   });
 
-  it("should name the case type the person typed in a PDF's form header", async () => {
+  it("should name the case type in a PDF's form header when one is typed", async () => {
     pdf.result = { bundle: { forms: [SPEC] }, checklist: [] };
     await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"), "CIC");
     expect(pdf.input).toMatchObject({ caseType: "CIC" });
@@ -233,7 +233,7 @@ describe("checking a spec", () => {
     expect(!checked.ok && checked.issues.map((i) => i.path)).toEqual(["sections.0.fields.2"]);
   });
 
-  it("should refuse a minimum length above the maximum, on the field's own row", () => {
+  it("should refuse a minimum length on the field's own row when it is above the maximum", () => {
     const bad = JSON.parse(JSON.stringify(SPEC));
     bad.sections[0].fields[0].minLength = 9;
     bad.sections[0].fields[0].maxLength = 3;

@@ -9,7 +9,7 @@ const rows = (...ids: string[]) => JSON.stringify(ids.map((ID) => ({ ID, FieldTy
 const typed = (CaseTypeID: string, ...ids: string[]) => ids.map((ID) => ({ CaseTypeID, ID, FieldType: "Text" }));
 
 describe("ccdDefinitionOf", () => {
-  it("should read the ids of a definition, leaving out label fields and rows without an id, and name its case type", () => {
+  it("should name the case type and list only case field ids when the definition has label fields and rows without an id", () => {
     const list = [...typed("CIC", "applicantName"), { CaseTypeID: "CIC", ID: "heading", FieldType: "Label" }, { ID: "", FieldType: "Text" }];
     expect(ccdDefinitionOf(list)).toEqual({ caseType: "CIC", fields: asFields("applicantName") });
   });
@@ -32,7 +32,7 @@ describe("ccdDefinitionOf", () => {
     expect(() => ccdDefinitionOf([...typed("One", "a"), ...typed("Two", "b")])).toThrow("holds 2 case types (One, Two)");
   });
 
-  it("should refuse what is not a list of case fields, saying what it holds", () => {
+  it("should refuse the definition, saying what it holds, when it is not a list of case fields", () => {
     expect(() => ccdDefinitionOf({})).toThrow("that definition is a JSON object, not a list of case fields");
     expect(() => ccdDefinitionOf([{ ID: "createCase", Name: "Create", CaseTypeID: "CIC" }])).toThrow(
       "that definition is not a CaseField list: its rows have no ID and FieldType (they have CaseTypeID, ID, Name)"
@@ -41,7 +41,7 @@ describe("ccdDefinitionOf", () => {
 });
 
 describe("loadCcdDefinition", () => {
-  it("should read a CaseField.json file or the directory holding it", () => {
+  it("should read the same definition when given a CaseField.json file or the directory holding it", () => {
     const dir = mkdtempSync(join(tmpdir(), "ccd-"));
     writeFileSync(join(dir, "CaseField.json"), JSON.stringify(typed("CIC", "applicant1FirstName")));
     expect(loadCcdDefinition(dir)).toEqual({ caseType: "CIC", fields: asFields("applicant1FirstName") });
@@ -57,7 +57,7 @@ describe("loadCcdDefinition", () => {
     expect(loadCcdDefinition(dir).fields).toEqual(asFields("first", "second"));
   });
 
-  it("should refuse a CaseEvent.json given as the case fields, and a file that is not JSON, naming it", () => {
+  it("should refuse and name the file when a CaseEvent.json is given as the case fields or a file is not JSON", () => {
     const dir = mkdtempSync(join(tmpdir(), "ccd-"));
     writeFileSync(join(dir, "CaseEvent.json"), JSON.stringify([{ ID: "createCase", Name: "Create" }]));
     writeFileSync(join(dir, "bad.json"), "not json");

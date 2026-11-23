@@ -128,6 +128,11 @@ function subtitleOf(heading: Line, lines: Line[]): string {
   return lines.find((l) => l.page === heading.page && l.y < heading.y && heading.y - l.y <= 25 && l.text.startsWith("("))?.text ?? "";
 }
 
+/** Whether the field is a Yes and No question: two options that share one key, "No" being the key left unticked. */
+export function isYesNoPair(d: DraftField): boolean {
+  return d.choices?.length === 2 && d.choices[0]?.slot === d.choices[1]?.slot;
+}
+
 function choiceOf(label: string, slot: number, ticked: boolean): Choice {
   const m = ROUTE.exec(label);
   if (!m) {

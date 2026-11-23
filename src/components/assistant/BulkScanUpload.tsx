@@ -2,7 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { type FormEvent, useId, useState } from "react";
-import { MAX_BULK_SCAN_FILE_BYTES, mebibytes } from "@/bulk-scan/limits";
+import { describeBytes } from "@/assistant/uploads";
+import { MAX_BULK_SCAN_FILE_BYTES } from "@/bulk-scan/limits";
 import { BulkScanCaseTypePicker, type PickedCaseType } from "@/components/assistant/BulkScanCaseTypePicker";
 import { FIELD } from "@/components/assistant/WelshParts";
 
@@ -22,7 +23,7 @@ export function BulkScanUpload({ podConversationId = null }: Readonly<{ podConve
       return;
     }
     if (form.size > MAX_BULK_SCAN_FILE_BYTES) {
-      setError(`That file is too large: a form may be up to ${mebibytes(MAX_BULK_SCAN_FILE_BYTES)}.`);
+      setError(`That file is too large: a form may be up to ${describeBytes(MAX_BULK_SCAN_FILE_BYTES)}.`);
       return;
     }
     const body = new FormData();

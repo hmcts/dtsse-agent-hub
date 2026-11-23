@@ -89,6 +89,7 @@ describe("fromPdf on a flat form", () => {
     expect(result.needsReview?.reason).toBe("the PDF has no AcroForm fields");
     expect(result.needsReview?.promptText).toContain("Section 1 - Your details");
     expect(result.needsReview?.promptText).toContain("(no text layer: read the page image)");
+    expect(result.needsReview?.promptText).toContain('`mandatory` on every field: "mandatory" unless the form marks it "(optional)"');
   });
 });
 
