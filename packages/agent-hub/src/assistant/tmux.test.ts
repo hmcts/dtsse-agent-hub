@@ -260,6 +260,29 @@ describe("createTmux", () => {
     ]);
   });
 
+  it("should paste a multi-line prompt as one bracketed paste with its line breaks kept, then press Enter, when asked to type it", async () => {
+    // Arrange
+    const { args, exec } = recorder();
+
+    // Act
+    await createTmux({ exec }).paste("c-1", "line one\nline two");
+
+    // Assert
+    expect(args).toEqual([
+      ["set-buffer", "-b", "ah-c-1", "--", "line one\nline two"],
+      ["paste-buffer", "-p", "-r", "-d", "-b", "ah-c-1", "-t", "c-1"],
+      ["send-keys", "-t", "c-1", "Enter"]
+    ]);
+  });
+
+  it("should name the failing tmux step, and press nothing, when the buffer cannot be set or pasted", async () => {
+    // Arrange
+    const { exec } = recorder({ code: 1, stderr: "no server\n" });
+
+    // Act & Assert
+    await expect(createTmux({ exec }).paste("c-1", "hi")).rejects.toThrow("tmux set-buffer exited 1: no server");
+  });
+
   // The supervisor logs a refused `send-keys`, and that log is only honest if this throws: keys are how a session is
   // told to exit or to end a turn, so `send-keys` reporting success for keys that never arrived would have the
   // supervisor say it interrupted a turn that is still running.

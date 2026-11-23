@@ -12,7 +12,7 @@ import { type TempClaudeHome, tempClaudeHome } from "./__fixtures__/claude-home.
 import { createMockHub, type MockHubOptions, type RecordedCall } from "./__fixtures__/mock-hub.ts";
 import { type Api, ApiError, createApi } from "./api.ts";
 import { modelPath } from "./assistant/models.ts";
-import { tmuxName } from "./assistant/tmux.ts";
+import { type Tmux, tmuxName } from "./assistant/tmux.ts";
 import { type RunBridgeOptions, runBridge, sessionKind } from "./bridge.ts";
 import { readDirects } from "./directs.ts";
 import type { Env } from "./env.ts";
@@ -114,7 +114,9 @@ const gaps = (calls: RecordedCall[]) => calls.slice(1).map((c, i) => (c.at ?? 0)
 const FAST_RECONNECT = { rapidCloseMs: 200 };
 const STREAM_MS = FAST_RECONNECT.rapidCloseMs + 200;
 
-type StartBridgeOptions = Omit<RunBridgeOptions, "sid" | "api" | "deliver"> & {
+type StartBridgeOptions = Omit<RunBridgeOptions, "sid" | "api" | "deliver" | "tmux"> & {
+  /** What a test types into a pane; `paste` is recorded with the socket's writes unless it gives its own. */
+  tmux?: Partial<Pick<Tmux, "sendKeys" | "paste">>;
   env?: Env;
   /** Stands in for some of the bridge's API calls; the setup's own registration goes to the mock hub as it is. */
   wrapApi?: (api: Api) => Api;
