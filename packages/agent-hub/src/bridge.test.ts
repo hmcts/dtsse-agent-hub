@@ -1299,7 +1299,9 @@ describe("runBridge", () => {
       await waitUntil(() => pasted.length >= 1, "the typed prompt");
 
       // Assert
-      expect(pasted[0]).toBe(`${tmuxName(CONVERSATION)}\n${contextOpen(sent.id)}\n${ANSWER_HERE}\nProduct area: Possession claims.\n${CONTEXT_CLOSE}\n\nadmin merge it`);
+      expect(pasted[0]).toBe(
+        `${tmuxName(CONVERSATION)}\n${contextOpen(sent.id)}\n${ANSWER_HERE}\nProduct area: Possession claims.\n${CONTEXT_CLOSE}\n\nadmin merge it`
+      );
       expect(bridge.socketWrites).toEqual([]);
     } finally {
       await bridge.stop();
