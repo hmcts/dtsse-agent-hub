@@ -32,9 +32,14 @@ export function matchesQuery(field: Field, query: string): boolean {
   return needle === "" || [field.id ?? "", field.label, ...field.keys, ...field.ccd].some((text) => text.toLowerCase().includes(needle));
 }
 
+/** The first line of a field's label, trimmed. */
+export function labelLine(field: Field): string {
+  return field.label.split("\n")[0]?.trim() ?? "";
+}
+
 /** What a field is called in the editor: its id, else its first key, else its label. */
 export function fieldName(field: Field, index: number): string {
-  return field.id || field.keys[0] || field.label.split("\n")[0]?.trim() || `field ${index + 1}`;
+  return field.id || field.keys[0] || labelLine(field) || `field ${index + 1}`;
 }
 
 /** The choices for whether a field is mandatory, with the words the select and the outline's badge both show. */

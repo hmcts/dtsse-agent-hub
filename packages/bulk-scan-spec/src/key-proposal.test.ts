@@ -195,6 +195,35 @@ describe("house keys that only end like a date part", () => {
   });
 });
 
+describe("a date's house keys", () => {
+  it("should keep an earlier text slot off the date's keys when the date takes the house's three", () => {
+    const house = ["dateBirthDay", "dateBirthMonth", "dateBirthYear"];
+    const keys = proposeKeys(
+      [
+        { label: "Date birth day", context: "" },
+        { label: "Date birth", context: "", parts: ["Day", "Month", "Year"] }
+      ],
+      house,
+      ["Q1", "Q2"]
+    );
+    expect(keys[1]?.parts?.map((k) => k.key)).toEqual(house);
+    expect(keys[0]?.key).not.toBe("dateBirthDay");
+  });
+
+  it("should still lead a key with the subject when the key only starts with the same letters", () => {
+    const section = "Section 3 – Appealing on behalf of a minor";
+    const keys = proposeKeys(
+      [
+        { label: "Minority", context: "", section },
+        { label: "Minority", context: "", section }
+      ],
+      [],
+      ["Q1", "Q2"]
+    );
+    expect(keys.map((k) => k.key)).toEqual(["minority", "minorMinority"]);
+  });
+});
+
 describe("subjectOf", () => {
   it("should name the party of a section when the real T210 and D8 titles are read", () => {
     const titles: [string, string | undefined][] = [

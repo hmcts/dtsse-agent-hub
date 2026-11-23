@@ -9,6 +9,7 @@ import {
   fieldFlags,
   fieldName,
   type Identity,
+  labelLine,
   mandatoryLabel,
   matchesQuery,
   needsReview,
@@ -90,9 +91,11 @@ export function BulkScanOutline({
     fields: section.fields.map((field, f) => ({ field, f })).filter(({ field, f }) => shown(field, `${s}.${f}`))
   }));
   const none = filtering && rows.every((row) => row.fields.length === 0);
-  const flagged = rows
-    .flatMap((row) => row.fields.map((one) => ({ ...one, row })))
-    .sort((a, b) => rankOf(a.field, issues, a.row.s, a.f) - rankOf(b.field, issues, b.row.s, b.f) || a.row.s - b.row.s || a.f - b.f);
+  const flagged = !onlyReview
+    ? []
+    : rows
+        .flatMap((row) => row.fields.map((one) => ({ ...one, row })))
+        .sort((a, b) => rankOf(a.field, issues, a.row.s, a.f) - rankOf(b.field, issues, b.row.s, b.f) || a.row.s - b.row.s || a.f - b.f);
 
   function steer(event: KeyboardEvent<HTMLDivElement>): void {
     const keys = ["ArrowDown", "ArrowUp", "Home", "End"];
@@ -340,7 +343,7 @@ function FieldLine({
       >
         <span className="flex min-w-0 items-center gap-2">
           <span className="w-9 shrink-0 truncate font-mono text-xs text-asst-muted">{field.id ?? ""}</span>{" "}
-          <span className="min-w-0 flex-1 truncate">{field.label.split("\n")[0] || field.keys[0] || "Untitled field"}</span>{" "}
+          <span className="min-w-0 flex-1 truncate">{labelLine(field) || field.keys[0] || "Untitled field"}</span>{" "}
           <span className="shrink-0 text-[11px] text-asst-muted">{field.inputType}</span>{" "}
           <span className={`shrink-0 rounded-full px-1.5 py-px text-[11px] ${BADGE_CLASS[field.mandatory]}`}>{mandatoryLabel(field.mandatory)}</span>{" "}
           {flags.review > 0 ? (

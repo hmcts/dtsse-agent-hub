@@ -17,11 +17,13 @@ type ChangeField = (change: (field: Field) => Field) => void;
 export function BulkScanSends({
   field,
   onKeys,
+  onRemoveKey,
   onFormat,
   onField
 }: Readonly<{
   field: Field;
   onKeys: (keys: string[]) => void;
+  onRemoveKey: (index: number) => void;
   onFormat: (patch: { regex?: string; minLength?: number | undefined; maxLength?: number | undefined }) => void;
   onField: ChangeField;
 }>) {
@@ -41,7 +43,7 @@ export function BulkScanSends({
                 onCommit={(text) => onKeys(field.keys.flatMap((k, at) => (at === i ? keysOf(text) : [k])))}
               />
             </Labelled>
-            <IconButton label={`Remove key ${i + 1}`} icon="remove" onClick={() => onKeys(field.keys.filter((_, at) => at !== i))} />
+            <IconButton label={`Remove key ${i + 1}`} icon="remove" onClick={() => onRemoveKey(i)} />
           </div>
         ))}
         <div>
@@ -105,21 +107,18 @@ function LengthInput({ value, onChange }: Readonly<{ value: number | undefined; 
  */
 function AllowedValues({ field, keyName, onField }: Readonly<{ field: Field; keyName: string; onField: ChangeField }>) {
   const { values, blankAllowed } = allowedFor(field, keyName);
-  const [typed, setTyped] = useState<string[]>(values);
+  const joined = values.join("\n");
+  const [state, setState] = useState({ base: joined, typed: values });
   const focusNext = useRef(false);
-  // The boxes are what was typed while they still say the field's values, which an outside change such as a new input type does not.
-  const rows = typed.filter((v) => v !== "").join("\n") === values.join("\n") ? typed : values;
-  const setRows = setTyped;
+  // The boxes keep what was typed, even a value already listed, until the field's values change from outside, such as a new input type.
+  if (state.base !== joined) {
+    setState({ base: joined, typed: values });
+  }
+  const rows = state.typed;
   const send = (next: string[]) => {
-    setRows(next);
-    onField((f) =>
-      withAllowed(
-        f,
-        keyName,
-        next.filter((v) => v !== ""),
-        allowedFor(f, keyName).blankAllowed
-      )
-    );
+    const filled = next.filter((v) => v !== "");
+    setState({ base: [...new Set(filled)].join("\n"), typed: next });
+    onField((f) => withAllowed(f, keyName, filled, allowedFor(f, keyName).blankAllowed));
   };
   return (
     <div role="group" aria-label={`Allowed values of ${keyName}`} className="flex flex-col gap-1.5 rounded-lg border border-asst-line bg-asst-bg p-2.5">
@@ -149,7 +148,7 @@ function AllowedValues({ field, keyName, onField }: Readonly<{ field: Field; key
           text="Add a value"
           onClick={() => {
             focusNext.current = true;
-            setRows([...rows, ""]);
+            setState({ ...state, typed: [...rows, ""] });
           }}
         />
         <label className="flex items-center gap-1.5 text-xs text-asst-text">

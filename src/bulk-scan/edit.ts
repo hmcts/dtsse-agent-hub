@@ -3,6 +3,7 @@ import { emitsOf, valueSets } from "@hmcts-cft/bulk-scan-spec/emits";
 import { renderCasePath, renderLogic } from "@hmcts-cft/bulk-scan-spec/logic";
 import { readsKeys } from "@hmcts-cft/bulk-scan-spec/model";
 import { isNegation, isTickedTest } from "@hmcts-cft/bulk-scan-spec/schema";
+import { labelLine } from "./outline.ts";
 
 /**
  * The editor's changes to a spec, as pure functions on it. Only the schema, rule wording and allowed-value modules come
@@ -79,6 +80,46 @@ function renameOwn(field: Field, from: string, to: string): Field {
     next.group = { ...field.group, options: field.group.options.map((o) => (o.key === from ? { ...o, key: to } : o)) };
   }
   return next;
+}
+
+/**
+ * The field without its key at `index`: the key's allowed values, its group option, and every condition and copy of the
+ * field that names it go too. Another field's condition on it is left for the engine to refuse, as it does a key no field has.
+ */
+export function withoutKey(field: Field, index: number): Field {
+  const key = field.keys[index];
+  const keys = field.keys.filter((_, i) => i !== index);
+  const next: Field = { ...field, keys };
+  if (key === undefined || key === "" || keys.includes(key)) {
+    return regroup(next);
+  }
+  if (field.emits) {
+    const emits = field.emits.filter((e) => e.key !== key);
+    if (emits.length > 0) {
+      next.emits = emits;
+    } else {
+      delete next.emits;
+    }
+  }
+  const without = (when: Record<string, Operand>) => Object.fromEntries(Object.entries(when).filter(([k]) => k !== key));
+  next.rules = field.rules.map((rule) => {
+    const { when, whenAny, set, ...rest } = rule;
+    const groups = whenAny?.map(without).filter((g) => Object.keys(g).length > 0);
+    const kept = when ? without(when) : undefined;
+    const copies = set ? Object.entries(set).filter(([, v]) => !(v !== null && typeof v === "object" && v.from === key)) : undefined;
+    return {
+      ...rest,
+      ...(kept && Object.keys(kept).length > 0 ? { when: kept } : {}),
+      ...(groups && groups.length > 0 ? { whenAny: groups } : {}),
+      ...(copies && copies.length > 0 ? { set: Object.fromEntries(copies) } : {})
+    };
+  });
+  if (field.required?.when) {
+    const { when: _when, ...label } = field.required;
+    const kept = without(field.required.when);
+    next.required = Object.keys(kept).length > 0 ? { ...label, when: kept } : label;
+  }
+  return regroup(next);
 }
 
 /** An option of a group exists only for a key the field has, so a group follows its field's keys; fewer than two keys is no group. */
@@ -202,7 +243,7 @@ export function formKeys(spec: FormSpec): string[] {
 
 /** The sheet ids a condition may name instead of a key, with the row's label. */
 export function sheetIds(spec: FormSpec): { id: string; label: string }[] {
-  return spec.sections.flatMap((s) => s.fields.flatMap((f) => (f.id ? [{ id: f.id, label: f.label.split("\n")[0]?.trim() ?? "" }] : [])));
+  return spec.sections.flatMap((s) => s.fields.flatMap((f) => (f.id ? [{ id: f.id, label: labelLine(f) }] : [])));
 }
 
 /** Every CCD field id a row of the form names. */

@@ -1,7 +1,7 @@
 "use client";
 
 import type { Field } from "@hmcts-cft/bulk-scan-spec";
-import { casePathWords, clearLogicText, conditionsOf, type FieldPatch, logicWords, withRequired, wordsOf, writeAsRules } from "@/bulk-scan/edit";
+import { casePathWords, clearLogicText, conditionsOf, type FieldPatch, logicWords, withoutKey, withRequired, wordsOf, writeAsRules } from "@/bulk-scan/edit";
 import { MANDATORY_CHOICES } from "@/bulk-scan/outline";
 import { BulkScanConditions, type KeyChoice } from "@/components/assistant/BulkScanConditions";
 import { BulkScanSends } from "@/components/assistant/BulkScanKeys";
@@ -102,7 +102,13 @@ export function BulkScanFieldDetails({
         ) : null}
       </Card>
 
-      <BulkScanSends field={field} onKeys={(keys) => onPatch({ keys })} onFormat={(patch) => onPatch(patch)} onField={onField} />
+      <BulkScanSends
+        field={field}
+        onKeys={(keys) => onPatch({ keys })}
+        onRemoveKey={(index) => onField((f) => withoutKey(f, index))}
+        onFormat={(patch) => onPatch(patch)}
+        onField={onField}
+      />
 
       <Card title="Where it goes in CCD">
         <Labelled label="CCD ids, separated by spaces">

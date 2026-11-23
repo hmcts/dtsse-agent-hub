@@ -3,7 +3,7 @@
 import type { FormSpec } from "@hmcts-cft/bulk-scan-spec";
 import { useId } from "react";
 import { ccdIds, clearReview, clearTodo, type FieldPatch, formKeys, mapField, patchField, patchSection, sheetIds } from "@/bulk-scan/edit";
-import { fieldName, type Identity } from "@/bulk-scan/outline";
+import { fieldName, type Identity, labelLine } from "@/bulk-scan/outline";
 import { BulkScanFieldDetails, type FormChoices } from "@/components/assistant/BulkScanFieldDetails";
 import type { Selection } from "@/components/assistant/BulkScanOutline";
 import { Card, INPUT, Labelled } from "@/components/assistant/BulkScanParts";
@@ -61,7 +61,7 @@ export function BulkScanDetail({
     ccd: ccdIds(spec)
   };
   const name = fieldName(field, f);
-  const firstLine = field.label.split("\n")[0]?.trim() ?? "";
+  const firstLine = labelLine(field);
   return (
     <section aria-labelledby={headingId} className="flex min-w-0 flex-col gap-4">
       <h2 id={headingId} className="truncate text-base font-semibold">

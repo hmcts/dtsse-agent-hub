@@ -95,11 +95,12 @@ export function subjectOf(title: string): string | undefined {
 
 /**
  * The first of these that `taken` allows: the key, then the key led by the section's subject, then that with the
- * question's tag, then with the tag and a number. The subject stays in the numbered form, and is left out of a key that
- * already starts with it.
+ * question's tag, then with the tag and a number. The subject stays in the numbered form, and is left out of a key whose
+ * first word it already is.
  */
 function distinct(key: string, taken: (candidate: string) => boolean, tag: string, subject?: string): string {
-  const lead = taken(key) && subject && !key.toLowerCase().startsWith(subject.toLowerCase()) ? `${subject}${cap(key)}` : key;
+  const first = key.split(/(?=[A-Z])/)[0]?.toLowerCase();
+  const lead = taken(key) && subject && first !== subject.toLowerCase() ? `${subject}${cap(key)}` : key;
   let candidate = lead;
   if (taken(candidate)) {
     candidate = `${lead}${tag}`;
@@ -150,7 +151,12 @@ export function proposeKeys(slots: KeySlot[], houseKeys: string[], tags: string[
     true
   );
   const prefixes = prefixesOf(houseKeys).map((p) => ({ prefix: p, words: tokens(p) }));
-  const used = new Set([...reused.values()].map((r) => r.candidate.toLowerCase()));
+  // A date's keys are taken from the start, as reused keys are, so no earlier slot is given one.
+  const used = new Set(
+    [...reused.values()]
+      .map((r) => r.candidate.toLowerCase())
+      .concat([...dateOf].flatMap(([i, match]) => (slots[i]?.parts ?? []).map((part) => `${match.candidate}${part}`.toLowerCase())))
+  );
   /** What a slot with no existing key is named from: the house party prefix its context matches, else the section's subject. */
   const naming = (slot: KeySlot, i: number) => {
     const party = prefixes

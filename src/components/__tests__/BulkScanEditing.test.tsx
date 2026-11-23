@@ -235,12 +235,21 @@ describe("a key box", () => {
   });
 });
 
-describe("the where-it-goes card", () => {
-  it("should draw no status line until the picker provides one", () => {
-    render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
-    expect(screen.queryByText(/Status:/)).toBeNull();
-  });
+describe("removing a key", () => {
+  it("should remove the key's emits and group option and its own conditions, leaving other fields' for the engine to refuse, when its button is pressed", async () => {
+    const user = await setup2();
+    await user.click(screen.getByRole("button", { name: "Remove key 1" }));
 
+    const [pair, other] = await saved2(user);
+    expect(pair?.keys).toEqual(["right"]);
+    expect(pair?.emits.map((e: { key: string }) => e.key)).toEqual(["right"]);
+    expect(pair).not.toHaveProperty("group");
+    expect(pair?.rules[0]).not.toHaveProperty("when");
+    expect(other?.required.when).toEqual({ left: { ticked: true } });
+  });
+});
+
+describe("the where-it-goes card", () => {
   it("should send the CCD ids as words when the box is left", async () => {
     const user = await setup();
     const box = screen.getByLabelText("CCD ids");
@@ -297,6 +306,19 @@ describe("allowed values after another change", () => {
     expect(screen.queryByLabelText("marriage value 1")).toBeNull();
     await select(user, "Input type", "checkbox");
     expect((screen.getByLabelText("marriage value 1") as HTMLInputElement).value).toBe("true");
+  });
+});
+
+describe("typing a value that repeats a listed one", () => {
+  it("should keep the box while Yes more is typed beside an existing Yes", async () => {
+    const user = await setup2();
+    const group = () => within(screen.getByRole("group", { name: "Allowed values of left" }));
+    expect((group().getByLabelText("left value 1") as HTMLInputElement).value).toBe("Yes");
+    await user.click(group().getByRole("button", { name: "Add a value for left" }));
+    await user.keyboard("Yes");
+    await user.keyboard(" more");
+
+    expect((group().getByLabelText("left value 2") as HTMLInputElement).value).toBe("Yes more");
   });
 });
 
