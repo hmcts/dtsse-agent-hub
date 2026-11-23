@@ -8,10 +8,10 @@ export interface MandatoryDecision {
   review: Review[];
 }
 
-/** A bracketed note such as "(optional)", "(if known)" or "(if you have one)" in a field's own words. */
 /** The form saying a tick box has to be ticked. */
 const MUST_TICK = /\bmust\s+(?:be\s+)?tick(?:ed)?\b/i;
 
+/** A bracketed note such as "(optional)", "(if known)" or "(if you have one)" in a field's own words. */
 const OPTIONAL_NOTE = /\((?:optional|if [a-z ]+)\)/i;
 
 interface Condition {
@@ -33,13 +33,23 @@ function targetOf(drafts: DraftField[], from: number, choice: Choice): number | 
   if (!route) {
     return undefined;
   }
-  const at = drafts.findIndex((d, i) => i > from && (route.kind === "section" ? d.sectionId === route.id : d.field.id === route.id));
+  const at = drafts.findIndex((d, i) => i > from && (route.kind === "section" ? d.sectionId : (d.field.id ?? "")).toLowerCase() === route.id.toLowerCase());
   return at < 0 ? undefined : at;
+}
+
+/** Whether the options share one key, a Yes and No pair, whose answer is the literal Yes or No its emits list. */
+function isPair(question: DraftField, choice: Choice): boolean {
+  return question.choices?.some((c) => c.slot === choice.slot && c.ticked !== choice.ticked) === true;
+}
+
+/** The test that `choice` is (or, when not `picked`, is not) the answer: the literal value for a Yes and No pair, else whether its key is ticked. */
+function answerTest(question: DraftField, choice: Choice, key: string, picked: boolean): Record<string, Operand> {
+  return { [key]: isPair(question, choice) ? (choice.ticked === picked ? "Yes" : "No") : { ticked: choice.ticked === picked } };
 }
 
 /** Wording for "this option is picked", for a Yes/No pair's one key and for a box of its own. */
 function pickedLabel(question: DraftField, choice: Choice, picked: boolean): string {
-  if (question.choices?.some((c) => c.slot === choice.slot && c.ticked !== choice.ticked)) {
+  if (isPair(question, choice)) {
     return `${quote(question.field.label)} is answered ${choice.ticked === picked ? "Yes" : "No"}`;
   }
   return `${quote(choice.label)} is ${picked ? "ticked" : "not ticked"}`;
@@ -73,7 +83,7 @@ function routedBy(drafts: DraftField[], keys: string[][], at: number, index: num
   if (only && reaching.length === 1) {
     return {
       label: pickedLabel(question, only, true),
-      when: { [key(only)]: { ticked: only.ticked } },
+      when: answerTest(question, only, key(only), true),
       reason: `${where} sends ${describe(only)} here and skips it for ${skipping.map(describe).join(", ")}`,
       confidence: "medium"
     };
@@ -82,7 +92,7 @@ function routedBy(drafts: DraftField[], keys: string[][], at: number, index: num
   if (other && skipping.length === 1) {
     return {
       label: pickedLabel(question, other, false),
-      when: { [key(other)]: { ticked: !other.ticked } },
+      when: answerTest(question, other, key(other), false),
       reason: `${where} skips it only for ${describe(other)}; it is reached by ${reaching.map(describe).join(" and ")}, since a section the form does not route out of runs on into the next`,
       confidence: "low"
     };
@@ -92,12 +102,13 @@ function routedBy(drafts: DraftField[], keys: string[][], at: number, index: num
 
 /**
  * Every field is mandatory, with no marker, unless the form marks it "(optional)" or "(if …)", or an option's "go to" route skips the section or question it sits in,
- * in which case it is required when an option that reaches it is picked. A field whose routes cannot be followed stays mandatory.
+ * in which case it is required when an option that reaches it is picked. A field whose routes cannot be followed stays mandatory, and its routing question carries one marker saying why.
  * `keys[i]` are the keys proposed for `drafts[i]`.
  */
 export function decideMandatory(drafts: DraftField[], keys: string[][]): MandatoryDecision[] {
   const routing = drafts.flatMap((d, i) => (d.choices?.some((c) => c.route) ? [i] : []));
-  return drafts.map((d, index) => {
+  const unresolvedAt = new Map<number, Set<string>>();
+  const decisions = drafts.map((d, index): MandatoryDecision => {
     const note = [d.field.label, d.question].map((t) => OPTIONAL_NOTE.exec(t)?.[0]).find((n) => n !== undefined);
     if (note) {
       return { mandatory: "optional", review: [{ about: "mandatory", reason: `optional: the form marks it ${note}`, confidence: "high" }] };
@@ -110,30 +121,28 @@ export function decideMandatory(drafts: DraftField[], keys: string[][]): Mandato
       };
     }
     const conditions: Condition[] = [];
-    const unresolved: string[] = [];
     for (const at of routing.filter((r) => r < index)) {
       const result = routedBy(drafts, keys, at, index);
       if (result && "unresolved" in result) {
-        unresolved.push(result.unresolved);
+        unresolvedAt.set(at, (unresolvedAt.get(at) ?? new Set()).add(result.unresolved));
       } else if (result) {
         conditions.push(result);
       }
     }
-    const review: Review[] = unresolved.map((reason) => ({
-      about: "mandatory",
-      reason: `mandatory, but a person must check it: ${reason}`,
-      confidence: "low"
-    }));
     if (conditions.length === 0) {
-      return {
-        mandatory: "mandatory",
-        review
-      };
+      return { mandatory: "mandatory", review: [] };
     }
     return {
       mandatory: "conditional",
       required: { label: conditions.map((c) => c.label).join(" and "), when: Object.assign({}, ...conditions.map((c) => c.when)) as Record<string, Operand> },
-      review: [...review, ...conditions.map((c): Review => ({ about: "mandatory", reason: `required ${c.label}: ${c.reason}`, confidence: c.confidence }))]
+      review: [...conditions.map((c): Review => ({ about: "mandatory", reason: `required ${c.label}: ${c.reason}`, confidence: c.confidence }))]
     };
   });
+  // A route that cannot be followed is the routing question's to report, once, not every later field's.
+  for (const [at, reasons] of unresolvedAt) {
+    decisions[at]?.review.push(
+      ...[...reasons].map((reason): Review => ({ about: "mandatory", reason: `routing, which a person must check: ${reason}`, confidence: "low" }))
+    );
+  }
+  return decisions;
 }

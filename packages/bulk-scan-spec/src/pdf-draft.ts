@@ -134,7 +134,7 @@ function choiceOf(label: string, slot: number, ticked: boolean): Choice {
     return { label, slot, ticked };
   }
   const kind = (m[1] ?? "").toLowerCase() === "section" ? "section" : "question";
-  return { label: label.slice(0, m.index).trim(), slot, ticked, route: { kind, id: m[2] ?? "", text: m[0].replace(/^[\s>.:\-–—]+/, "").trim() } };
+  return { label: label.slice(0, m.index).trim(), slot, ticked, route: { kind, id: m[2] ?? "", text: m[0].replace(/^[\s>.,:\-–—]+/, "").trim() } };
 }
 
 /** How far below an undotted number a box may start for the number to be a question's rather than numbered guidance. */

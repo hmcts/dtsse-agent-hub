@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { makePdf, SAMPLE_FORM } from "./__fixtures__/make-pdf.ts";
 import { ROUTED_FORM } from "./__fixtures__/t210-routes.ts";
 import { isQuestion, keyModels } from "./codegen/model.ts";
+import { emitsOf } from "./emits.ts";
 import { fromPdf } from "./from-pdf.ts";
 import type { Field, FormSpec } from "./schema.ts";
 import { allFields } from "./schema.ts";
@@ -58,7 +59,7 @@ describe("mandatory, optional and conditional fields of a PDF draft", () => {
     expect(byId(fields, "5.1")).toMatchObject({ mandatory: "mandatory" });
     expect(byId(fields, "5.2")).toMatchObject({
       mandatory: "conditional",
-      required: { label: "'Do you have a representative?' is answered Yes", when: { [answer as string]: { ticked: true } } }
+      required: { label: "'Do you have a representative?' is answered Yes", when: { [answer as string]: "Yes" } }
     });
   });
 
@@ -80,8 +81,11 @@ describe("mandatory, optional and conditional fields of a PDF draft", () => {
     }
     const fields = await fieldsOf(pages);
     expect(byId(fields, "3.1")).toMatchObject({ mandatory: "mandatory" });
-    expect(markers(byId(fields, "6.1"))[0]).toMatchObject({ confidence: "low" });
-    expect(markers(byId(fields, "6.1"))[0]?.reason).toContain("leads to section 12, which is not after it in the form");
+    expect(markers(byId(fields, "6.1"))).toEqual([]);
+    expect(markers(byId(fields, "2.5"))).toHaveLength(1);
+    expect(markers(byId(fields, "2.5"))[0]).toMatchObject({ confidence: "low" });
+    expect(markers(byId(fields, "2.5"))[0]?.reason).toContain("leads to section 12, which is not after it in the form");
+    expect(fields.flatMap(markers).filter((m) => m.reason.includes("must check"))).toHaveLength(1);
   });
 
   it("should make every field of a form with no routes and no notes mandatory", async () => {
@@ -153,7 +157,7 @@ describe("tick boxes", () => {
     const pair = form.sections.flatMap((s) => s.fields).find((f) => f.label === "Do you have a solicitor?") as Field;
     expect(pair).toMatchObject({ mandatory: "mandatory", keys: [expect.any(String)] });
     const [key] = pair.keys as [string];
-    expect(pair.emits).toEqual([
+    expect(emitsOf(pair)).toEqual([
       { when: "if yes", key, value: "Yes" },
       { when: "if no", key, value: "No" },
       { when: "if empty", key, value: "" }
@@ -182,5 +186,70 @@ describe("tick boxes", () => {
   it("should make a single tick box mandatory when the form says it must be ticked", async () => {
     const [box] = await fieldsOf(single("You must tick this box to confirm"));
     expect(box).toMatchObject({ mandatory: "mandatory" });
+  });
+});
+
+describe("a field reached only by one answer of a Yes and No pair", () => {
+  const PAIR: Parameters<typeof makePdf>[1] = [
+    {
+      texts: [
+        { text: "Section 1 - Start", x: 28, y: 750 },
+        { text: "1.1 Do you have a solicitor?", x: 28, y: 725 },
+        { text: "Yes > go to Section 3", x: 77, y: 698 },
+        { text: "No > go to Section 2", x: 77, y: 668 },
+        { text: "Section 2 - Your own details", x: 28, y: 620 },
+        { text: "2.1 Your name", x: 28, y: 595 },
+        { text: "Section 3 - Solicitor details", x: 28, y: 520 },
+        { text: "3.1 Solicitor name", x: 28, y: 495 }
+      ],
+      checkboxes: [
+        { name: "yes", x: 57, y: 695 },
+        { name: "no", x: 57, y: 665 }
+      ],
+      textBoxes: [
+        { name: "own", x: 57, y: 565 },
+        { name: "sol", x: 57, y: 465 }
+      ]
+    }
+  ];
+
+  it("should require it when the answer is the literal No, which a blank answer is not", async () => {
+    const fields = await fieldsOf(PAIR);
+    const [answer] = byId(fields, "1.1").keys;
+    expect(byId(fields, "2.1")).toMatchObject({
+      mandatory: "conditional",
+      required: { label: "'Do you have a solicitor?' is answered No", when: { [answer as string]: "No" } }
+    });
+    expect(byId(fields, "3.1")).toMatchObject({ mandatory: "mandatory" });
+  });
+});
+
+describe("a route that cannot be followed", () => {
+  it("should find a section whatever the case of its letter", async () => {
+    const pages: Parameters<typeof makePdf>[1] = [
+      {
+        texts: [
+          { text: "Section 1 - Start", x: 28, y: 750 },
+          { text: "1.1 Will you take part?", x: 28, y: 725 },
+          { text: "Yes. Go to Section 6A", x: 77, y: 698 },
+          { text: "No. Go to Section 7", x: 77, y: 668 },
+          { text: "Section 6a - Hearing details", x: 28, y: 620 },
+          { text: "6.1 Phone number", x: 28, y: 595 },
+          { text: "Section 7 - End", x: 28, y: 520 },
+          { text: "7.1 Comments", x: 28, y: 495 }
+        ],
+        checkboxes: [
+          { name: "yes", x: 57, y: 695 },
+          { name: "no", x: 57, y: 665 }
+        ],
+        textBoxes: [
+          { name: "phone", x: 57, y: 565 },
+          { name: "comments", x: 57, y: 465 }
+        ]
+      }
+    ];
+    const fields = await fieldsOf(pages);
+    expect(byId(fields, "6.1")).toMatchObject({ mandatory: "conditional" });
+    expect(fields.flatMap(markers).filter((m) => m.reason.includes("must check"))).toEqual([]);
   });
 });

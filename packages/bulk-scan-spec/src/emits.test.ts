@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { YES_NO } from "./__fixtures__/helpers.ts";
-import { keyConflicts, parseEmits, renderEmits, valueSets } from "./emits.ts";
+import { defaultEmits, keyConflicts, parseEmits, renderEmits, valueSets } from "./emits.ts";
 import { parseLogic } from "./logic.ts";
 import { fieldSchema } from "./schema.ts";
 
@@ -61,5 +61,18 @@ describe("parseEmits with a name and no value", () => {
       { key: "b", value: "x" },
       { key: "c", value: "" }
     ]);
+  });
+});
+
+describe("defaultEmits for a Yes and No pair", () => {
+  it("should list Yes, No and blank for a one-key tick box in a group of two, and true and false for any other tick box", () => {
+    const base = { role: "field", label: "", inputType: "checkbox", mandatory: "mandatory", ccd: [], rules: [], todo: [] } as const;
+    const pair = fieldSchema.parse({ ...base, keys: ["q"], group: { kind: "xor", size: 2, options: [{ key: "q" }] } });
+    expect(defaultEmits(pair)).toEqual([
+      { when: "if yes", key: "q", value: "Yes" },
+      { when: "if no", key: "q", value: "No" },
+      { when: "if empty", key: "q", value: "" }
+    ]);
+    expect(defaultEmits(fieldSchema.parse({ ...base, keys: ["t"] })).map((e) => e.value)).toEqual(["true", "false"]);
   });
 });
