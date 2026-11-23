@@ -31,6 +31,9 @@ export function fakeTmux(): FakeTmux {
     sendKeys: async (name, ...keys) => {
       calls.push(["send-keys", name, ...keys]);
     },
+    paste: async (name, text) => {
+      calls.push(["paste", name, text]);
+    },
     kill: async (name) => {
       calls.push(["kill", name]);
       alive.delete(name);

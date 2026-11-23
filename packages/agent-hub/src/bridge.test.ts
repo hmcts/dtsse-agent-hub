@@ -1278,6 +1278,34 @@ describe("runBridge", () => {
     }
   });
 
+  it("should type a conversation's prompt into its pane, and not hand it to the socket, when AGENT_HUB_TYPE_PROMPTS is on", async () => {
+    // Arrange
+    const pasted: string[] = [];
+    const tmux = {
+      sendKeys: async () => {},
+      paste: async (name: string, text: string) => void pasted.push(`${name}\n${text}`)
+    };
+    const bridge = await startBridge(
+      { pingMs: 5000 },
+      { env: { ...VIRTUAL, AGENT_HUB_CONVERSATION_ID: CONVERSATION, AGENT_HUB_TYPE_PROMPTS: "1" }, tmux, modelSettleMs: 0 }
+    );
+    const assistant = { conversation_id: CONVERSATION, product: "pcs", product_label: "Possession claims", artefact_version: 0, artefact_updated_by: null };
+
+    try {
+      await waitUntil(() => bridge.streamOpens().length >= 1, "the first stream");
+
+      // Act
+      const sent = bridge.hub.sendDirectFromOwner(bridge.agentId, "admin merge it", { assistant });
+      await waitUntil(() => pasted.length >= 1, "the typed prompt");
+
+      // Assert
+      expect(pasted[0]).toBe(`${tmuxName(CONVERSATION)}\n${contextOpen(sent.id)}\n${ANSWER_HERE}\nProduct area: Possession claims.\n${CONTEXT_CLOSE}\n\nadmin merge it`);
+      expect(bridge.socketWrites).toEqual([]);
+    } finally {
+      await bridge.stop();
+    }
+  });
+
   /** One upload as the mock hub holds it, and as `held` below takes it. */
   type HeldUpload = [uploadId: string, upload: { parts: Uint8Array[]; fetched: boolean }];
 

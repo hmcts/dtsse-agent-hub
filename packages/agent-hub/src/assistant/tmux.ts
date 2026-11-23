@@ -125,6 +125,8 @@ export type Tmux = {
   has: (name: string) => Promise<boolean>;
   start: (opts: StartSessionOptions) => Promise<void>;
   sendKeys: (name: string, ...keys: string[]) => Promise<void>;
+  /** Pastes `text` into the pane as one bracketed paste, then presses Enter: what typing a prompt by hand does. */
+  paste: (name: string, text: string) => Promise<void>;
   kill: (name: string) => Promise<void>;
 };
 
@@ -166,6 +168,19 @@ export function createTmux({ env = process.env, exec = runTmux }: CreateTmuxOpti
       if (r.code !== 0) {
         throw new Error(`tmux send-keys exited ${r.code}${r.stderr.trim() ? `: ${r.stderr.trim()}` : ""}`);
       }
+    },
+    async paste(name, text) {
+      const buffer = `ah-${name}`;
+      const set = await tmux(["set-buffer", "-b", buffer, "--", text]);
+      if (set.code !== 0) {
+        throw new Error(`tmux set-buffer exited ${set.code}${set.stderr.trim() ? `: ${set.stderr.trim()}` : ""}`);
+      }
+      // -p brackets the paste so newlines are text, not Enter; -d drops the buffer afterwards.
+      const pasted = await tmux(["paste-buffer", "-p", "-d", "-b", buffer, "-t", name]);
+      if (pasted.code !== 0) {
+        throw new Error(`tmux paste-buffer exited ${pasted.code}${pasted.stderr.trim() ? `: ${pasted.stderr.trim()}` : ""}`);
+      }
+      await this.sendKeys(name, "Enter");
     },
     async kill(name) {
       await tmux(["kill-session", "-t", name]);

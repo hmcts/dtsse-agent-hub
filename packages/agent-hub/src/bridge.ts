@@ -7,7 +7,7 @@ import { claimsCurrentFeatures, loadAgent, registerAgent, type StoredAgent } fro
 import { type Api, ApiError, createApi } from "./api.ts";
 import { fetchAttachments, readAttachments, unfetchedAttachments } from "./assistant/attachments.ts";
 import { switchModel } from "./assistant/models.ts";
-import { createTmux, type Tmux } from "./assistant/tmux.ts";
+import { createTmux, type Tmux, tmuxName } from "./assistant/tmux.ts";
 import { peerOf, recordDirect } from "./directs.ts";
 import type { Env } from "./env.ts";
 import { type AssistantFrame, type AttachmentOutcome, chooseEnvelope, routeDelivery, type SessionKind } from "./envelope.ts";
@@ -56,7 +56,7 @@ export type RunBridgeOptions = {
   transcriptSync?: TranscriptSync;
   inbound?: (opts: InboundOptions) => InboundResult;
   /** What types `/model` into a conversation's pane; a test passes its own. */
-  tmux?: Pick<Tmux, "sendKeys">;
+  tmux?: Pick<Tmux, "sendKeys" | "paste">;
   modelSettleMs?: number;
   /** When a stream counts as ending rapidly, and the first backoff; `reconnect.ts`'s own unless a test says otherwise. */
   reconnect?: ReconnectTiming;
@@ -404,7 +404,15 @@ export async function runBridge({
       try {
         const skills = skillNames();
         const content = chooseEnvelope(message, delivery, { skills, attachments, previousProduct });
-        await deliver(info.socketPath, env.CLAUDE_CODE_MESSAGING_TOKEN, content);
+        // A conversation's prompt is the owner's own words, so with `AGENT_HUB_TYPE_PROMPTS=1` it is typed into the pane
+        // as input rather than handed over Claude Code's cross-session socket, which frames everything it carries as a
+        // peer's. Off by default: it needs trying on a real pod, and the socket is what acknowledges delivery.
+        const conversationId = env.AGENT_HUB_CONVERSATION_ID;
+        if (delivery.kind === "conversation" && conversationId && env.AGENT_HUB_TYPE_PROMPTS === "1") {
+          await tmux.paste(tmuxName(conversationId), content);
+        } else {
+          await deliver(info.socketPath, env.CLAUDE_CODE_MESSAGING_TOKEN, content);
+        }
         remember(message.id);
         if (assistant) {
           try {
