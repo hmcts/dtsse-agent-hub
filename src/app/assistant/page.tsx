@@ -1,45 +1,11 @@
-import { cookies } from "next/headers";
-import {
-  deleteConversation,
-  openConversation,
-  pinConversation,
-  renameConversation,
-  saveAssistantModel,
-  sendAssistantMessage,
-  setConversationProduct,
-  startConversation
-} from "@/app/_actions/assistant";
-import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/assistant-files";
-import { readAssistantAgent, readGitIdentity, readSchedule, saveSchedule } from "@/app/_actions/assistant-settings";
-import { clearGitIdentity, removeCredential, resetClaudeMd, saveClaudeMd, saveCredential, saveGitIdentity } from "@/app/_actions/credentials";
-import { saveExportDefaults } from "@/app/_actions/export-defaults";
-import { archiveFeedbackProject, pinFeedbackProject } from "@/app/_actions/feedback";
-import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
-import { pasteLoginCode, reconnectSignIn, restartVirtualAgent, saveVirtualAgentPod } from "@/app/_actions/virtual-agents";
-import { SHARING_SETTINGS } from "@/app/assistant/sharing";
-import { connectionsData } from "@/assistant/connections";
-import { savedCredentialsData } from "@/assistant/saved-credentials";
-import { assistantPluginsData } from "@/assistant/settings";
-import { SIDEBAR_COOKIE, sidebarCollapsedOf } from "@/assistant/sidebar";
+import { openConversation, sendAssistantMessage, setConversationProduct, startConversation } from "@/app/_actions/assistant";
+import { AssistantShellFrame, loadFrame } from "@/app/assistant/frame";
 import { STARTERS } from "@/assistant/starters";
 import { offeredTemplates } from "@/assistant/templates";
-import { THEME_COOKIE, themeOf } from "@/assistant/theme";
-import { WAITING_COOKIE } from "@/assistant/waiting";
 import { AssistantGate } from "@/components/assistant/AssistantGate";
-import { AssistantShell, type ConversationActions } from "@/components/assistant/AssistantShell";
 import { EmptyChat, type EmptyChatActions } from "@/components/assistant/EmptyChat";
-import { feedbackEnabled } from "@/feedback/settings";
 import { requireViewer } from "@/viewer/current";
-import {
-  assistantExportDefaults,
-  assistantFiles,
-  assistantModel,
-  assistantSize,
-  assistantTemplates,
-  claudeMdSettings,
-  openAssistant,
-  unsentNewChat
-} from "@/web/data";
+import { unsentNewChat } from "@/web/data";
 
 export const dynamic = "force-dynamic";
 
@@ -51,70 +17,17 @@ const CHAT_ACTIONS: EmptyChatActions = {
   setProduct: setConversationProduct
 };
 
-/** What a conversation's row in the sidebar offers. */
-const ROW_ACTIONS: ConversationActions = {
-  rename: renameConversation,
-  pin: pinConversation,
-  remove: deleteConversation,
-  pinFeedback: pinFeedbackProject,
-  archiveFeedback: archiveFeedbackProject
-};
-
 /** A new chat. Opening it creates the viewer's assistant on their first visit, and starts it whenever it is stopped. */
 export default async function AssistantPage() {
   const viewer = await requireViewer();
-  const jar = await cookies();
-  const theme = themeOf(jar.get(THEME_COOKIE)?.value);
-  const [home, unsent, claudeMd, mine, files, size, defaults, model] = await Promise.all([
-    openAssistant(viewer),
-    unsentNewChat(viewer),
-    claudeMdSettings(viewer),
-    assistantTemplates(viewer),
-    assistantFiles(viewer),
-    assistantSize(viewer),
-    assistantExportDefaults(viewer),
-    assistantModel(viewer)
-  ]);
-  // The same sign-in the conversation page gives the document panel, for the settings' searches.
-  const atlassian = {
-    connected: home.credentials.available && home.credentials.statuses.some((status) => status.kind === "atlassian" && status.stored),
-    login: home.assistant.logins.find((login) => login.kind === "atlassian") ?? null
-  };
-  const plugins = assistantPluginsData(home.assistant, home.plugins);
-  const pluginSettings = plugins && { ...plugins, save: saveVirtualAgentPod };
+  const [frame, unsent] = await Promise.all([loadFrame(viewer), unsentNewChat(viewer)]);
+  const { home, mine, theme } = frame;
   return (
-    <AssistantShell
-      viewerName={viewer.name}
-      groups={home.conversations}
-      activeId={null}
-      theme={theme}
-      collapsed={sidebarCollapsedOf(jar.get(SIDEBAR_COOKIE)?.value)}
-      actions={ROW_ACTIONS}
-      connections={connectionsData(home.assistant, home.credentials)}
-      viewerRoute={home.credentials.modelRoute}
-      connect={{ assistantId: home.assistant.id, running: home.assistant.desired === "running", reconnect: reconnectSignIn, paste: pasteLoginCode }}
-      now={Date.now()}
-      plugins={pluginSettings}
-      welsh={home.welsh}
-      briefing={home.briefing}
-      feedback={feedbackEnabled()}
-      start={startConversation}
-      claudeMd={{ settings: claudeMd, save: saveClaudeMd, reset: resetClaudeMd }}
-      templates={{ mine, save: saveTemplate, remove: deleteTemplate }}
-      files={files === undefined ? undefined : { view: files, remove: deleteAssistantFile, removeAll: deleteAllAssistantFiles }}
-      size={size === undefined ? undefined : { view: size, assistantId: home.assistant.id, save: saveVirtualAgentPod }}
-      model={model === undefined ? undefined : { ...model, save: saveAssistantModel }}
-      exports={{ defaults, save: saveExportDefaults, access: atlassian }}
-      sharing={SHARING_SETTINGS}
-      agent={{ load: readAssistantAgent, restart: restartVirtualAgent }}
-      git={{ load: readGitIdentity, save: saveGitIdentity, clear: clearGitIdentity }}
-      schedule={{ load: readSchedule, save: saveSchedule }}
-      tokens={{ ...savedCredentialsData(home.credentials, home.assistant.modelRoute), save: saveCredential, remove: removeCredential }}
-    >
+    <AssistantShellFrame frame={frame}>
       {/* No `local` here: this screen is about to start a chat on a pod, so it needs what a pod needs. */}
-      <AssistantGate home={home} waiting={jar.get(WAITING_COOKIE)?.value} theme={theme}>
+      <AssistantGate home={home} waiting={frame.waiting} theme={theme}>
         <EmptyChat starters={STARTERS} templates={offeredTemplates(mine)} skills={home.skills} viewerOid={viewer.oid} unsent={unsent} actions={CHAT_ACTIONS} />
       </AssistantGate>
-    </AssistantShell>
+    </AssistantShellFrame>
   );
 }
