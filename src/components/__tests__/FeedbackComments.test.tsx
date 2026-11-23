@@ -323,7 +323,7 @@ describe("CommentsView's choosing, themes and refining", () => {
     render(<CommentsView projectId="p1" threads={threads()} links={project().links} people={[ANN, BEN]} handlers={chosen} />);
 
     fireEvent.click(screen.getByRole("checkbox", { name: /^Choose the comment by Ben Reviewer/ }));
-    expect(screen.getByText(/drafts one Jira story per theme/)).toBeTruthy();
+    expect(screen.getByText(/drafts one Jira story for each theme/)).toBeTruthy();
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Refine with Assistant" })));
     expect(chosen.refine).toHaveBeenCalledWith(["b"]);
 

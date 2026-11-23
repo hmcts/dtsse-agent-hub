@@ -161,13 +161,25 @@ describe("startWidget", () => {
     expect(types().at(-1)).toBe("replay-events");
   });
 
+  it("should send no more of a page's title than a thread keeps", () => {
+    document.title = "t".repeat(5000);
+    document.body.innerHTML = `<button id="go">Continue</button>`;
+    running = startWidget(framedView(), CONFIG, record);
+    send({ type: "pick-start" });
+    document.querySelector("button")?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    const picked = posted.at(-1)?.message;
+    expect(picked?.type === "picked" ? picked.title : undefined).toHaveLength(300);
+    expect(posted.find((entry) => entry.message.type === "hello")?.message).toMatchObject({ title: "t".repeat(300) });
+    document.title = "Start";
+  });
+
   it("should post the picked element's anchor and snapshot", () => {
     document.body.innerHTML = `<button id="go">Continue</button>`;
     running = startWidget(framedView(), CONFIG, record);
     send({ type: "pick-start" });
     document.querySelector("button")?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     const picked = posted.at(-1)?.message;
-    expect(picked).toMatchObject({ type: "picked", path: "/start?step=1", anchor: { selector: "#go", text: "Continue", tag: "button" } });
+    expect(picked).toMatchObject({ type: "picked", path: "/start?step=1", title: "Start", anchor: { selector: "#go", text: "Continue", tag: "button" } });
     expect(picked?.type === "picked" ? picked.snapshot.map((event) => event.type) : []).toEqual([4, 2]);
     expect(recordCalls[0]?.maskAllInputs).toBe(true);
   });

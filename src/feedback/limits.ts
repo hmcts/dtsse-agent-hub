@@ -38,3 +38,6 @@ export const FEEDBACK_RATE_LIMITED = "that is a lot at once; wait a moment and t
 
 /** How long an archived project is kept, links already dead, before the sweep deletes it and its blobs. */
 export const ARCHIVED_PROJECT_DAYS = 7;
+
+/** Most of a page title a thread keeps, which is far past any title a person reads in a list. The widget sends no more. */
+export const MAX_PAGE_TITLE = 300;

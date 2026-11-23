@@ -7,6 +7,7 @@ import {
   MAX_LINKS_PER_PROJECT,
   MAX_MEMBERS,
   MAX_PAGE_PATH,
+  MAX_PAGE_TITLE,
   MAX_PROJECT_NAME,
   MAX_PROTOTYPE_VERSION,
   MAX_RECORDING_MS,
@@ -108,13 +109,14 @@ export type FeedbackSettingsInput = z.output<typeof feedbackSettingsBody>;
 
 const offsetMs = z.number().int().min(0).max(MAX_RECORDING_MS);
 
-/** Most of a page title a thread keeps, which is far past any title a person reads in a list. */
-export const MAX_PAGE_TITLE = 300;
+export { MAX_PAGE_TITLE };
 
-/** A page's title as the widget read it, with its whitespace run together; blank is no title. */
+/**
+ * A page's title as the widget read it, with its whitespace run together and cut to `MAX_PAGE_TITLE`; blank is no
+ * title. Cut rather than refused, so a page with an outlandish title can still be commented on.
+ */
 const pageTitle = z
   .string()
-  .max(MAX_PAGE_TITLE * 4)
   .transform((value) => value.replace(/\s+/g, " ").trim().slice(0, MAX_PAGE_TITLE))
   .transform((value) => (value === "" ? null : value));
 

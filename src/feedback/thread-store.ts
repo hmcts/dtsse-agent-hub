@@ -110,13 +110,22 @@ function commentView(row: CommentRow): FeedbackCommentView {
   };
 }
 
-function threadView(row: ThreadRow, viewerOid: string): FeedbackThreadView {
+/**
+ * A thread as `viewerOid` reads it through `scope`. A theme is the team's own way of sorting threads, and a
+ * refining chat is a team member's, so a reviewer reading through a link sees neither; the Jira issues their comment
+ * went into they do see.
+ */
+function threadView(row: ThreadRow, viewerOid: string, scope: Pick<ResolvedScope, "access">): FeedbackThreadView {
   const { refinements, ...rest } = row;
   const done = refinements.map((link) => link.refinement);
+  const team = scope.access === "team";
   return {
     ...rest,
+    theme: team ? row.theme : null,
     jiraKeys: [...new Set(done.flatMap((refinement) => refinement.jiraKeys))],
-    refinedIn: done.filter((refinement) => refinement.ownerOid === viewerOid).at(-1)?.conversationId ?? null,
+    refinedIn: team
+      ? (done.filter((refinement) => refinement.ownerOid === viewerOid && refinement.conversationId !== null).at(-1)?.conversationId ?? null)
+      : null,
     anchor: row.anchor as FeedbackAnchor,
     status: row.status as FeedbackThreadStatus,
     resolvedAt: row.resolvedAt?.toISOString() ?? null,
@@ -140,13 +149,13 @@ export async function listThreads(db: Database, viewerOid: string, scope: Feedba
     return [];
   }
   const rows = await db.feedbackThread.findMany({ where, select: THREAD_COLUMNS, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: MAX_THREADS_LISTED });
-  return rows.map((row) => threadView(row, viewerOid));
+  return rows.map((row) => threadView(row, viewerOid, resolved));
 }
 
 /** One thread the scope reaches, or the 404 any other is reported as. */
 export async function getThread(db: Database, viewerOid: string, scope: FeedbackScope, threadId: string): Promise<FeedbackThreadView> {
   const resolved = await resolveScope(db, viewerOid, scope);
-  return threadView(await threadIn(db, resolved, threadId), viewerOid);
+  return threadView(await threadIn(db, resolved, threadId), viewerOid, resolved);
 }
 
 async function threadIn(db: Database, scope: ResolvedScope, threadId: string): Promise<ThreadRow> {
@@ -236,7 +245,7 @@ export async function createThread(
     await writeComment(tx, id, viewerOid, input.body, named, now);
     await notify(tx, { type: "feedback", project_id: scope.projectId, link_id: linkId });
   });
-  return { thread: threadView(await threadIn(prisma, scope, id), viewerOid), snapshotPath: snapshot };
+  return { thread: threadView(await threadIn(prisma, scope, id), viewerOid, scope), snapshotPath: snapshot };
 }
 
 /** A reply on a thread the scope reaches, which moves the thread's `updated_at` on. */
@@ -293,5 +302,5 @@ export async function patchThread(
     await tx.feedbackThread.update({ where: { id: threadId }, data });
     await notify(tx, { type: "feedback", project_id: thread.projectId, link_id: thread.linkId });
   });
-  return threadView(await threadIn(prisma, resolved, threadId), viewerOid);
+  return threadView(await threadIn(prisma, resolved, threadId), viewerOid, resolved);
 }

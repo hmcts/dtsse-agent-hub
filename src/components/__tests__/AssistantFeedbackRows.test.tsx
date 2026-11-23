@@ -312,6 +312,8 @@ describe("a Bulk Scan form's row", () => {
     }
 
     expect(document.activeElement).toBe(link);
+  });
+});
 
 describe("AssistantShell's Mentions", () => {
   it("should not offer Mentions while prototype feedback is off", () => {

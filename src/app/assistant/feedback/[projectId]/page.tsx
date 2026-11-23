@@ -38,7 +38,13 @@ export default async function FeedbackProjectPage({
       <MarkSeen projectId={data.project.id} markSeen={markFeedbackProjectSeen} />
       <div className="mx-auto flex max-w-[1280px] flex-col gap-5 px-5 pb-10 pt-5">
         <FeedbackHeader title={data.project.name} back={{ href: "/assistant/feedback", label: "Feedback projects" }} />
-        <ProjectPage data={data} tab={tab} actions={PROJECT_ACTIONS} allowHttp={allowPrivateTargets()} thread={typeof query.thread === "string" ? query.thread : null} />
+        <ProjectPage
+          data={data}
+          tab={tab}
+          actions={PROJECT_ACTIONS}
+          allowHttp={allowPrivateTargets()}
+          thread={typeof query.thread === "string" ? query.thread : null}
+        />
       </div>
     </AssistantFrame>
   );

@@ -99,9 +99,11 @@ export function refinementRequest(input: {
   now: Date;
 }): { product: string; title: string; body: string } {
   const ordered = refinementOrder(input.threads).slice(0, MAX_REFINE_THREADS);
-  const intro = opening(input.projectName, ordered.length);
+  // The opening says how many comments follow, which is only known once they are fitted in: room is kept for the
+  // longest it could be.
+  const room = Math.max(opening(input.projectName, ordered.length).length, opening(input.projectName, 1).length);
   const sections: string[] = [];
-  let used = intro.length;
+  let used = room;
   let theme: string | undefined;
   let included = 0;
   for (const [index, thread] of ordered.entries()) {
@@ -122,6 +124,6 @@ export function refinementRequest(input: {
   return {
     product: DEFAULT_PRODUCT,
     title: `Refine feedback: ${input.projectName}, ${ukLongDate(input.now)}`,
-    body: `${intro}${sections.join("")}${note}`
+    body: `${opening(input.projectName, included)}${sections.join("")}${note}`
   };
 }

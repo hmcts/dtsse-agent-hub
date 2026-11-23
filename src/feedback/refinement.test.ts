@@ -95,6 +95,9 @@ describe("refinementRequest", () => {
     expect(request.body.length).toBeLessThanOrEqual(MAX_BODY);
     expect(request.body).toContain(`"${"x".repeat(MAX_QUOTED_COMMENT)}…"`);
     expect(request.body).toMatch(/\(\d+ more comments were left out to keep this message short enough to send\.\)$/);
+    const listed = request.body.match(/^\[\d+\] /gm)?.length ?? 0;
+    expect(request.body).toContain(`Below are ${listed} comments`);
+    expect(listed).toBeLessThan(MAX_REFINE_THREADS);
   });
 
   it("should take at most the threads one refinement takes, and say when one was left out to fit", () => {

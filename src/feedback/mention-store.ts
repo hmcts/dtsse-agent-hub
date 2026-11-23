@@ -1,6 +1,7 @@
 import { type FeedbackLinkAccess, feedbackLinkAccess, feedbackProjectAccess } from "../access/rules.ts";
 import { isUuid } from "../agents/ids.ts";
-import type { Database, Prisma } from "../store/prisma.ts";
+import { notify } from "../realtime/notify.ts";
+import type { Database, Prisma, PrismaClient } from "../store/prisma.ts";
 import type { FeedbackAnchor } from "./schemas.ts";
 import type { FeedbackAuthor, FeedbackThreadStatus } from "./thread-store.ts";
 
@@ -12,11 +13,11 @@ import type { FeedbackAuthor, FeedbackThreadStatus } from "./thread-store.ts";
  * project's page for its team, the link's review page for a reviewer.
  */
 
-/** Most mentions the list shows, newest first, which is more than a person has to catch up on in one sitting. */
+/**
+ * Most mentions the list shows, newest first, which is more than a person has to catch up on in one sitting. The
+ * sidebar counts the unseen among these same ones, so opening the list always clears its count.
+ */
 export const MAX_MENTIONS_LISTED = 50;
-
-/** Most unseen mentions counted for the badge, which shows anything over as "99+". */
-export const MAX_MENTIONS_COUNTED = 100;
 
 export interface FeedbackMentionView {
   commentId: string;
@@ -80,15 +81,32 @@ export function mentionHref(
   return `/review/${mention.token}?${new URLSearchParams({ path: mention.pagePath })}`;
 }
 
-const LIVE_PROJECT = { comment: { thread: { project: { archivedAt: null } } } } as const satisfies Prisma.FeedbackMentionWhereInput;
+/**
+ * The mentions of `personOid` that `accessOf` can let them open, as a query, so the newest of them are read whatever
+ * number of others they can no longer open: a live project they are on the team of, or a live link. `accessOf` is
+ * still asked of every row, being the rule.
+ */
+function openable(personOid: string): Prisma.FeedbackMentionWhereInput {
+  return {
+    personOid,
+    comment: {
+      thread: {
+        project: { archivedAt: null },
+        OR: [{ project: { ownerOid: personOid } }, { project: { members: { some: { memberOid: personOid } } } }, { link: { revokedAt: null } }]
+      }
+    }
+  };
+}
+
+const NEWEST = [{ comment: { createdAt: "desc" } }, { commentId: "desc" }] as const satisfies Prisma.FeedbackMentionOrderByWithRelationInput[];
 
 /** The comments that named `personOid`, newest first, that they can still open. */
-export async function listMentions(db: Database, personOid: string, limit = MAX_MENTIONS_LISTED): Promise<FeedbackMentionView[]> {
+export async function listMentions(db: Database, personOid: string): Promise<FeedbackMentionView[]> {
   const rows = await db.feedbackMention.findMany({
-    where: { personOid, ...LIVE_PROJECT },
+    where: openable(personOid),
     select: MENTION_COLUMNS,
-    orderBy: [{ comment: { createdAt: "desc" } }, { commentId: "desc" }],
-    take: limit
+    orderBy: NEWEST,
+    take: MAX_MENTIONS_LISTED
   });
   const views: FeedbackMentionView[] = [];
   for (const row of rows) {
@@ -117,46 +135,36 @@ export async function listMentions(db: Database, personOid: string, limit = MAX_
   return views;
 }
 
-/** How many of the mentions `listMentions` would show `personOid` they have not seen, up to `MAX_MENTIONS_COUNTED`. */
-export async function unseenMentionCount(db: Database, personOid: string): Promise<number> {
-  const rows = await db.feedbackMention.findMany({
-    where: { personOid, seenAt: null, ...LIVE_PROJECT },
-    select: { comment: { select: { thread: { select: ACCESS_COLUMNS } } } },
-    take: MAX_MENTIONS_COUNTED
-  });
-  return rows.filter((row) => accessOf(personOid, row.comment.thread) !== "none").length;
-}
-
-/** How many of a person's newest mentions are read to tell whether any is still theirs to open. */
-const MENTIONS_PROBED = 20;
-
 /**
- * What the sidebar shows of `personOid`'s mentions: how many they have not seen, or null when they have none they
- * could open, seen or not, which hides Mentions altogether rather than offering an empty list.
+ * What the sidebar shows of `personOid`'s mentions: how many of those `listMentions` shows them they have not seen,
+ * or null when it would show them none, which hides Mentions altogether rather than offering an empty list.
  */
 export async function mentionsBadge(db: Database, personOid: string): Promise<number | null> {
-  const unseen = await unseenMentionCount(db, personOid);
-  if (unseen > 0) {
-    return unseen;
-  }
   const rows = await db.feedbackMention.findMany({
-    where: { personOid, ...LIVE_PROJECT },
-    select: { comment: { select: { thread: { select: ACCESS_COLUMNS } } } },
-    orderBy: [{ comment: { createdAt: "desc" } }, { commentId: "desc" }],
-    take: MENTIONS_PROBED
+    where: openable(personOid),
+    select: { seenAt: true, comment: { select: { thread: { select: ACCESS_COLUMNS } } } },
+    orderBy: NEWEST,
+    take: MAX_MENTIONS_LISTED
   });
-  return rows.some((row) => accessOf(personOid, row.comment.thread) !== "none") ? 0 : null;
+  const listed = rows.filter((row) => accessOf(personOid, row.comment.thread) !== "none");
+  return listed.length === 0 ? null : listed.filter((row) => row.seenAt === null).length;
 }
 
 /**
  * Marks the mentions of `personOid` on `commentIds` seen, those the list showed them, so one that arrives after the
  * list was read stays counted. A mention seen before keeps when it was first seen. Answers how many were marked.
  */
-export async function markMentionsSeen(db: Database, personOid: string, commentIds: readonly string[], now: Date = new Date()): Promise<number> {
+export async function markMentionsSeen(prisma: PrismaClient, personOid: string, commentIds: readonly string[], now: Date = new Date()): Promise<number> {
   const ids = [...new Set(commentIds.filter(isUuid))];
   if (ids.length === 0) {
     return 0;
   }
-  const { count } = await db.feedbackMention.updateMany({ where: { personOid, commentId: { in: ids }, seenAt: null }, data: { seenAt: now } });
-  return count;
+  return await prisma.$transaction(async (tx) => {
+    const { count } = await tx.feedbackMention.updateMany({ where: { personOid, commentId: { in: ids }, seenAt: null }, data: { seenAt: now } });
+    // The person's other tabs count their mentions too.
+    if (count > 0) {
+      await notify(tx, { type: "feedback_mention", person_oids: [personOid] });
+    }
+    return count;
+  });
 }

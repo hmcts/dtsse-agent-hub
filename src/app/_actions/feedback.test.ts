@@ -14,6 +14,7 @@ const store = {
 const threads = { replyToThread: vi.fn(), patchThread: vi.fn(), listThreads: vi.fn() };
 const refinements = { setThreadsTheme: vi.fn(), refinableThreads: vi.fn(), recordRefinement: vi.fn() };
 const startConversation = vi.fn();
+const deleteConversation = vi.fn();
 const mentions = { markMentionsSeen: vi.fn() };
 const probeTarget = vi.fn();
 let enabled = true;
@@ -27,7 +28,10 @@ vi.mock("@/feedback/store", () => store);
 vi.mock("@/feedback/thread-store", () => threads);
 vi.mock("@/feedback/mention-store", () => mentions);
 vi.mock("@/feedback/refinement-store", () => refinements);
-vi.mock("@/app/_actions/assistant", () => ({ startConversation: (...args: unknown[]) => startConversation(...args) }));
+vi.mock("@/app/_actions/assistant", () => ({
+  startConversation: (...args: unknown[]) => startConversation(...args),
+  deleteConversation: (...args: unknown[]) => deleteConversation(...args)
+}));
 vi.mock("@/feedback/probe", () => ({ probeTarget: (...args: unknown[]) => probeTarget(...args) }));
 vi.mock("@/feedback/targets", async (original) => ({
   ...(await original<typeof import("@/feedback/targets")>()),
@@ -210,6 +214,10 @@ describe("setFeedbackTheme", () => {
       error: "Keep the theme to 60 characters"
     });
     expect(refinements.setThreadsTheme).not.toHaveBeenCalled();
+    expect(await actions.setFeedbackTheme({ projectId: "p1", threadIds: ["t1"], theme: 7 })).toEqual({
+      ok: false,
+      error: "theme: must be text, or null to clear it"
+    });
   });
 
   it("should refuse while prototype feedback is off", async () => {
@@ -277,6 +285,14 @@ describe("refineFeedback", () => {
 
     expect(await actions.refineFeedback({ projectId: "p1", threadIds: ["t1"] })).toEqual({ ok: false, error: "Connect GitHub and Claude to start chatting" });
     expect(refinements.recordRefinement).not.toHaveBeenCalled();
+  });
+
+  it("should delete the chat it started when the refinement cannot be recorded, and say why", async () => {
+    refinements.recordRefinement.mockRejectedValue(new HttpError(409, "that project is archived"));
+    deleteConversation.mockReset().mockResolvedValue({ ok: true });
+
+    expect(await actions.refineFeedback({ projectId: "p1", threadIds: ["t1"] })).toEqual({ ok: false, error: "that project is archived" });
+    expect(deleteConversation).toHaveBeenCalledWith({ conversationId: "conv-1" });
   });
 
   it("should refuse while prototype feedback is off", async () => {

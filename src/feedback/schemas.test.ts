@@ -161,6 +161,7 @@ describe("createFeedbackThreadBody", () => {
   it("should treat a blank page title as none, and cut a long one", () => {
     expect(createFeedbackThreadBody.parse({ page_path: "/", page_title: "   ", anchor: ANCHOR, body: "x" }).pageTitle).toBeNull();
     expect(createFeedbackThreadBody.parse({ page_path: "/", page_title: "t".repeat(500), anchor: ANCHOR, body: "x" }).pageTitle).toHaveLength(MAX_PAGE_TITLE);
+    expect(createFeedbackThreadBody.parse({ page_path: "/", page_title: "t".repeat(5000), anchor: ANCHOR, body: "x" }).pageTitle).toHaveLength(MAX_PAGE_TITLE);
   });
 
   it("should keep the recording and its offset when both are given", () => {

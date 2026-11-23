@@ -144,8 +144,21 @@ describe("recordRefinement and the Jira export", () => {
     ]);
     // Alice sees the issue, but the conversation is Bob's to open.
     expect((await listThreads(prisma, ALICE.oid, { projectId: made.id }))[0]).toMatchObject({ jiraKeys: ["PCS-123"], refinedIn: null });
-    // The reviewer who raised it sees that it went into an issue.
-    expect((await listThreads(prisma, CAROL.oid, { token: made.links[0]!.token }))[0]?.jiraKeys).toEqual(["PCS-123"]);
+    // The reviewer who raised it sees that it went into an issue, but not the team's theme for it, nor Bob's chat.
+    await setThreadsTheme(prisma, BOB.oid, made.id, [first], "Won't fix");
+    expect((await listThreads(prisma, CAROL.oid, { token: made.links[0]!.token }))[0]).toMatchObject({ jiraKeys: ["PCS-123"], theme: null, refinedIn: null });
+    expect((await listThreads(prisma, BOB.oid, { token: made.links[0]!.token }))[0]).toMatchObject({ theme: "Won't fix", refinedIn: conversation.id });
+  });
+
+  it("should keep a refinement's Jira issues on its threads after its conversation is deleted", async () => {
+    const { made, first } = await setUp();
+    const { conversation, exportId } = await exportingConversation(BOB.oid);
+    await recordRefinement(prisma, BOB.oid, made.id, conversation.id, [first]);
+    await recordJiraExport(prisma, conversation, { export_id: exportId, key: "PCS-7" });
+
+    await prisma.assistantConversation.delete({ where: { id: conversation.id } });
+
+    expect((await listThreads(prisma, BOB.oid, { projectId: made.id }))[0]).toMatchObject({ jiraKeys: ["PCS-7"], refinedIn: null });
   });
 
   it("should leave a failed export, and a conversation that refines nothing, without issues on any thread", async () => {

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { HttpError, parse } from "@/agent-api/http";
-import { startConversation } from "@/app/_actions/assistant";
+import { deleteConversation, startConversation } from "@/app/_actions/assistant";
 import { markMentionsSeen } from "@/feedback/mention-store";
 import { markProjectSeen, pinProject } from "@/feedback/nav-store";
 import { type ProbeOutcome, probeTarget } from "@/feedback/probe";
@@ -257,7 +257,7 @@ export async function setFeedbackTheme(input: { projectId: unknown; threadIds: u
     const viewer = await requireViewer();
     const theme = checkTheme(input.theme);
     if (theme === undefined) {
-      return { ok: false, error: `Keep the theme to ${MAX_THEME} characters` };
+      return { ok: false, error: typeof input.theme === "string" ? `Keep the theme to ${MAX_THEME} characters` : "theme: must be text, or null to clear it" };
     }
     const changed = await setThreadsTheme(prisma, viewer.oid, text(input.projectId), strings(input.threadIds), theme);
     revalidatePath(PAGES, "layout");
@@ -290,7 +290,14 @@ export async function refineFeedback(input: { projectId: unknown; threadIds: unk
     if (!started.ok) {
       return started;
     }
-    await recordRefinement(prisma, viewer.oid, projectId, started.id, ids);
+    try {
+      await recordRefinement(prisma, viewer.oid, projectId, started.id, ids);
+    } catch (error) {
+      // The project changed under the click (archived, its threads gone): a chat its threads never hear of is no use,
+      // and a second click would only start another, so it goes.
+      await deleteConversation({ conversationId: started.id });
+      throw error;
+    }
     revalidatePath(PAGES, "layout");
     return { ok: true, id: started.id };
   });

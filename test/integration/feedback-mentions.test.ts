@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { listMentions, markMentionsSeen, mentionsBadge, unseenMentionCount } from "../../src/feedback/mention-store.ts";
+import { listMentions, MAX_MENTIONS_LISTED, markMentionsSeen, mentionsBadge } from "../../src/feedback/mention-store.ts";
 import { archiveProject, createProject, revokeLink } from "../../src/feedback/store.ts";
 import { createThread, replyToThread } from "../../src/feedback/thread-store.ts";
 import { insertUser, person, prisma, resetDatabase } from "./database.ts";
@@ -80,11 +80,11 @@ describe("listMentions", () => {
     await replyToThread(prisma, BOB.oid, { projectId: made.id }, raised.id, `@${CAROL.name} it is on the next page`, at(2));
 
     expect((await listMentions(prisma, CAROL.oid)).map((mention) => mention.href)).toEqual([`/review/${link.token}?path=%2Fcheck`]);
-    expect(await unseenMentionCount(prisma, CAROL.oid)).toBe(1);
+    expect(await mentionsBadge(prisma, CAROL.oid)).toBe(1);
     await revokeLink(prisma, ALICE.oid, made.id, link.id, at(3));
 
     expect(await listMentions(prisma, CAROL.oid)).toEqual([]);
-    expect(await unseenMentionCount(prisma, CAROL.oid)).toBe(0);
+    expect(await mentionsBadge(prisma, CAROL.oid)).toBeNull();
   });
 
   it("should keep the team's mentions after the link is turned off, and drop them once the project is archived", async () => {
@@ -96,7 +96,7 @@ describe("listMentions", () => {
     await archiveProject(prisma, ALICE.oid, made.id, at(3));
 
     expect(await listMentions(prisma, ALICE.oid)).toEqual([]);
-    expect(await unseenMentionCount(prisma, ALICE.oid)).toBe(0);
+    expect(await mentionsBadge(prisma, ALICE.oid)).toBeNull();
   });
 
   it("should not list a comment that names only someone else, nor one a person wrote naming themselves", async () => {
@@ -114,12 +114,12 @@ describe("markMentionsSeen", () => {
     await createThread(prisma, BOB.oid, made.links[0]!.token, thread(`One @${ALICE.name}`), at(1));
     await createThread(prisma, BOB.oid, made.links[0]!.token, thread(`Two @${ALICE.name}`), at(2));
     const [two, one] = await listMentions(prisma, ALICE.oid);
-    expect(await unseenMentionCount(prisma, ALICE.oid)).toBe(2);
+    expect(await mentionsBadge(prisma, ALICE.oid)).toBe(2);
 
     expect(await markMentionsSeen(prisma, ALICE.oid, [one!.commentId, "not-an-id"], at(5))).toBe(1);
     expect(await markMentionsSeen(prisma, ALICE.oid, [one!.commentId], at(9))).toBe(0);
 
-    expect(await unseenMentionCount(prisma, ALICE.oid)).toBe(1);
+    expect(await mentionsBadge(prisma, ALICE.oid)).toBe(1);
     expect((await listMentions(prisma, ALICE.oid)).map((mention) => [mention.commentId, mention.seen])).toEqual([
       [two!.commentId, false],
       [one!.commentId, true]
@@ -135,7 +135,7 @@ describe("markMentionsSeen", () => {
 
     expect(await markMentionsSeen(prisma, BOB.oid, [mention!.commentId])).toBe(0);
     expect(await markMentionsSeen(prisma, ALICE.oid, [])).toBe(0);
-    expect(await unseenMentionCount(prisma, ALICE.oid)).toBe(1);
+    expect(await mentionsBadge(prisma, ALICE.oid)).toBe(1);
   });
 });
 
@@ -153,5 +153,40 @@ describe("mentionsBadge", () => {
 
     await archiveProject(prisma, ALICE.oid, made.id, at(2));
     expect(await mentionsBadge(prisma, ALICE.oid)).toBeNull();
+  });
+});
+
+describe("listMentions and mentionsBadge together", () => {
+  it("should count only the mentions the list shows, so opening it clears the count, whatever ones the person can no longer open", async () => {
+    const made = await project();
+    const second = await createProject(prisma, ALICE.oid, {
+      name: "Other",
+      links: [{ label: "Only", targetUrl: "https://other.herokuapp.com/", prototypeVersion: null }],
+      memberOids: [],
+      maskInputs: false,
+      retentionDays: 90
+    });
+    // Carol reviews the second project, and is named on it, then its link is turned off.
+    const { thread: raised } = await createThread(prisma, CAROL.oid, second.links[0]!.token, thread("Hello"), at(0));
+    for (let n = 0; n < 5; n += 1) {
+      await replyToThread(prisma, ALICE.oid, { projectId: second.id }, raised.id, `@${CAROL.name} ${n}`, at(1));
+    }
+    await revokeLink(prisma, ALICE.oid, second.id, second.links[0]!.id, at(2));
+    // On the first she is named more times than the list shows.
+    const { thread: mine } = await createThread(prisma, CAROL.oid, made.links[0]!.token, thread("Me again"), at(3));
+    for (let n = 0; n < MAX_MENTIONS_LISTED + 3; n += 1) {
+      await replyToThread(prisma, BOB.oid, { projectId: made.id }, mine.id, `@${CAROL.name} ${n}`, at(4 + n));
+    }
+
+    const listed = await listMentions(prisma, CAROL.oid);
+    expect(listed).toHaveLength(MAX_MENTIONS_LISTED);
+    expect(await mentionsBadge(prisma, CAROL.oid)).toBe(MAX_MENTIONS_LISTED);
+
+    await markMentionsSeen(
+      prisma,
+      CAROL.oid,
+      listed.map((mention) => mention.commentId)
+    );
+    expect(await mentionsBadge(prisma, CAROL.oid)).toBe(0);
   });
 });

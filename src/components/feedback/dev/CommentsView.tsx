@@ -504,7 +504,7 @@ function AllComments({
             <p id={`${ids}-refine-hint`} className="text-xs text-asst-muted">
               {selected.length > MAX_REFINE_THREADS
                 ? `Choose at most ${MAX_REFINE_THREADS} comments to refine at once.`
-                : "Refine with Assistant starts a chat that works out the requirement behind each theme and drafts one Jira story per theme, with options, which you can edit and send to Jira. Your themes are kept as they are."}
+                : "Opens a chat that drafts one Jira story for each theme, with options. Comments without a theme are grouped into suggested themes, so one chat can make several stories. Each story is a separate document you can edit and send to Jira."}
             </p>
           )}
           <p role="alert" className={`text-asst-error ${error === null ? "sr-only" : ""}`}>
@@ -513,8 +513,8 @@ function AllComments({
         </section>
       ) : null}
 
-      {groupsOf(groupBy, pages, threads, linkLabel).map((group) => {
-        const headingId = `group-${ids}-${group.key.replace(/[^a-zA-Z0-9-]/g, "-")}`;
+      {groupsOf(groupBy, pages, threads, linkLabel).map((group, index) => {
+        const headingId = `${ids}-group-${index}`;
         return (
           <section key={group.key} aria-labelledby={headingId} className="flex flex-col gap-2">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
