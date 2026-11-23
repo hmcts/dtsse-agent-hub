@@ -102,7 +102,7 @@ export function scriptFailure(stderr: string, code: number): PodJobError {
     return new PodJobError("not_cloned", detail);
   }
   // The script's progress line names generateCCDConfig on every run; its failure is the last line it prints.
-  if (/^generateCCDConfig failed in|no current build\/definitions/i.test(message)) {
+  if (/^generateCCDConfig failed in/i.test(message) || /no current build\/definitions/i.test(message)) {
     return new PodJobError("generation_failed", detail);
   }
   return new PodJobError("failed", detail);
