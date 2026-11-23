@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { makePdf, SAMPLE_FORM } from "./__fixtures__/make-pdf.ts";
+import { fisTransformYaml } from "./codegen/fis.ts";
 import { fromPdf } from "./from-pdf.ts";
+import type { FormSpec } from "./schema.ts";
 import { allFields, bundleSchema } from "./schema.ts";
 
 const HOUSE = ["soleOrApplicant1FirstName", "applicationForDivorce", "applicationForDissolution", "soleOrApplicant1Solicitor"];
@@ -56,6 +58,22 @@ describe("fromPdf on a form with fields", () => {
   });
 });
 
+describe("fromPdf with a case type", () => {
+  it("should name the case type in the form's header when one is given, and leave it out otherwise", async () => {
+    const pdf = await makePdf("sample", SAMPLE_FORM);
+    expect((await fromPdf({ pdf, caseType: "CriminalInjuriesCompensation" })).bundle.forms[0]?.form.ccdCaseTypeId).toBe("CriminalInjuriesCompensation");
+    expect((await fromPdf({ pdf })).bundle.forms[0]?.form).not.toHaveProperty("ccdCaseTypeId");
+  });
+});
+
+describe("fromPdf case type in the fis transform", () => {
+  it("should come out as the CASE_TYPE_ID of the fis transform YAML when a case type is given", async () => {
+    const { bundle } = await fromPdf({ pdf: await makePdf("sample", SAMPLE_FORM), caseType: "CriminalInjuriesCompensation" });
+    const form = { ...(bundle.forms[0] as FormSpec), form: { ...(bundle.forms[0] as FormSpec).form, formType: "T210" } };
+    expect(fisTransformYaml(form).yaml).toContain("CASE_TYPE_ID: CriminalInjuriesCompensation");
+  });
+});
+
 describe("fromPdf on a flat form", () => {
   it("should return an empty draft and a prompt carrying the page text", async () => {
     const pdf = await makePdf("flat", [{ texts: [{ text: "Section 1 - Your details", x: 40, y: 700 }] }, {}]);
@@ -64,6 +82,7 @@ describe("fromPdf on a flat form", () => {
     expect(result.needsReview?.reason).toBe("the PDF has no AcroForm fields");
     expect(result.needsReview?.promptText).toContain("Section 1 - Your details");
     expect(result.needsReview?.promptText).toContain("(no text layer: read the page image)");
+    expect(result.needsReview?.promptText).toContain('`mandatory` on every field: "mandatory" unless the form marks it "(optional)"');
   });
 });
 

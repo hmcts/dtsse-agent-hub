@@ -47,6 +47,15 @@ export function parseEmits(description: string): Emit[] {
   return emits;
 }
 
+/** What a Yes and No question emits, in the words the D8 sheet uses: Yes, No, or blank when it is left empty. */
+export function yesNoEmits(key: string): Emit[] {
+  return [
+    { when: "if yes", key, value: "Yes" },
+    { when: "if no", key, value: "No" },
+    { when: "if empty", key, value: "" }
+  ];
+}
+
 /** What a capture emits for a field the spec author has not enumerated: a tick box gives true or false, anything else free text. */
 export function defaultEmits(field: Field): Emit[] {
   if (field.role !== "field") {

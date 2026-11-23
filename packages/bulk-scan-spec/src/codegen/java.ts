@@ -238,6 +238,7 @@ export function nfdivValidator(spec: FormSpec, options: JavaOptions, names: Java
   const allowed = models.filter((m) => m.allowed.length > 0);
   const formatted = models.filter((m) => formatPattern(m));
   const limited = models.filter((m) => m.maxLength);
+  const minimal = models.filter((m) => m.minLength);
   const groups = exclusiveGroups(spec);
   const chains = allFields(spec).map((f) => ({ field: f, chain: outcomeChain(spec, f, names, "data", (_o, message) => `warnings.add(${message});`) }));
   const content = `${header(pkg)}import org.springframework.stereotype.Component;
@@ -263,6 +264,7 @@ public class OcrValidator {
     public static final String FIELD_EMPTY_OR_MISSING_WARNING = "Mandatory field '%s' should not be empty";
     public static final String FIELD_FORMAT_WARNING = "Field '%s' has a value that is not in the expected format: '%s'";
     public static final String FIELD_LENGTH_WARNING = "Field '%s' is longer than %d characters";
+    public static final String FIELD_MIN_LENGTH_WARNING = "Field '%s' is shorter than %d characters";
     public static final String GROUP_EMPTY_WARNING = "At least one of the fields '%s' is required";
     public static final String FIELD_VALUE_NOT_ALLOWED_WARNING = "Field '%s' has unexpected value '%s'";
     public static final String GROUP_MULTIPLE_WARNING = "Only one of the fields '%s' may be ticked";
@@ -270,11 +272,13 @@ public class OcrValidator {
     private static final Map<String, Set<String>> ALLOWED_VALUES = new LinkedHashMap<>();
     private static final Map<String, Pattern> FORMAT_PATTERNS = new LinkedHashMap<>();
     private static final Map<String, Integer> LENGTH_LIMITS = new LinkedHashMap<>();
+    private static final Map<String, Integer> LENGTH_MINIMUMS = new LinkedHashMap<>();
 
     static {
 ${allowed.map((m) => `        ALLOWED_VALUES.put(${q(m.key)}, Set.of(${[...m.allowed, ...(m.blankAllowed ? [""] : [])].map(q).join(", ")}));`).join("\n")}
 ${formatted.map((m) => `        FORMAT_PATTERNS.put(${q(m.key)}, Pattern.compile(${q(anchoredPattern(formatPattern(m) ?? ""))}));`).join("\n")}
 ${limited.map((m) => `        LENGTH_LIMITS.put(${q(m.key)}, ${m.maxLength});`).join("\n")}
+${minimal.map((m) => `        LENGTH_MINIMUMS.put(${q(m.key)}, ${m.minLength});`).join("\n")}
     }
 
     public OcrValidationResponse validateExceptionRecord(String formType, OcrDataValidationRequest request) {
@@ -357,10 +361,13 @@ ${formatted.map((m) => `        values.put(${q(m.key)}, ${getter(m.key, names)})
 
     private void validateLengths(OcrDataFields data, List<String> warnings) {
         Map<String, String> values = new LinkedHashMap<>();
-${limited.map((m) => `        values.put(${q(m.key)}, ${getter(m.key, names)});`).join("\n")}
+${[...new Map([...limited, ...minimal].map((m) => [m.key, m])).values()].map((m) => `        values.put(${q(m.key)}, ${getter(m.key, names)});`).join("\n")}
         values.forEach((key, value) -> {
-            if (!isEmpty(value) && value.length() > LENGTH_LIMITS.get(key)) {
+            if (!isEmpty(value) && LENGTH_LIMITS.containsKey(key) && value.length() > LENGTH_LIMITS.get(key)) {
                 warnings.add(String.format(FIELD_LENGTH_WARNING, key, LENGTH_LIMITS.get(key)));
+            }
+            if (!isEmpty(value) && LENGTH_MINIMUMS.containsKey(key) && value.length() < LENGTH_MINIMUMS.get(key)) {
+                warnings.add(String.format(FIELD_MIN_LENGTH_WARNING, key, LENGTH_MINIMUMS.get(key)));
             }
         });
     }

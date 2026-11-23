@@ -34,7 +34,6 @@ import { zipFiles } from "./zip.ts";
  * and the saved spec: no person's credentials, so no job in their pod. Pure, and `spec-store.ts` is the Postgres half.
  */
 
-export const MAX_BULK_SCAN_FILE_BYTES = 5 * 1024 * 1024;
 /** A saved spec's JSON: the D8 form, 91 field rows, is under 400 KiB. */
 export const MAX_SPEC_BYTES = 3 * 1024 * 1024;
 export const MAX_SPEC_NAME = 200;
@@ -44,10 +43,10 @@ export interface Imported {
   forms: FormSpec[];
 }
 
-/** Reads an uploaded form PDF, Exela SIP or HMCTS transformation sheet into one spec per form it holds. */
-export async function importUpload(fileName: string, bytes: Uint8Array): Promise<Imported> {
+/** Reads an uploaded form PDF, Exela SIP or HMCTS transformation sheet into one spec per form it holds, with `caseType`, the CCD case type id the person typed, as each form's. */
+export async function importUpload(fileName: string, bytes: Uint8Array, caseType?: string): Promise<Imported> {
   if (isPdf(bytes)) {
-    const result = await fromPdf({ pdf: fileName, bytes }).catch((error: unknown) => {
+    const result = await fromPdf({ pdf: fileName, bytes, ...(caseType ? { caseType } : {}) }).catch((error: unknown) => {
       console.error(`a form PDF could not be read: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`);
       return undefined;
     });
@@ -71,13 +70,18 @@ export async function importUpload(fileName: string, bytes: Uint8Array): Promise
     if (forms.length === 0) {
       throw new HttpError(422, "that SIP has no filled-in form tab");
     }
-    return openable({ kind: "sip", forms });
+    return openable({ kind: "sip", forms: withCaseType(forms, caseType) });
   }
   const { spec } = readSheet(() => importTransformSheet(selectSheet(workbook, undefined)));
   if (spec.sections.every((s) => s.fields.length === 0)) {
     throw new HttpError(422, "no field rows were found in the first sheet: is it a transformation sheet?");
   }
-  return openable({ kind: "transformation sheet", forms: [spec] });
+  return openable({ kind: "transformation sheet", forms: withCaseType([spec], caseType) });
+}
+
+/** The forms with the CCD case type the person typed as their header's, when one was typed. */
+function withCaseType(forms: FormSpec[], caseType: string | undefined): FormSpec[] {
+  return caseType ? forms.map((f) => ({ ...f, form: { ...f.form, ccdCaseTypeId: caseType } })) : forms;
 }
 
 /** An importer's refusal of a sheet that is not laid out as it expects, as the 422 that says where. */
@@ -142,6 +146,16 @@ export function checkSpec(raw: unknown): { ok: true; spec: FormSpec } | { ok: fa
   );
   if (regexIssues.length > 0) {
     return { ok: false, issues: regexIssues };
+  }
+  const lengthIssues = parsed.data.sections.flatMap((section, s) =>
+    section.fields.flatMap((field, f) =>
+      field.minLength !== undefined && field.maxLength !== undefined && field.minLength > field.maxLength
+        ? [{ path: `sections.${s}.fields.${f}.minLength`, message: `the minimum length ${field.minLength} is above the maximum ${field.maxLength}` }]
+        : []
+    )
+  );
+  if (lengthIssues.length > 0) {
+    return { ok: false, issues: lengthIssues };
   }
   const keyIssues = keyShapeIssues(parsed.data);
   if (keyIssues.length > 0) {
@@ -260,18 +274,12 @@ export function codeDownload(spec: FormSpec, target: Target, javaPackage: string
   }
 }
 
-/** An uploaded file's name as shown back: the last path part, safe characters only, ending `.pdf` or `.xlsx`. */
+/** An uploaded file's name as shown back (as the browser gave it, not URL-encoded): the last path part, safe characters only, ending `.pdf` or `.xlsx`. */
 export function uploadFileName(raw: unknown): string | null {
   if (typeof raw !== "string") {
     return null;
   }
-  let name: string;
-  try {
-    name = decodeURIComponent(raw);
-  } catch {
-    return null;
-  }
-  const base = (name.split(/[\\/]/).pop() ?? "")
+  const base = (raw.split(/[\\/]/).pop() ?? "")
     .replace(/[^\p{L}\p{N} ._()-]/gu, "_")
     .replace(/\s+/g, " ")
     .trim()

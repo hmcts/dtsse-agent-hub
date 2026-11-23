@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
-import { loadCcdFields } from "./ccd-propose.ts";
+import { loadCcdDefinition } from "./ccd-propose.ts";
 import { readWorkbook, selectSheet } from "./cells.ts";
 import type { Pattern } from "./code-keys.ts";
 import { loadCodeKeys, PATTERNS } from "./code-keys.ts";
@@ -22,13 +22,14 @@ import { importTransformSheet } from "./transform-import.ts";
 const USAGE = `usage:
   import   --transform <xlsx> [--sheet <name>] --out <spec.json>
   import   --sip <xlsx> --out <spec.json>
-  from-pdf --pdf <form.pdf> [--house-style <spec.json> | --house-style <code file or dir> --pattern <p>] [--ccd <definition dir or CaseField.json>] --out <draft.json>
+  from-pdf --pdf <form.pdf> [--house-style <spec.json> | --house-style <code file or dir> --pattern <p>] [--ccd <definition dir or CaseField.json> [--case-type <CaseTypeID>]] --out <draft.json>
   generate --spec <spec.json> [--sip <out.xlsx> [--template <sip.xlsx>]] [--transform <out.xlsx>] [--form <n>]
   drift    (--spec <spec.json> | --transform <xlsx> [--sheet <name>]) --pattern ${PATTERNS.join("|")} --code <file|dir> [--form <n>]
   codegen  --spec <spec.json> --target ${TARGETS.join("|")}|all --out <dir> [--package <java base package>] [--prefix <class prefix>] [--jurisdiction <J>] [--form <n>]
   roundtrip --transform <xlsx> [--sheet <name>] [--template <sip.xlsx>] [--out <dir>]`;
 
 const OPTION_NAMES = [
+  "case-type",
   "ccd",
   "code",
   "form",
@@ -126,10 +127,13 @@ async function runFromPdf(opts: Map<string, string>): Promise<void> {
   const out = need(opts, "out");
   const ccd = opts.get("ccd");
   const keys = houseKeys(opts);
+  const definition = ccd ? loadCcdDefinition(ccd, opts.get("case-type")) : undefined;
+  const caseType = definition?.caseType ?? opts.get("case-type");
   const result = await fromPdf({
     pdf: need(opts, "pdf"),
     ...(keys ? { houseKeys: keys } : {}),
-    ...(ccd ? { ccdIds: loadCcdFields(ccd) } : {})
+    ...(definition ? { ccdIds: definition.fields } : {}),
+    ...(caseType ? { caseType } : {})
   });
   const { needsReview } = result;
   if (needsReview) {
@@ -142,7 +146,7 @@ async function runFromPdf(opts: Map<string, string>): Promise<void> {
   save(out, `${JSON.stringify(result.bundle, null, 2)}\n`);
   const fields = result.bundle.forms.flatMap((f) => f.sections.flatMap((s) => s.fields));
   console.log(`${fields.length} fields, ${fields.filter((f) => f.group).length} XoR groups -> ${out}`);
-  console.log(`review checklist (${result.checklist.length} guesses, lowest confidence first); the mandatory column, validation and rules are not proposed:`);
+  console.log(`review checklist (${result.checklist.length} guesses, lowest confidence first); rules are not proposed:`);
   for (const line of result.checklist) {
     console.log(`  ${line}`);
   }

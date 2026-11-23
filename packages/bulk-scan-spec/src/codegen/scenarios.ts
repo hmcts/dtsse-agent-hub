@@ -70,7 +70,10 @@ export function sampleValue(model: KeyModel): string {
   const guess = defaultSample(model);
   const usual = pattern && !new RegExp(anchoredPattern(pattern)).test(guess) ? (sampleFromRegex(pattern) ?? guess) : guess;
   const fitted = pattern || !model.maxLength ? usual : usual.slice(0, model.maxLength);
-  return firstFitting(model, [fitted, ...(pattern ? [sampleFromRegex(pattern)] : []).filter((s): s is string => s !== undefined), ...SHORT_SAMPLES]);
+  const built = [fitted, ...(pattern ? [sampleFromRegex(pattern)] : []).filter((s): s is string => s !== undefined)];
+  // An open-ended format such as ^[XG].* accepts the sample padded out to the minimum length; one that does not leaves no sample to fit.
+  const padded = model.minLength ? built.flatMap((s) => ["x", "0", "a"].map((c) => s.padEnd(model.minLength ?? 0, c))) : [];
+  return firstFitting(model, [...built, ...padded, ...SHORT_SAMPLES]);
 }
 
 function defaultSample(model: KeyModel): string {
@@ -266,7 +269,12 @@ export function expectedFor(spec: FormSpec, data: Data): Scenario["expected"] {
       note("warning", `${m.key} does not match its format`);
     }
     if (violatesLength(m, data[m.key])) {
-      note("warning", `${m.key} is longer than ${m.maxLength} characters`);
+      note(
+        "warning",
+        m.maxLength && (data[m.key] ?? "").length > m.maxLength
+          ? `${m.key} is longer than ${m.maxLength} characters`
+          : `${m.key} is shorter than ${m.minLength} characters`
+      );
     }
   }
   for (const g of exclusiveGroups(spec)) {

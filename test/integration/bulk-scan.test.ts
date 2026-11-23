@@ -61,9 +61,15 @@ function as(persona: string, path: string, init: { method?: string; body?: BodyI
 
 const context = (id: string) => ({ params: Promise.resolve({ id }) });
 
+function uploadForm(name: string, content: BlobPart): FormData {
+  const form = new FormData();
+  form.set("form", new File([content], name));
+  return form;
+}
+
 async function upload(persona = "alice", name = "t1.xlsx"): Promise<string[]> {
   const bytes = new Uint8Array((await generateTransformWorkbook(SPEC).xlsx.writeBuffer()) as ArrayBuffer);
-  const response = await uploadRoute.POST(as(persona, "/api/ui/assistant/bulk-scan", { method: "POST", body: bytes, headers: { "x-file-name": name } }));
+  const response = await uploadRoute.POST(as(persona, "/api/ui/assistant/bulk-scan", { method: "POST", body: uploadForm(name, bytes) }));
   expect(response.status).toBe(201);
   return (await jsonOf<{ ids: string[] }>(response)).ids;
 }
@@ -85,12 +91,30 @@ describe("starting a spec", () => {
     expect((await readSpec(prisma, own(ALICE), id as string))?.versions).toMatchObject([{ version: 1, savedBy: ALICE.name, signedOffBy: null }]);
   });
 
-  it("should refuse a file that is not a PDF or spreadsheet, a name that is neither, and a request from outside the hub's pages", async () => {
-    const bad = await uploadRoute.POST(as("alice", "/api/ui/assistant/bulk-scan", { method: "POST", body: "hello", headers: { "x-file-name": "t.xlsx" } }));
-    const noName = await uploadRoute.POST(as("alice", "/api/ui/assistant/bulk-scan", { method: "POST", body: "hello", headers: { "x-file-name": "t.txt" } }));
+  it("should take a file when its name has a percent sign in it, which is not a URL-encoded name", async () => {
+    const ids = await upload("alice", "Fee 100% form.xlsx");
 
-    expect([bad.status, noName.status]).toEqual([400, 400]);
+    expect(ids).toHaveLength(1);
+  });
+
+  it("should refuse a file that is not a PDF or spreadsheet, a name that is neither, and a request from outside the hub's pages", async () => {
+    const bad = await uploadRoute.POST(as("alice", "/api/ui/assistant/bulk-scan", { method: "POST", body: uploadForm("t.xlsx", "hello") }));
+    const noName = await uploadRoute.POST(as("alice", "/api/ui/assistant/bulk-scan", { method: "POST", body: uploadForm("t.txt", "hello") }));
+    const noForm = await uploadRoute.POST(as("alice", "/api/ui/assistant/bulk-scan", { method: "POST", body: "hello" }));
+
+    expect([bad.status, noName.status, noForm.status]).toEqual([400, 400, 400]);
     expect(await prisma.bulkScanSpec.count()).toBe(0);
+  });
+
+  it("should name the case type in the spec's header when one is typed with an upload", async () => {
+    const bytes = new Uint8Array((await generateTransformWorkbook(SPEC).xlsx.writeBuffer()) as ArrayBuffer);
+    const body = uploadForm("t1.xlsx", bytes);
+    body.set("caseType", "CriminalInjuriesCompensation");
+
+    const response = await uploadRoute.POST(as("alice", "/api/ui/assistant/bulk-scan", { method: "POST", body }));
+    const [id] = (await jsonOf<{ ids: string[] }>(response)).ids;
+
+    expect((await readSpec(prisma, own(ALICE), id as string))?.spec).toMatchObject({ form: { ccdCaseTypeId: "CriminalInjuriesCompensation" } });
   });
 
   it("should be unavailable where virtual agents are off", async () => {

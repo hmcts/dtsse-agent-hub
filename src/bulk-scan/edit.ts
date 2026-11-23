@@ -10,7 +10,7 @@ import { isNegation, isTickedTest } from "@hmcts-cft/bulk-scan-spec/schema";
  */
 
 /** The form-level values the editor changes. */
-export type HeaderPatch = Partial<Pick<FormSpec["form"], "name" | "formType" | "poBox">>;
+export type HeaderPatch = Partial<Pick<FormSpec["form"], "name" | "formType" | "poBox" | "ccdCaseTypeId">>;
 
 export function patchHeader(spec: FormSpec, patch: HeaderPatch): FormSpec {
   const form = { ...spec.form };
@@ -25,7 +25,7 @@ export function patchHeader(spec: FormSpec, patch: HeaderPatch): FormSpec {
 }
 
 /** The field values the editor changes in a row. */
-export type FieldPatch = Partial<Pick<Field, "id" | "label" | "keys" | "ccd" | "inputType" | "mandatory" | "regex" | "maxLength">>;
+export type FieldPatch = Partial<Pick<Field, "id" | "label" | "keys" | "ccd" | "inputType" | "mandatory" | "regex" | "maxLength" | "minLength">>;
 
 /** The spec with one field replaced by what `change` makes of it. */
 export function mapField(spec: FormSpec, sectionIndex: number, fieldIndex: number, change: (field: Field) => Field): FormSpec {
@@ -95,7 +95,7 @@ function regroup(field: Field): Field {
 }
 
 /**
- * The spec with one field's row values changed. An empty id, regex or maximum length is the field without one. When the
+ * The spec with one field's row values changed. An empty id, regex, minimum or maximum length is the field without one. When the
  * keys change, a key that is spelt differently at the same place is the same key renamed, so its allowed values, group
  * option and every condition and copy that names it follow it; the group then follows the keys. A field that stops being
  * conditional loses its condition.
@@ -105,7 +105,7 @@ export function patchField(spec: FormSpec, sectionIndex: number, fieldIndex: num
   const renames = patch.keys && before ? renamesBetween(before.keys, patch.keys) : [];
   const changed = mapField(spec, sectionIndex, fieldIndex, (field) => {
     let next: Field = { ...field, ...patch };
-    for (const optional of ["id", "regex", "maxLength"] as const) {
+    for (const optional of ["id", "regex", "maxLength", "minLength"] as const) {
       if (next[optional] === "" || next[optional] === undefined) {
         delete next[optional];
       }
@@ -153,9 +153,9 @@ function moved<T>(items: readonly T[], from: number, by: -1 | 1): T[] {
   return [...rest.slice(0, to), item, ...rest.slice(to)];
 }
 
-/** A new field is an optional text field with an empty key, which `checkSpec` refuses until it has one. */
+/** A new field is a mandatory text field with an empty key, which `checkSpec` refuses until it has one. */
 export function blankField(): Field {
-  return { role: "field", label: "", inputType: "text", mandatory: "optional", keys: [""], ccd: [], rules: [], todo: [] };
+  return { role: "field", label: "", inputType: "text", mandatory: "mandatory", keys: [""], ccd: [], rules: [], todo: [] };
 }
 
 export function addField(spec: FormSpec, sectionIndex: number): FormSpec {
@@ -449,7 +449,7 @@ export function wordsOf(text: string): string[] {
   return text.split(/[\s,]+/).filter((word) => word !== "");
 }
 
-/** A maximum length typed as digits: a whole number, or none for an empty box. */
+/** A minimum or maximum length typed as digits: a whole number, or none for an empty box. */
 export function maxLengthOf(digits: string): number | undefined {
   return digits === "" ? undefined : Number(digits);
 }

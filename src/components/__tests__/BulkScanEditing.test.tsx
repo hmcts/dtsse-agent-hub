@@ -96,7 +96,7 @@ describe("adding, removing and reordering", () => {
     await user.click(screen.getByRole("button", { name: "Save as a new version" }));
 
     const body = JSON.parse(fetchMock.mock.calls[0]?.[1].body).spec;
-    expect(body.sections[1].fields[1]).toMatchObject({ keys: [""], inputType: "text", mandatory: "optional" });
+    expect(body.sections[1].fields[1]).toMatchObject({ keys: [""], inputType: "text", mandatory: "mandatory" });
     expect(await screen.findByText('keys.0: the key "" is bad')).toBeTruthy();
   });
 

@@ -1,7 +1,10 @@
 import { basename, extname } from "node:path";
 import { proposeCcd } from "./ccd-propose.ts";
+import { yesNoEmits } from "./emits.ts";
+import { formatFromNote } from "./hints.ts";
 import { proposeKeys } from "./key-proposal.ts";
-import { draftFields } from "./pdf-draft.ts";
+import { decideMandatory } from "./mandatory.ts";
+import { draftFields, isYesNoPair } from "./pdf-draft.ts";
 import type { PdfContent } from "./pdf-extract.ts";
 import { extractPdf } from "./pdf-extract.ts";
 import type { Bundle, Field, Section } from "./schema.ts";
@@ -16,6 +19,8 @@ export interface FromPdfInput {
   houseKeys?: string[];
   /** CCD case field ids of the service's definition. */
   ccdIds?: string[];
+  /** The CCD case type the form belongs to, written to the form's header. */
+  caseType?: string;
 }
 
 export interface FromPdfResult {
@@ -44,7 +49,8 @@ The PDF has no fillable form fields, so no field could be read from it. Open the
 - checkboxes of one question are one field with a \`group\` of kind \`xor\`; the field's \`keys\` are the group's option keys
 - a camelCase \`keys\` entry for each box, in the style of the service's existing keys
 - \`pageOrder\`: for each page, the keys on it
-- every guess gets an entry in the field's \`review\` list: \`{ "about": "key" | "type" | "group" | "ccd", "reason": "...", "confidence": "low" | "medium" | "high" }\`
+- \`mandatory\` on every field: "mandatory" unless the form marks it "(optional)" or "(if …)" (then "optional"), or a "> go to" route skips the field's section or question (then "conditional", with \`required\`: \`"label": "'<option>' is ticked", "when": "<option key>": "ticked": true \`). A field with no mark and no route is mandatory
+- every guess gets an entry in the field's \`review\` list: \`{ "about": "key" | "type" | "group" | "ccd" | "mandatory" | "regex", "reason": "...", "confidence": "low" | "medium" | "high" }\`
 - remove \`needsReview\` from the draft once it is filled in, and check it with \`generate\` or any other command that reads a spec
 
 The text layer of each page follows; it may miss text drawn as images.
@@ -56,7 +62,7 @@ ${pageText(content)}
 /** Reads a PDF and drafts its field spec, proposing keys, groups and CCD ids and flagging each as a guess. */
 export async function fromPdf(input: FromPdfInput): Promise<FromPdfResult> {
   const content = await extractPdf(input.bytes ?? input.pdf);
-  const form = { name: basename(input.pdf, extname(input.pdf)), formType: "" };
+  const form = { name: basename(input.pdf, extname(input.pdf)), formType: "", ...(input.caseType ? { ccdCaseTypeId: input.caseType } : {}) };
   if (content.widgets.length === 0) {
     const reason = "the PDF has no AcroForm fields";
     return { bundle: bundleSchema.parse({ forms: [{ form }] }), checklist: [], needsReview: { reason, promptText: promptFor(input.pdf, content) } };
@@ -75,6 +81,10 @@ export async function fromPdf(input: FromPdfInput): Promise<FromPdfResult> {
     withKeys.map(({ d, mine }) => `${mine.map((k) => k.key).join(" ")} ${d.field.label} ${d.question}`),
     input.ccdIds ?? []
   );
+  const decisions = decideMandatory(
+    drafts,
+    withKeys.map(({ mine }) => mine.map((k) => k.key))
+  );
   const checklist: { confidence: keyof typeof RANK; line: string }[] = [];
   const sections = new Map<string, Section>();
   const pages = new Map<number, string[]>();
@@ -87,6 +97,12 @@ export async function fromPdf(input: FromPdfInput): Promise<FromPdfResult> {
     for (const r of d.reasons) {
       review.push(r);
     }
+    const decision = decisions[i] as (typeof decisions)[number];
+    review.push(...decision.review);
+    const format = d.note ? formatFromNote(d.note) : undefined;
+    if (format) {
+      review.push({ about: "regex", reason: `${format.regex}: the form says "${format.source}"`, confidence: "medium" });
+    }
     const proposed = ccd[i];
     if (input.ccdIds) {
       review.push(
@@ -97,6 +113,10 @@ export async function fromPdf(input: FromPdfInput): Promise<FromPdfResult> {
     }
     const field: Field = {
       ...d.field,
+      mandatory: decision.mandatory,
+      ...(isYesNoPair(d) && mine[0] ? { emits: yesNoEmits(mine[0].key) } : {}),
+      ...(format ? { regex: format.regex } : {}),
+      ...(decision.required ? { required: decision.required } : {}),
       keys: mine.map((k) => k.key),
       ccd: proposed ? [proposed.id] : [],
       ...(d.groupSize && d.groupSize > 1

@@ -25,7 +25,7 @@ import {
   versionOf
 } from "./spec.ts";
 
-const pdf = vi.hoisted(() => ({ result: undefined as unknown }));
+const pdf = vi.hoisted(() => ({ result: undefined as unknown, input: undefined as unknown }));
 const sip = vi.hoisted(() => ({ fail: false }));
 vi.mock("@hmcts-cft/bulk-scan-spec", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@hmcts-cft/bulk-scan-spec")>();
@@ -39,7 +39,8 @@ vi.mock("@hmcts-cft/bulk-scan-spec", async (importOriginal) => {
       }
       return actual.importSip(workbook as never);
     },
-    fromPdf: async () => {
+    fromPdf: async (input: unknown) => {
+      pdf.input = input;
       if (pdf.result === undefined) {
         throw new Error("unreadable");
       }
@@ -128,6 +129,19 @@ describe("uploads", () => {
     expect((await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"))).forms).toEqual([SPEC]);
   });
 
+  it("should name the case type in a PDF's form header when one is typed", async () => {
+    pdf.result = { bundle: { forms: [SPEC] }, checklist: [] };
+    await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"), "CIC");
+    expect(pdf.input).toMatchObject({ caseType: "CIC" });
+  });
+
+  it("should set the case type on a spreadsheet's forms when one is typed", async () => {
+    const imported = await importUpload("t.xlsx", await bytesOf(generateTransformWorkbook(SPEC)), "CIC");
+    expect(imported.forms.map((f) => f.form.ccdCaseTypeId)).toEqual(["CIC"]);
+    const sip = await importUpload("sip.xlsx", await bytesOf(generateSipWorkbook({ forms: [SPEC] })), "CIC");
+    expect(sip.forms.map((f) => f.form.ccdCaseTypeId)).toEqual(["CIC"]);
+  });
+
   it("should refuse a PDF with no form fields, saying why", async () => {
     pdf.result = { bundle: { forms: [] }, checklist: [], needsReview: { reason: "the PDF has no AcroForm fields", promptText: "" } };
     const error = await refusal(importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7")));
@@ -142,10 +156,10 @@ describe("uploads", () => {
 
 describe("file and spec names", () => {
   it("should keep the last path part with safe characters, for a pdf or xlsx only", () => {
-    expect(uploadFileName(encodeURIComponent("C:\\docs\\My form (1).PDF"))).toBe("My form (1).PDF");
-    expect(uploadFileName("a%2Fb%3Cc.xlsx")).toBe("b_c.xlsx");
+    expect(uploadFileName("C:\\docs\\My form (1).PDF")).toBe("My form (1).PDF");
+    expect(uploadFileName("a<b.xlsx")).toBe("a_b.xlsx");
+    expect(uploadFileName("Fee 100% form.pdf")).toBe("Fee 100_ form.pdf");
     expect(uploadFileName("notes.txt")).toBeNull();
-    expect(uploadFileName("%E0%A4%A")).toBeNull();
     expect(uploadFileName(undefined)).toBeNull();
   });
 
@@ -168,6 +182,14 @@ describe("checking a spec", () => {
     const checked = checkSpec(bad);
     expect(checked.ok).toBe(false);
     expect(!checked.ok && checked.issues.map((i) => i.path)).toEqual(["sections.0.fields.2"]);
+  });
+
+  it("should refuse a minimum length on the field's own row when it is above the maximum", () => {
+    const bad = JSON.parse(JSON.stringify(SPEC));
+    bad.sections[0].fields[0].minLength = 9;
+    bad.sections[0].fields[0].maxLength = 3;
+    const checked = checkSpec(bad);
+    expect(!checked.ok && checked.issues).toEqual([{ path: "sections.0.fields.0.minLength", message: "the minimum length 9 is above the maximum 3" }]);
   });
 
   it("should refuse a key the engine cannot use", () => {
