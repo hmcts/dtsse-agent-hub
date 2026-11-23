@@ -101,8 +101,8 @@ describe("a date's keys", () => {
     expect(one?.reason).toContain(`matches existing keys ${house.join(", ")}`);
   });
 
-  it("should strip a trailing Day, Month or Year from a reused key before adding the parts when the house lacks the other two", () => {
-    const [one] = proposeKeys([date], ["dateOfBirthDay"], ["Q1"]);
+  it("should build the missing key on the house stem when the house has two of a date's three keys", () => {
+    const [one] = proposeKeys([date], ["dateOfBirthDay", "dateOfBirthMonth"], ["Q1"]);
     expect(one?.parts?.map((k) => k.key)).toEqual(["dateOfBirthDay", "dateOfBirthMonth", "dateOfBirthYear"]);
     expect(one?.reason).toContain("dateOfBirthDay, dateOfBirthMonth, dateOfBirthYear");
   });
@@ -183,8 +183,39 @@ describe("keys that already carry who they are about", () => {
   });
 });
 
+describe("house keys that only end like a date part", () => {
+  it("should reuse a lone house key ending Year for a plain slot when its label matches", () => {
+    const [one] = proposeKeys([{ label: "Tax year", context: "" }], ["taxYear"], ["Q1"]);
+    expect(one?.key).toBe("taxYear");
+  });
+
+  it("should not read a lone house key ending Day as a date's stem when a date slot has a similar label", () => {
+    const [one] = proposeKeys([{ label: "Hearing date", context: "", parts: ["Day", "Month", "Year"] }], ["hearingDay"], ["Q1"]);
+    expect(one?.parts?.map((k) => k.key)).toEqual(["hearingDateDay", "hearingDateMonth", "hearingDateYear"]);
+  });
+});
+
 describe("subjectOf", () => {
-  it("should give the last word that is not generic when a title is read", () => {
+  it("should name the party of a section when the real T210 and D8 titles are read", () => {
+    const titles: [string, string | undefined][] = [
+      ["Section 1 – Appeal information", undefined],
+      ["Section 2 – Your information", undefined],
+      ["Section 3 – Appealing on behalf of a minor (under 18 years old)", "minor"],
+      ["Section 4 – Appealing following a bereavement", "bereavement"],
+      ["Section 5 – Appellant's representative information", "representative"],
+      ["Section 6 – Reasons for appealing", undefined],
+      ["Section 7 – Request for an extension of time", undefined],
+      ["Section 8 – Hearing", "hearing"],
+      ["Section 1 - Your Application", undefined],
+      ["Section 2 - About you (the sole applicant or applicant 1)", undefined],
+      ["Section 3 - About the respondent", "respondent"],
+      ["Applicant 1 personal details", "applicant1"],
+      ["Your contact information", undefined]
+    ];
+    expect(titles.map(([title]) => subjectOf(title))).toEqual(titles.map(([, subject]) => subject));
+  });
+
+  it("should give a title's one non-generic word when it has only one", () => {
     expect(subjectOf("Section 4 – Appealing following a bereavement")).toBe("bereavement");
     expect(subjectOf("Section 1 – Appeal information")).toBeUndefined();
   });

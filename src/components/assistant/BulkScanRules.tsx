@@ -1,7 +1,6 @@
 "use client";
 
 import type { Field, Outcome, Rule } from "@hmcts-cft/bulk-scan-spec";
-import { capitalised } from "@hmcts-cft/bulk-scan-spec/capitalised";
 import {
   type AssignmentRow,
   addRule,
@@ -17,7 +16,7 @@ import {
   withoutAction
 } from "@/bulk-scan/edit";
 import { BulkScanConditions, type KeyChoice, nextCondition } from "@/components/assistant/BulkScanConditions";
-import { AddButton, FOCUS, IconButton, INPUT, SMALL_BUTTON } from "@/components/assistant/BulkScanParts";
+import { AddButton, IconButton, INPUT, SMALL_BUTTON } from "@/components/assistant/BulkScanParts";
 
 const OUTCOMES: readonly Outcome[] = ["success", "warning", "exception"];
 const LEAD = "w-24 shrink-0 text-xs font-semibold uppercase tracking-wide text-asst-muted";
@@ -46,7 +45,7 @@ export function BulkScanRules({
         // A branch has no identity but its place in the list, which is what its controls change.
         <RuleBranch
           key={i}
-          label={`branch ${i + 1}`}
+          number={i + 1}
           rule={rule}
           first={i === 0}
           last={i === field.rules.length - 1}
@@ -75,7 +74,7 @@ function Toggle({ label, text, checked, onChange }: Readonly<{ label: string; te
 }
 
 function RuleBranch({
-  label,
+  number,
   rule,
   first,
   last,
@@ -86,7 +85,7 @@ function RuleBranch({
   onMove,
   onRemove
 }: Readonly<{
-  label: string;
+  number: number;
   rule: Rule;
   first: boolean;
   last: boolean;
@@ -102,7 +101,8 @@ function RuleBranch({
   const setRows = (rows: AssignmentRow[]) => onChange((r) => withAssignments(r, rows));
   const freeTarget = ccdChoices.find((c) => !assignments.some((a) => a.target === c));
   const firstCondition = nextCondition([], conditionChoices);
-  const title = capitalised(label);
+  const label = `branch ${number}`;
+  const title = `Branch ${number}`;
   return (
     <div role="group" aria-label={title} className="flex flex-col gap-3 rounded-lg border border-asst-line bg-asst-bg p-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -273,7 +273,7 @@ function RuleBranch({
       {rule.action ? (
         <div className="flex flex-wrap items-center gap-2 rounded-lg bg-asst-warn/20 px-2.5 py-1.5 text-xs text-asst-text">
           <span>{`English the importer could not read: ${rule.action}`}</span>
-          <button type="button" aria-label={`Remove the English of ${label}`} className={`${SMALL_BUTTON} ${FOCUS}`} onClick={() => onChange(withoutAction)}>
+          <button type="button" aria-label={`Remove the English of ${label}`} className={SMALL_BUTTON} onClick={() => onChange(withoutAction)}>
             Remove English
           </button>
         </div>

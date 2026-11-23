@@ -216,6 +216,8 @@ export function BulkScanOutline({
                           next.delete(key);
                           return next;
                         });
+                        onQuery("");
+                        onOnlyReview(false);
                         onSpec(addField(spec, s), true);
                         onSelect({ section: s, field: section.fields.length });
                       }}
@@ -288,6 +290,8 @@ export function BulkScanOutline({
           label="Add a section"
           text="Add a section"
           onClick={() => {
+            onQuery("");
+            onOnlyReview(false);
             onSpec(addSection(spec), true);
             onSelect({ section: spec.sections.length, field: null });
           }}

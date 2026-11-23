@@ -105,6 +105,7 @@ export function BulkScanEditor({ view, signOff }: Readonly<{ view: BulkScanEdito
                 className={`rounded-full bg-asst-warn/25 px-2.5 py-0.5 font-medium text-asst-text hover:bg-asst-warn/40 ${FOCUS}`}
                 onClick={() => {
                   setTab("Edit");
+                  setQuery("");
                   setOnlyReview(true);
                 }}
               >

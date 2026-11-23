@@ -27,7 +27,7 @@ export interface JavaOptions {
 }
 
 const q = (s: string): string => JSON.stringify(s);
-const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
+export const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
 const low = (s: string): string => s.charAt(0).toLowerCase() + s.slice(1);
 
 /**

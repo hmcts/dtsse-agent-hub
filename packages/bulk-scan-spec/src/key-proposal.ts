@@ -1,4 +1,4 @@
-import { capitalised } from "./capitalised.ts";
+import { cap } from "./codegen/java.ts";
 import type { Confidence } from "./similarity.ts";
 import { assign, confidenceOf, tokens, words } from "./similarity.ts";
 
@@ -21,6 +21,9 @@ export interface ProposedKey {
   parts?: ProposedKey[];
 }
 
+/** The suffixes of a date's keys, as the sheets and nfdiv name them. */
+export const DATE_PARTS = ["Day", "Month", "Year"] as const;
+
 const MIN_REUSE = 0.55;
 const MIN_PREFIX_USES = 3;
 const MAX_WORDS = 5;
@@ -31,7 +34,7 @@ export function camelCase(label: string, skip: Set<string> = new Set()): string 
   const lead = all.findIndex((w) => !skip.has(w));
   return all
     .slice(lead < 0 ? all.length : lead, (lead < 0 ? all.length : lead) + MAX_WORDS)
-    .map((w, i) => (i === 0 ? w : capitalised(w)))
+    .map((w, i) => (i === 0 ? w : cap(w)))
     .join("");
 }
 
@@ -51,11 +54,14 @@ const GENERIC = new Set([
   "information",
   "details",
   "detail",
+  "personal",
+  "contact",
   "section",
-  "appealing",
-  "appeal",
   "about",
   "your",
+  "own",
+  "appealing",
+  "appeal",
   "request",
   "application",
   "form",
@@ -64,11 +70,28 @@ const GENERIC = new Set([
   "reasons"
 ]);
 
-/** The word a section title is about, such as minor for "Appealing on behalf of a minor": its last word that is not generic. */
+/** Words that say who a section is about, which make the best prefix for a key another section already has. */
+const PARTIES = new Set([
+  "applicant",
+  "applicant1",
+  "applicant2",
+  "appellant",
+  "respondent",
+  "representative",
+  "solicitor",
+  "minor",
+  "child",
+  "parent",
+  "witness"
+]);
+
+/**
+ * The word a section title is about, such as minor for "Appealing on behalf of a minor": the last party word in it, else
+ * its one word that is not a qualifier. A title with several such words has no subject, since any one would mislead.
+ */
 export function subjectOf(title: string): string | undefined {
-  return words(title)
-    .filter((w) => !/^\d+$/.test(w) && !GENERIC.has(w))
-    .at(-1);
+  const named = words(title).filter((w) => !/^\d+$/.test(w) && !GENERIC.has(w));
+  return named.filter((w) => PARTIES.has(w)).at(-1) ?? (named.length === 1 ? named[0] : undefined);
 }
 
 /**
@@ -77,7 +100,7 @@ export function subjectOf(title: string): string | undefined {
  * already starts with it.
  */
 function distinct(key: string, taken: (candidate: string) => boolean, tag: string, subject?: string): string {
-  const lead = taken(key) && subject && !key.toLowerCase().startsWith(subject.toLowerCase()) ? `${subject}${capitalised(key)}` : key;
+  const lead = taken(key) && subject && !key.toLowerCase().startsWith(subject.toLowerCase()) ? `${subject}${cap(key)}` : key;
   let candidate = lead;
   if (taken(candidate)) {
     candidate = `${lead}${tag}`;
@@ -96,7 +119,8 @@ function uniqueKey(key: string, used: Set<string>, tag: string, subject?: string
 
 /** A reused or proposed key without its trailing Day, Month or Year, which a date's own keys add back. */
 function stemOf(key: string): string {
-  return key.replace(/(Day|Month|Year)$/, "");
+  const part = DATE_PARTS.find((p) => key.endsWith(p));
+  return part ? key.slice(0, -part.length) : key;
 }
 
 /**
@@ -108,11 +132,10 @@ export function proposeKeys(slots: KeySlot[], houseKeys: string[], tags: string[
   const own = slots.map((s) => tokens(s.label));
   const lower = new Set(houseKeys.map((k) => k.toLowerCase()));
   const dated = slots.flatMap((slot, i) => (slot.parts ? [i] : []));
-  const partsOf = (i: number): readonly string[] => slots[i]?.parts ?? [];
 
-  // A house key ending Day, Month or Year is a date's, never a plain slot's: a date slot takes its stem, and a stem whose
-  // three keys all exist is the house's own date.
-  const stems = [...new Set(houseKeys.flatMap((k) => (/(Day|Month|Year)$/.test(k) ? [stemOf(k)] : [])))];
+  // A stem is a date's when the house has two or more of its Day, Month and Year keys; those keys go to date slots only.
+  const stems = [...new Set(houseKeys.map(stemOf))].filter((stem) => DATE_PARTS.filter((part) => lower.has(`${stem}${part}`.toLowerCase())).length >= 2);
+  const dateKeys = new Set(stems.flatMap((stem) => DATE_PARTS.map((part) => `${stem}${part}`.toLowerCase())));
   const dateMatches = assign(
     dated.map((i) => ({ context: contexts[i] as Set<string>, own: own[i] as Set<string> })),
     stems.map((stem) => ({ id: stem, words: tokens(stem) })),
@@ -120,30 +143,38 @@ export function proposeKeys(slots: KeySlot[], houseKeys: string[], tags: string[
     true
   );
   const dateOf = new Map([...dateMatches].map(([n, match]) => [dated[n] as number, match]));
-  const reservedByDates = new Set([...dateOf].flatMap(([i, match]) => partsOf(i).map((part) => `${match.candidate}${part}`.toLowerCase())));
 
   const reused = assign(
     contexts.map((context, i) => ({ context: slots[i]?.parts ? new Set<string>() : context, own: own[i] as Set<string> })),
-    houseKeys.filter((k) => !reservedByDates.has(k.toLowerCase()) && !/(Day|Month|Year)$/.test(k)).map((id) => ({ id, words: tokens(id) })),
+    houseKeys.filter((k) => !dateKeys.has(k.toLowerCase())).map((id) => ({ id, words: tokens(id) })),
     MIN_REUSE,
     true
   );
   const prefixes = prefixesOf(houseKeys).map((p) => ({ prefix: p, words: tokens(p) }));
-  const used = new Set([...reused.values()].map((r) => r.candidate.toLowerCase()).concat([...reservedByDates]));
-  return slots.map((slot, i) => {
-    const tag = tags[i] ?? "";
+  const used = new Set([...reused.values()].map((r) => r.candidate.toLowerCase()));
+  /** What a slot with no existing key is named from: the house party prefix its context matches, else the section's subject. */
+  const naming = (slot: KeySlot, i: number) => {
     const party = prefixes
       .map((p) => ({ ...p, shared: [...p.words].filter((w) => contexts[i]?.has(w)).length }))
       .filter((p) => p.shared > 0)
       .sort((a, b) => b.shared - a.shared || b.words.size - a.words.size)[0];
-    // A key led by the house's party prefix already says who it is about, so the section's subject is left out of it.
-    const subject = slot.section && !party ? subjectOf(slot.section) : undefined;
     const base = camelCase(slot.label, party ? new Set(words(party.prefix)) : undefined) || "field";
-    const proposed = party ? `${party.prefix}${capitalised(base)}` : base;
+    return {
+      party,
+      proposed: party ? `${party.prefix}${cap(base)}` : base,
+      // A key led by the house's party prefix already says who it is about, so the section's subject is left out of it.
+      subject: slot.section && !party ? subjectOf(slot.section) : undefined
+    };
+  };
+  return slots.map((slot, i) => {
+    const tag = tags[i] ?? "";
     const { parts } = slot;
     if (parts) {
       const match = dateOf.get(i);
-      const final = match ? match.candidate : distinct(proposed, (k) => parts.some((part) => used.has(`${k}${part}`.toLowerCase())), tag, subject);
+      const named = match ? undefined : naming(slot, i);
+      const final = match
+        ? match.candidate
+        : distinct(named?.proposed ?? "field", (k) => parts.some((part) => used.has(`${k}${part}`.toLowerCase())), tag, named?.subject);
       const keys = parts.map((part) => `${final}${part}`);
       for (const key of keys) {
         used.add(key.toLowerCase());
@@ -154,7 +185,7 @@ export function proposeKeys(slots: KeySlot[], houseKeys: string[], tags: string[
         ? `matches existing keys ${keys.join(", ")} (similarity ${match.score.toFixed(2)})`
         : match
           ? `keys ${keys.join(", ")}: built on the existing ${final} keys with ${parts.join(", ")} (similarity ${match.score.toFixed(2)})`
-          : `keys ${keys.join(", ")}: new from the label with ${parts.join(", ")}${party ? ` and house prefix ${party.prefix}` : ""}`;
+          : `keys ${keys.join(", ")}: new from the label with ${parts.join(", ")}${named?.party ? ` and house prefix ${named.party.prefix}` : ""}`;
       return { key: keys[0] as string, reason, confidence, parts: keys.map((key) => ({ key, reason, confidence })) };
     }
     const match = reused.get(i);
@@ -165,6 +196,7 @@ export function proposeKeys(slots: KeySlot[], houseKeys: string[], tags: string[
         confidence: confidenceOf(match.score)
       };
     }
+    const { party, proposed, subject } = naming(slot, i);
     return {
       key: uniqueKey(proposed, used, tag, subject),
       reason: party ? `new key from the label with house prefix ${party.prefix}` : "new key from the label; no existing key matched",

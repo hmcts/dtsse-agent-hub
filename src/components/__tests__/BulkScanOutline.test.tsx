@@ -342,6 +342,63 @@ describe("what stays with a section or field", () => {
   });
 });
 
+describe("adding while a filter is on", () => {
+  it("should clear the search and show the new field when a field is added with a search typed", async () => {
+    const user = setup();
+    const search = screen.getByRole("searchbox", { name: "Search fields" }) as HTMLInputElement;
+    await user.type(search, "decision");
+    await user.click(screen.getByRole("button", { name: "Add a field to section 2" }));
+
+    expect(search.value).toBe("");
+    expect(outlineLines().filter((b) => b.getAttribute("aria-current") === "true")).toHaveLength(1);
+  });
+
+  it("should turn Needs review off and show the new section when a section is added with it on", async () => {
+    const user = setup();
+    await user.click(screen.getByRole("button", { name: /^Needs review/ }));
+    await user.click(screen.getByRole("button", { name: "Add a section" }));
+
+    expect(screen.getByRole("button", { name: /^Needs review/ }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: "Collapse section 3" })).toBeTruthy();
+  });
+
+  it("should clear the search when the header's count turns the filter on, so the list matches the count", async () => {
+    const user = setup();
+    await user.type(screen.getByRole("searchbox", { name: "Search fields" }), "zzz");
+    await user.click(screen.getByRole("button", { name: "2 to review" }));
+
+    expect((screen.getByRole("searchbox", { name: "Search fields" }) as HTMLInputElement).value).toBe("");
+    expect(outlineLines()).toHaveLength(2);
+  });
+});
+
+describe("identical markers", () => {
+  it("should list two identical TODOs and clear one at a time when each is marked done", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const user = userEvent.setup();
+    render(
+      <BulkScanEditor
+        view={view({
+          spec: {
+            form: { name: "T210", formType: "T210" },
+            sections: [{ id: "1", title: "A", fields: [field({ id: "1.1", label: "One", keys: ["a"], todo: ["TODO: same", "TODO: same"] })] }],
+            composes: [],
+            pageOrder: [],
+            expectedDocuments: []
+          }
+        })}
+        signOff={vi.fn()}
+      />
+    );
+    expect(screen.getAllByText(/same/)).toHaveLength(2);
+    await user.click(screen.getByRole("button", { name: "Done: TODO 1" }));
+
+    expect(screen.getAllByText(/same/)).toHaveLength(1);
+    expect(error).not.toHaveBeenCalled();
+    error.mockRestore();
+  });
+});
+
 describe("adding a field", () => {
   it("should open a collapsed section and show the new line when a field is added to it", async () => {
     const user = setup();

@@ -143,7 +143,7 @@ export function BulkScanFieldDetails({
         <Card title="Review">
           <ul className="flex flex-col gap-2">
             {field.todo.map((todo, i) => (
-              <li key={todo} className="flex items-start gap-2 rounded-lg bg-asst-warn/20 px-3 py-2 text-[13px] text-asst-text">
+              <li key={`${i}-${todo}`} className="flex items-start gap-2 rounded-lg bg-asst-warn/20 px-3 py-2 text-[13px] text-asst-text">
                 <span className="flex-1">
                   <span className="font-semibold">TODO: </span>
                   {todo.replace(/^TODO:\s*/, "")}
@@ -152,7 +152,7 @@ export function BulkScanFieldDetails({
               </li>
             ))}
             {review.map((r, i) => (
-              <li key={`${r.about}-${r.reason}`} className="flex items-start gap-2 rounded-lg bg-asst-warn/20 px-3 py-2 text-[13px] text-asst-text">
+              <li key={`${i}-${r.about}-${r.reason}`} className="flex items-start gap-2 rounded-lg bg-asst-warn/20 px-3 py-2 text-[13px] text-asst-text">
                 <span className="flex-1">
                   <span className="font-semibold">{`Check the ${r.about} `}</span>
                   <span className="text-asst-muted">{`(${r.confidence} confidence) `}</span>

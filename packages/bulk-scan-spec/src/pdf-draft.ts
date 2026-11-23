@@ -1,4 +1,5 @@
 import { noteFor } from "./hints.ts";
+import { DATE_PARTS } from "./key-proposal.ts";
 import type { Line, PdfContent, Widget } from "./pdf-extract.ts";
 import type { Field } from "./schema.ts";
 
@@ -241,9 +242,6 @@ function textRows(places: Place[], start: number): Place[] {
   }
   return rows;
 }
-
-/** The suffixes of a date's keys, as the sheets and nfdiv name them. */
-const DATE_PARTS = ["Day", "Month", "Year"] as const;
 
 /** Day, month and year boxes in one row, in that order, are one date. */
 function dateRun(places: Place[], start: number): Place[] | undefined {
