@@ -213,6 +213,28 @@ describe("the keys card", () => {
   });
 });
 
+describe("a key box", () => {
+  it("should keep the key and every condition that names it when the box is cleared and left", async () => {
+    const user = await setup2();
+    const key = screen.getByLabelText("Key 1") as HTMLInputElement;
+    await user.clear(key);
+    await user.tab();
+
+    expect(key.value).toBe("left");
+    expect((screen.getByRole("button", { name: "Save as version 2" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("should not mark the form changed when the text typed means the same keys", async () => {
+    const user = await setup2();
+    await user.type(screen.getByLabelText("Key 1"), " ");
+    await user.tab();
+    await user.type(screen.getByLabelText("CCD ids"), " ");
+    await user.tab();
+
+    expect((screen.getByRole("button", { name: "Save as version 2" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
 describe("the where-it-goes card", () => {
   it("should draw no status line until the picker provides one", () => {
     render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
@@ -242,7 +264,7 @@ describe("allowed values", () => {
     await user.click(screen.getByRole("button", { name: "Add a value for marriage" }));
     await user.keyboard(" No ");
 
-    const blank = screen.getByLabelText("Blank is allowed for marriage") as HTMLInputElement;
+    const blank = screen.getByLabelText("Blank allowed for marriage") as HTMLInputElement;
     expect(blank.checked).toBe(true);
     await user.click(blank);
     await user.click(blank);
@@ -609,9 +631,9 @@ describe("retyping a key", () => {
 describe("blank for a free-text key", () => {
   it("should leave the blank box ticked and disabled when the key lists no values", async () => {
     const user = await setup2();
-    expect((screen.getByLabelText("Blank is allowed for left") as HTMLInputElement).disabled).toBe(false);
+    expect((screen.getByLabelText("Blank allowed for left") as HTMLInputElement).disabled).toBe(false);
     await open(user, "5.2");
-    const blank = screen.getByLabelText("Blank is allowed for other") as HTMLInputElement;
+    const blank = screen.getByLabelText("Blank allowed for other") as HTMLInputElement;
     expect([blank.checked, blank.disabled]).toEqual([true, true]);
   });
 });

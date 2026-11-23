@@ -1,3 +1,4 @@
+import { capitalised } from "./capitalised.ts";
 import type { Confidence } from "./similarity.ts";
 import { assign, confidenceOf, tokens, words } from "./similarity.ts";
 
@@ -30,7 +31,7 @@ export function camelCase(label: string, skip: Set<string> = new Set()): string 
   const lead = all.findIndex((w) => !skip.has(w));
   return all
     .slice(lead < 0 ? all.length : lead, (lead < 0 ? all.length : lead) + MAX_WORDS)
-    .map((w, i) => (i === 0 ? w : w.charAt(0).toUpperCase() + w.slice(1)))
+    .map((w, i) => (i === 0 ? w : capitalised(w)))
     .join("");
 }
 
@@ -70,14 +71,13 @@ export function subjectOf(title: string): string | undefined {
     .at(-1);
 }
 
-const capitalised = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
-
 /**
  * The first of these that `taken` allows: the key, then the key led by the section's subject, then that with the
- * question's tag, then with the tag and a number. The subject stays in the numbered form.
+ * question's tag, then with the tag and a number. The subject stays in the numbered form, and is left out of a key that
+ * already starts with it.
  */
 function distinct(key: string, taken: (candidate: string) => boolean, tag: string, subject?: string): string {
-  const lead = taken(key) && subject ? `${subject}${capitalised(key)}` : key;
+  const lead = taken(key) && subject && !key.toLowerCase().startsWith(subject.toLowerCase()) ? `${subject}${capitalised(key)}` : key;
   let candidate = lead;
   if (taken(candidate)) {
     candidate = `${lead}${tag}`;
@@ -124,19 +124,20 @@ export function proposeKeys(slots: KeySlot[], houseKeys: string[], tags: string[
 
   const reused = assign(
     contexts.map((context, i) => ({ context: slots[i]?.parts ? new Set<string>() : context, own: own[i] as Set<string> })),
-    houseKeys.filter((k) => !reservedByDates.has(k.toLowerCase())).map((id) => ({ id, words: tokens(id) })),
+    houseKeys.filter((k) => !reservedByDates.has(k.toLowerCase()) && !/(Day|Month|Year)$/.test(k)).map((id) => ({ id, words: tokens(id) })),
     MIN_REUSE,
     true
   );
   const prefixes = prefixesOf(houseKeys).map((p) => ({ prefix: p, words: tokens(p) }));
   const used = new Set([...reused.values()].map((r) => r.candidate.toLowerCase()).concat([...reservedByDates]));
   return slots.map((slot, i) => {
-    const subject = slot.section ? subjectOf(slot.section) : undefined;
     const tag = tags[i] ?? "";
     const party = prefixes
       .map((p) => ({ ...p, shared: [...p.words].filter((w) => contexts[i]?.has(w)).length }))
       .filter((p) => p.shared > 0)
       .sort((a, b) => b.shared - a.shared || b.words.size - a.words.size)[0];
+    // A key led by the house's party prefix already says who it is about, so the section's subject is left out of it.
+    const subject = slot.section && !party ? subjectOf(slot.section) : undefined;
     const base = camelCase(slot.label, party ? new Set(words(party.prefix)) : undefined) || "field";
     const proposed = party ? `${party.prefix}${capitalised(base)}` : base;
     const { parts } = slot;

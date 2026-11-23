@@ -99,8 +99,9 @@ export async function fromPdf(input: FromPdfInput): Promise<FromPdfResult> {
   withKeys.forEach(({ d, mine }, i) => {
     const review: NonNullable<Field["review"]> = [];
     const where = `${d.field.id ?? ""} ${d.field.label}`.trim();
-    for (const k of mine) {
-      review.push({ about: "key", reason: `${k.key}: ${k.reason}`, confidence: k.confidence });
+    // A date's keys share one reason, which names all three, so it is one marker.
+    for (const k of d.dateParts ? mine.slice(0, 1) : mine) {
+      review.push({ about: "key", reason: d.dateParts ? k.reason : `${k.key}: ${k.reason}`, confidence: k.confidence });
     }
     for (const r of d.reasons) {
       review.push(r);

@@ -155,6 +155,34 @@ describe("a date's keys", () => {
   });
 });
 
+describe("keys that already carry who they are about", () => {
+  it("should not repeat the section's subject in a key that starts with it when the key is taken", () => {
+    const section = "Section 3 – Appealing on behalf of a minor";
+    const keys = proposeKeys(
+      [
+        { label: "Minor name", context: "", section },
+        { label: "Minor name", context: "", section }
+      ],
+      [],
+      ["Q3", "Q4"]
+    );
+    expect(keys.map((k) => k.key)).toEqual(["minorName", "minorNameQ4"]);
+  });
+
+  it("should not put the section's subject before a house party prefix when the key is taken", () => {
+    const house = ["applicant1FirstName", "applicant1LastName", "applicant1Email"];
+    const slot = { label: "Phone", context: "applicant1", section: "Section 2 – Applicant details" };
+    const keys = proposeKeys([slot, slot], house, ["Q1", "Q2"]);
+    expect(keys[0]?.key).toBe("applicant1Phone");
+    expect(keys[1]?.key).toBe("applicant1PhoneQ2");
+  });
+
+  it("should never give a house Day, Month or Year key to a plain slot when it matches the slot's label", () => {
+    const keys = proposeKeys([{ label: "Date of birth", context: "" }], ["dateOfBirthDay", "dateOfBirthMonth"], ["Q1"]);
+    expect(keys[0]?.key).toBe("dateBirth");
+  });
+});
+
 describe("subjectOf", () => {
   it("should give the last word that is not generic when a title is read", () => {
     expect(subjectOf("Section 4 – Appealing following a bereavement")).toBe("bereavement");

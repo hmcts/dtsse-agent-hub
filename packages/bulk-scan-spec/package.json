@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./capitalised": "./src/capitalised.ts",
     "./schema": "./src/schema.ts",
     "./logic": "./src/logic.ts",
     "./emits": "./src/emits.ts",

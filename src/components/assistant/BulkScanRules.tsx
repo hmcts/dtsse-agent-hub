@@ -1,6 +1,7 @@
 "use client";
 
 import type { Field, Outcome, Rule } from "@hmcts-cft/bulk-scan-spec";
+import { capitalised } from "@hmcts-cft/bulk-scan-spec/capitalised";
 import {
   type AssignmentRow,
   addRule,
@@ -101,7 +102,7 @@ function RuleBranch({
   const setRows = (rows: AssignmentRow[]) => onChange((r) => withAssignments(r, rows));
   const freeTarget = ccdChoices.find((c) => !assignments.some((a) => a.target === c));
   const firstCondition = nextCondition([], conditionChoices);
-  const title = `${label.charAt(0).toUpperCase()}${label.slice(1)}`;
+  const title = capitalised(label);
   return (
     <div role="group" aria-label={title} className="flex flex-col gap-3 rounded-lg border border-asst-line bg-asst-bg p-3">
       <div className="flex flex-wrap items-center gap-2">

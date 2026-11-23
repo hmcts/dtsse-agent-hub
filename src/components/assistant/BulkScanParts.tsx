@@ -109,16 +109,33 @@ export function CommitInput({
   label,
   value,
   placeholder,
+  normalise = (text) => text,
+  keepValue = false,
   onCommit
-}: Readonly<{ label: string; value: string; placeholder?: string; onCommit: (text: string) => void }>) {
+}: Readonly<{
+  label: string;
+  value: string;
+  placeholder?: string;
+  /** What the text means, so that text which says the same thing as the value is no change. */
+  normalise?: (text: string) => string;
+  /** Whether a cleared box goes back to its value rather than being sent as empty. */
+  keepValue?: boolean;
+  onCommit: (text: string) => void;
+}>) {
   const [state, setState] = useState({ base: value, text: value });
   if (state.base !== value) {
     setState({ base: value, text: value });
   }
   const commit = () => {
-    if (state.text !== value) {
-      onCommit(state.text);
+    const meant = normalise(state.text);
+    if (meant === normalise(value)) {
+      return;
     }
+    if (keepValue && meant === "") {
+      setState({ base: value, text: value });
+      return;
+    }
+    onCommit(state.text);
   };
   return (
     <input

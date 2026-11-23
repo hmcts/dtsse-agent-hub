@@ -211,6 +211,11 @@ export function BulkScanOutline({
                       label={`Add a field to section ${s + 1}`}
                       icon="plus"
                       onClick={() => {
+                        setClosed((before) => {
+                          const next = new Set(before);
+                          next.delete(key);
+                          return next;
+                        });
                         onSpec(addField(spec, s), true);
                         onSelect({ section: s, field: section.fields.length });
                       }}

@@ -342,6 +342,19 @@ describe("what stays with a section or field", () => {
   });
 });
 
+describe("adding a field", () => {
+  it("should open a collapsed section and show the new line when a field is added to it", async () => {
+    const user = setup();
+    await user.click(screen.getByRole("button", { name: "Collapse section 2" }));
+    expect(screen.queryByRole("button", { name: /^2\.1 / })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Add a field to section 2" }));
+
+    expect(screen.getByRole("button", { name: "Collapse section 2" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^2\.1 / })).toBeTruthy();
+    expect(outlineLines().filter((b) => b.getAttribute("aria-current") === "true")).toHaveLength(1);
+  });
+});
+
 describe("fields a save refused", () => {
   it("should list the refused field and open its collapsed section when a filter would hide it", async () => {
     const user = setup();

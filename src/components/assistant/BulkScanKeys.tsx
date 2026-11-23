@@ -33,7 +33,13 @@ export function BulkScanSends({
           // A key is named by its place until it is typed, which is also what a rename follows.
           <div key={i} className="flex items-end gap-1.5">
             <Labelled label={field.keys.length > 1 ? `Key ${i + 1}` : "Key"} className="flex-1">
-              <CommitInput label={`Key ${i + 1}`} value={key} onCommit={(text) => onKeys(field.keys.flatMap((k, at) => (at === i ? keysOf(text) : [k])))} />
+              <CommitInput
+                label={`Key ${i + 1}`}
+                value={key}
+                normalise={(text) => wordsOf(text).join(" ")}
+                keepValue={key !== ""}
+                onCommit={(text) => onKeys(field.keys.flatMap((k, at) => (at === i ? keysOf(text) : [k])))}
+              />
             </Labelled>
             <IconButton label={`Remove key ${i + 1}`} icon="remove" onClick={() => onKeys(field.keys.filter((_, at) => at !== i))} />
           </div>
@@ -146,7 +152,7 @@ function AllowedValues({ field, keyName, onField }: Readonly<{ field: Field; key
         <label className="flex items-center gap-1.5 text-xs text-asst-text">
           <input
             type="checkbox"
-            aria-label={`Blank is allowed for ${keyName}`}
+            aria-label={`Blank allowed for ${keyName}`}
             checked={blankAllowed}
             disabled={values.length === 0}
             title={values.length === 0 ? "A free-text key can always be blank" : undefined}

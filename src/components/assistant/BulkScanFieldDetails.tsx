@@ -108,7 +108,6 @@ export function BulkScanFieldDetails({
         <Labelled label="CCD ids, separated by spaces">
           <CcdIds value={field.ccd} onChange={(ccd) => onPatch({ ccd })} />
         </Labelled>
-        {/* Slot for the picker's per-field status line (PR #297); nothing is drawn until that component exists. */}
       </Card>
 
       <Card title="Rules">
@@ -210,5 +209,5 @@ function SheetWords({ field }: Readonly<{ field: Field }>) {
 
 /** CCD ids typed as words: the text goes up when the person leaves the box or presses Enter. */
 function CcdIds({ value, onChange }: Readonly<{ value: readonly string[]; onChange: (ids: string[]) => void }>) {
-  return <CommitInput label="CCD ids" value={value.join(" ")} onCommit={(text) => onChange(wordsOf(text))} />;
+  return <CommitInput label="CCD ids" value={value.join(" ")} normalise={(text) => wordsOf(text).join(" ")} onCommit={(text) => onChange(wordsOf(text))} />;
 }
