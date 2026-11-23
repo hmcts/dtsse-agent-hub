@@ -313,7 +313,7 @@ export function AssistantShell({
           ref={sidebar}
         >
           <div className="flex items-center gap-2.5 px-4 pb-3 pt-4">
-            <Link href="/assistant" aria-label="CFT Workspace, new chat" className="flex min-w-0 items-center gap-2.5">
+            <Link href="/assistant" className="flex min-w-0 items-center gap-2.5">
               <Mark />
               <span className="text-sm font-semibold">CFT Workspace</span>
             </Link>

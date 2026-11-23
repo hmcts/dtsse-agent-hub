@@ -7,15 +7,16 @@ import { FeedbackHeader } from "@/components/feedback/dev/ProjectList";
 import { ProjectPage } from "@/components/feedback/dev/ProjectPage";
 import { allowPrivateTargets } from "@/feedback/targets";
 import { requireViewer } from "@/viewer/current";
-import { feedbackProjectPage } from "@/web/feedback-data";
+import { feedbackProjectName, feedbackProjectPage } from "@/web/feedback-data";
 import { PROJECT_ACTIONS } from "../actions";
 import { FeedbackFrame, requireFeedback } from "../frame";
 
 export const dynamic = "force-dynamic";
 
 export async function generateMetadata({ params }: Readonly<{ params: Promise<{ projectId: string }> }>): Promise<Metadata> {
-  const data = await feedbackProjectPage(await requireViewer(), (await params).projectId);
-  return data === undefined ? { title: "Feedback project" } : { title: data.project.name };
+  requireFeedback();
+  const name = await feedbackProjectName(await requireViewer(), (await params).projectId);
+  return { title: name?.trim() || "Feedback project" };
 }
 
 /** One feedback project, for its owner and team; `?tab=` picks the section. Anyone else's is not found. */

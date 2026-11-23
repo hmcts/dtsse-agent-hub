@@ -9,9 +9,13 @@ import { bulkScanEditor } from "@/web/data";
 
 export const dynamic = "force-dynamic";
 
-export async function generateMetadata({ params }: Readonly<{ params: Promise<{ id: string }> }>): Promise<Metadata> {
-  const view = await bulkScanEditor(await requireViewer(), (await params).id, versionOf(undefined));
-  return { title: view ? view.name : "Bulk Scan form" };
+export async function generateMetadata({
+  params,
+  searchParams
+}: Readonly<{ params: Promise<{ id: string }>; searchParams: Promise<{ version?: string | string[] }> }>): Promise<Metadata> {
+  const [{ id }, { version }] = await Promise.all([params, searchParams]);
+  const view = await bulkScanEditor(await requireViewer(), id, versionOf(Array.isArray(version) ? version[0] : version));
+  return { title: view?.name.trim() || "Bulk Scan form" };
 }
 
 /** One of the person's Bulk Scan specs at its latest version, or `?version=n`. Anyone else's reads as missing. */

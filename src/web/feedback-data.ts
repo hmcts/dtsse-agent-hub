@@ -103,3 +103,8 @@ export async function feedbackRecordingPage(viewer: Identity, projectId: string,
     return { project, recording, people, threads: threads.filter((thread) => thread.recordingId === recording.id) };
   });
 }
+
+/** Just a project's name, for a tab title: the page's own read is the aggregate, and a title needs none of it. */
+export async function feedbackProjectName(viewer: Identity, projectId: string): Promise<string | undefined> {
+  return await orMissing(async () => (await getProject(prisma, viewer.oid, projectId)).name);
+}

@@ -46,6 +46,7 @@ import { feedbackEnabled } from "@/feedback/settings";
 import { requireViewer } from "@/viewer/current";
 import {
   assistantConversation,
+  assistantConversationTitle,
   assistantExportDefaults,
   assistantFiles,
   assistantModel,
@@ -83,8 +84,8 @@ const ACTIONS: ChatActions = {
 
 /** The tab title: "CFT - " and the conversation's name. A missing one gets the default and the page answers not found. */
 export async function generateMetadata({ params }: { params: Promise<{ conversationId: string }> }): Promise<Metadata> {
-  const view = await assistantConversation(await requireViewer(), (await params).conversationId);
-  return view === undefined ? {} : { title: view.title };
+  const title = await assistantConversationTitle(await requireViewer(), (await params).conversationId);
+  return title === undefined ? {} : { title: title.trim() || "New chat" };
 }
 
 /** One of the viewer's conversations. Anyone else's, or one deleted, is not found. */
