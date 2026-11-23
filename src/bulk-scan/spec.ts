@@ -1,8 +1,6 @@
 import {
   type CcdField,
-  type CcdRow,
   caseDataFor,
-  ccdFieldsOf,
   type Data,
   expectedFor,
   type FormSpec,
@@ -16,6 +14,7 @@ import {
   isModelKey,
   matchCcd,
   modelByKey,
+  newCcdFieldFiles,
   readsKeys,
   readWorkbookBytes,
   type Scenario,
@@ -26,9 +25,10 @@ import {
   type Target,
   validData
 } from "@hmcts-cft/bulk-scan-spec";
+import { ccdFieldsOf } from "@hmcts-cft/bulk-scan-spec/ccd-match";
 import { z } from "zod";
 import { HttpError } from "../agent-api/http.ts";
-import { CCD_FIELD_ROWS } from "../assistant/ccd-jobs.ts";
+import { CCD_FIELD_ROWS, type CcdConfig } from "../assistant/ccd-jobs.ts";
 import { isPdf } from "../assistant/docmosis.ts";
 import { isXlsx } from "../assistant/welsh.ts";
 import { zipFiles } from "./zip.ts";
@@ -44,10 +44,10 @@ export const MAX_SPEC_BYTES = 3 * 1024 * 1024;
 export const MAX_SPEC_NAME = 200;
 
 /** The case type a person picked, whose fields their pod fetched: the product that defines it and how it configures CCD. */
-export interface PickedCaseType {
+export interface UploadedCaseType {
   caseType: string;
   product: string;
-  config?: "config-generator" | "json" | "hybrid";
+  config?: CcdConfig;
   fields: CcdField[];
 }
 
@@ -57,7 +57,7 @@ export function parseCcdFields(json: unknown): CcdField[] {
   if (!parsed.success) {
     throw new HttpError(400, "the case type's fields are not in the shape the CCD job answers");
   }
-  return ccdFieldsOf(parsed.data as CcdRow[]);
+  return ccdFieldsOf(parsed.data);
 }
 
 export interface Imported {
@@ -69,7 +69,7 @@ export interface Imported {
  * Reads an uploaded form PDF, Exela SIP or HMCTS transformation sheet into one spec per form it holds, with `caseType`
  * as each form's CCD case type id. A PDF's fields are matched against `picked`, the case type the person chose.
  */
-export async function importUpload(fileName: string, bytes: Uint8Array, caseType?: string, picked?: PickedCaseType): Promise<Imported> {
+export async function importUpload(fileName: string, bytes: Uint8Array, caseType?: string, picked?: UploadedCaseType): Promise<Imported> {
   if (isPdf(bytes)) {
     const result = await fromPdf({ pdf: fileName, bytes, ...(picked ? { ccdFields: picked.fields } : {}), ...(caseType ? { caseType } : {}) }).catch(
       (error: unknown) => {
@@ -113,7 +113,7 @@ export async function importUpload(fileName: string, bytes: Uint8Array, caseType
 }
 
 /** The forms with the case type the person picked: its product and configuration in the header, and each row's ids checked against its fields, keeping those the sheet has. */
-function withPicked(forms: FormSpec[], picked: PickedCaseType | undefined): FormSpec[] {
+function withPicked(forms: FormSpec[], picked: UploadedCaseType | undefined): FormSpec[] {
   return picked
     ? forms.map((f) =>
         matchCcd(
@@ -311,7 +311,7 @@ export function codeDownload(spec: FormSpec, target: Target, javaPackage: string
     throw new HttpError(400, "the Java package is lower-case words joined by dots, such as uk.gov.hmcts.divorce.bulkscan");
   }
   try {
-    const files = generateTarget(target, spec, { basePackage: javaPackage });
+    const files = [...generateTarget(target, spec, { basePackage: javaPackage }), ...newCcdFieldFiles(spec)];
     return {
       fileName: `${stem(spec)}-${target}.zip`,
       contentType: "application/zip",

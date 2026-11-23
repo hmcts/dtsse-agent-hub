@@ -3,6 +3,7 @@
 import type { FormSpec } from "@hmcts-cft/bulk-scan-spec";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { withoutCaseType } from "@/bulk-scan/case-type";
 import { clearReview, issuesByField, patchHeader, reviewChecklist } from "@/bulk-scan/edit";
 import type { BulkScanEditorView } from "@/bulk-scan/editor-view";
 import { BulkScanDownloads } from "@/components/assistant/BulkScanDownloads";
@@ -86,7 +87,9 @@ export function BulkScanEditor({
           <HeaderField
             label="Case type (CCD case type id)"
             value={spec.form.ccdCaseTypeId ?? ""}
-            onChange={(caseType) => change(patchHeader(spec, { ccdCaseTypeId: caseType }))}
+            onChange={(caseType) =>
+              change((current) => patchHeader(current.form.ccdProduct === undefined ? current : withoutCaseType(current), { ccdCaseTypeId: caseType }))
+            }
             className="w-64"
           />
         </div>

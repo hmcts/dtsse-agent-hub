@@ -168,6 +168,33 @@ describe("matchCcd", () => {
   });
 });
 
+describe("ids that came with the form", () => {
+  it("should mark an id the form already had as the form's, so it is kept across case types", () => {
+    const [row] = rowsOf(matchCcd(spec([field("Anything", { ccd: ["applicantEmail"] })]), CASE_TYPE, { keepSet: true }));
+
+    expect(row?.ccdMatch).toMatchObject({ status: "existing", chosenBy: "form" });
+  });
+});
+
+describe("a date in three boxes", () => {
+  it("should not be joined across sections or over a row that is not a field", () => {
+    const day = field("Date of birth Day");
+    const month = field("Month");
+    const year = field("Year");
+    const crossing = formSpecSchema.parse({
+      form: { name: "F", formType: "F1" },
+      sections: [
+        { id: "1", title: "A", fields: [day, month] },
+        { id: "2", title: "B", fields: [year] }
+      ]
+    });
+    const blocked = spec([day, fieldSchema.parse({ role: "label", label: "Note" }), month, year]);
+
+    expect(new Set(rowsOf(matchCcd(crossing, CASE_TYPE)).map((r) => r.ccdMatch?.newField?.id ?? r.ccd[0])).size).toBeGreaterThan(1);
+    expect(rowsOf(matchCcd(blocked, CASE_TYPE))[0]?.ccd).not.toEqual(rowsOf(matchCcd(blocked, CASE_TYPE))[2]?.ccd);
+  });
+});
+
 describe("matching again", () => {
   it("should propose the same id for a new field each time, not one numbered after its own earlier proposal", () => {
     const first = matchCcd(spec([field("National insurance number")]), CASE_TYPE);

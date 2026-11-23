@@ -103,8 +103,8 @@ export const ccdMatchSchema = z.object({
   status: z.enum(CCD_STATUSES),
   candidates: z.array(z.object({ id: z.string(), type: z.string(), label: z.string().optional() })).optional(),
   newField: z.object({ id: z.string(), type: z.string() }).optional(),
-  /** Set once a person chose or typed the id, so a later match against another case type keeps it; absent for the matcher's own. */
-  chosenBy: z.literal("person").optional(),
+  /** Set when the id is not the matcher's: a person chose or typed it, or it came with the form. A later match against another case type keeps it. */
+  chosenBy: z.enum(["person", "form"]).optional(),
   /** Why the matcher decided as it did, for the person to check. */
   reason: z.string().optional()
 });

@@ -1,9 +1,9 @@
 import type { NextRequest } from "next/server";
 import { errorResponse, json } from "@/agent-api/http";
-import { MAX_FIELDS_BYTES } from "@/assistant/ccd-jobs";
+import { CCD_CONFIGS, MAX_FIELDS_BYTES, PRODUCT } from "@/assistant/ccd-jobs";
 import { readBytes } from "@/assistant/upload-body";
 import { MAX_BULK_SCAN_FILE_BYTES, MAX_CASE_TYPE_ID, MAX_UPLOAD_BODY_BYTES, mebibytes } from "@/bulk-scan/limits";
-import { importUpload, type PickedCaseType, parseCcdFields, specName, uploadFileName } from "@/bulk-scan/spec";
+import { importUpload, parseCcdFields, specName, type UploadedCaseType, uploadFileName } from "@/bulk-scan/spec";
 import { createSpecs } from "@/bulk-scan/spec-store";
 import { prisma } from "@/store/prisma";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
@@ -55,10 +55,8 @@ export async function POST(request: NextRequest): Promise<Response> {
   });
 }
 
-const CONFIGS = ["config-generator", "json", "hybrid"] as const;
-
 /** The case type the person picked, with the fields their pod fetched for it; none when no fields came, and a refusal when they are not what the job answers. */
-function pickedCaseType(caseType: string, product: unknown, config: unknown, fields: unknown): PickedCaseType | Response | undefined {
+function pickedCaseType(caseType: string, product: unknown, config: unknown, fields: unknown): UploadedCaseType | Response | undefined {
   if (typeof fields !== "string" || fields === "") {
     return undefined;
   }
@@ -68,7 +66,7 @@ function pickedCaseType(caseType: string, product: unknown, config: unknown, fie
   if (caseType === "") {
     return errorResponse(400, "name the case type the fields belong to");
   }
-  if (typeof product !== "string" || !/^[a-z][a-z0-9-]{0,39}$/.test(product)) {
+  if (typeof product !== "string" || !PRODUCT.test(product)) {
     return errorResponse(400, "name the product that defines the case type");
   }
   let rows: unknown;
@@ -77,6 +75,6 @@ function pickedCaseType(caseType: string, product: unknown, config: unknown, fie
   } catch {
     return errorResponse(400, "the case type's fields are not JSON");
   }
-  const found = CONFIGS.find((c) => c === config);
+  const found = CCD_CONFIGS.find((c) => c === config);
   return { caseType, product, ...(found ? { config: found } : {}), fields: parseCcdFields(rows) };
 }

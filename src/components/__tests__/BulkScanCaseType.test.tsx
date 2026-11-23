@@ -68,9 +68,42 @@ afterEach(() => {
   push.mockReset();
 });
 
+/** The list is asked for when the person opens the picker, not when the page loads. */
+async function openPicker(): Promise<void> {
+  await userEvent.click(select());
+  await waitFor(() => expect(select().querySelectorAll("option").length).toBeGreaterThan(1));
+}
+
 const select = () => screen.getByLabelText("Service and CCD case type (optional)") as HTMLSelectElement;
 
 describe("the case type picker", () => {
+  it("should ask for nothing until the person opens it, and once for the page", async () => {
+    fetchMock.mockImplementation(podJobs());
+    render(<BulkScanCaseTypePicker conversationId="c1" selected={null} onPicked={vi.fn()} onCleared={vi.fn()} />);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(asked).toEqual([]);
+    await openPicker();
+    await userEvent.click(select());
+    await userEvent.tab();
+    await userEvent.click(select());
+    expect(asked.filter((a) => a.kind === "ccd.case-types")).toHaveLength(1);
+  });
+
+  it.each(["script_missing", "tool_missing", "not_cloned", "unknown_case_type"])(
+    "should offer no Try again for %s, which would fail the same way",
+    async (error) => {
+      fetchMock.mockImplementation(podJobs());
+      answers[0] = { kind: "ccd.case-types", answer: { status: "failed", kind: "x", error, detail: "it will not work" } };
+      render(<BulkScanCaseTypePicker conversationId="c1" selected={null} onPicked={vi.fn()} onCleared={vi.fn()} />);
+
+      await userEvent.click(select());
+
+      expect((await screen.findByRole("alert")).textContent).toContain("it will not work");
+      expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+    }
+  );
+
   it("should say why the fields could not be read and read them again on Try again", async () => {
     fetchMock.mockImplementation(podJobs());
     answers[1] = {
@@ -80,7 +113,7 @@ describe("the case type picker", () => {
     const onPicked = vi.fn();
     render(<BulkScanCaseTypePicker conversationId="c1" selected={null} onPicked={onPicked} onCleared={vi.fn()} />);
 
-    await waitFor(() => expect(select().disabled).toBe(false));
+    await openPicker();
     await userEvent.selectOptions(select(), "nfdiv/NFD");
     expect((await screen.findByRole("alert")).textContent).toContain("generateCCDConfig failed");
     answers[1] = { kind: "ccd.case-type-fields", answer: { status: "done", kind: "x", result: { fields: ROWS, total: 2, omitted: 0 } } };
@@ -94,7 +127,7 @@ describe("the case type picker", () => {
     const onPicked = vi.fn();
     render(<BulkScanCaseTypePicker conversationId="c1" selected={null} onPicked={onPicked} onCleared={vi.fn()} />);
 
-    await waitFor(() => expect(select().disabled).toBe(false));
+    await openPicker();
     expect([...select().querySelectorAll("optgroup")].map((g) => g.label)).toEqual(["nfdiv", "sptribs"]);
     await userEvent.selectOptions(select(), "sptribs/CriminalInjuriesCompensation");
 
@@ -108,7 +141,7 @@ describe("the case type picker", () => {
     const onCleared = vi.fn();
     render(<BulkScanCaseTypePicker conversationId="c1" selected={{ product: "nfdiv", caseType: "NFD" }} onPicked={vi.fn()} onCleared={onCleared} />);
 
-    await waitFor(() => expect(select().disabled).toBe(false));
+    await openPicker();
     await userEvent.selectOptions(select(), "");
 
     expect(onCleared).toHaveBeenCalled();
@@ -119,7 +152,7 @@ describe("the case type picker", () => {
     answers[1] = { kind: "ccd.case-type-fields", answer: { status: "done", kind: "x", result: { fields: ROWS, total: 9000, omitted: 40 } } };
     render(<BulkScanCaseTypePicker conversationId="c1" selected={null} onPicked={vi.fn()} onCleared={vi.fn()} />);
 
-    await waitFor(() => expect(select().disabled).toBe(false));
+    await openPicker();
     await userEvent.selectOptions(select(), "nfdiv/NFD");
 
     expect(await screen.findByText(/40 were left out/)).toBeTruthy();
@@ -129,6 +162,7 @@ describe("the case type picker", () => {
     fetchMock.mockImplementation(podJobs({ status: "unsupported" }));
     render(<BulkScanCaseTypePicker conversationId="c1" selected={null} onPicked={vi.fn()} onCleared={vi.fn()} />);
 
+    await userEvent.click(select());
     expect((await screen.findByRole("alert")).textContent).toContain("needs an update");
     expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
   });
@@ -137,15 +171,16 @@ describe("the case type picker", () => {
     fetchMock.mockImplementation(podJobs());
     answers[0] = {
       kind: "ccd.case-types",
-      answer: { status: "failed", kind: "x", error: "script_missing", detail: "Your workspace has no CCD case type tool yet." }
+      answer: { status: "failed", kind: "x", error: "unreadable", detail: "Your workspace has no CCD case type tool yet." }
     };
     render(<BulkScanCaseTypePicker conversationId="c1" selected={null} onPicked={vi.fn()} onCleared={vi.fn()} />);
 
+    await userEvent.click(select());
     expect((await screen.findByRole("alert")).textContent).toContain("Your workspace has no CCD case type tool yet.");
     answers[0] = { kind: "ccd.case-types", answer: { status: "done", kind: "x", result: { case_types: CASE_TYPES } } };
     await userEvent.click(screen.getByRole("button", { name: "Try again" }));
 
-    await waitFor(() => expect(select().disabled).toBe(false));
+    await openPicker();
   });
 
   it("should say a chat is needed, and ask for nothing, when the person has none on their assistant", () => {
@@ -244,7 +279,7 @@ describe("the upload with a case type picked", () => {
     fetchMock.mockImplementation(podJobs());
     render(<BulkScanUpload podConversationId="c1" />);
 
-    await waitFor(() => expect(select().disabled).toBe(false));
+    await openPicker();
     await userEvent.selectOptions(select(), "sptribs/CriminalInjuriesCompensation");
     await waitFor(() => expect(asked.at(-1)?.kind).toBe("ccd.case-type-fields"));
     await userEvent.upload(screen.getByLabelText(/^Form:/), new File(["x"], "t210.pdf"));
@@ -291,7 +326,7 @@ describe("the editor's case type", () => {
     fetchMock.mockImplementation(podJobs());
     render(<BulkScanEditor view={view({ ccd: [] })} signOff={vi.fn()} podConversationId="c1" />);
 
-    await waitFor(() => expect(select().disabled).toBe(false));
+    await openPicker();
     await userEvent.selectOptions(select(), "sptribs/CriminalInjuriesCompensation");
 
     expect(await screen.findByText("0 new case fields to add, 1 to choose")).toBeTruthy();
@@ -304,7 +339,7 @@ describe("the editor's case type", () => {
     answers[1] = { kind: "ccd.case-type-fields", answer: { status: "pending" } };
     render(<BulkScanEditor view={view({ id: "1.1", ccd: [] })} signOff={vi.fn()} podConversationId="c1" />);
 
-    await waitFor(() => expect(select().disabled).toBe(false));
+    await openPicker();
     await userEvent.selectOptions(select(), "sptribs/CriminalInjuriesCompensation");
     const label = screen.getByLabelText("Label of 1.1") as HTMLInputElement;
     await userEvent.type(label, " (edited)");
@@ -324,11 +359,25 @@ describe("the editor's case type", () => {
     expect((screen.getByLabelText("Case type (CCD case type id)") as HTMLInputElement).value).toBe("CIC");
   });
 
+  it("should drop the picked case type's product and badges when a different one is typed", async () => {
+    fetchMock.mockImplementation(podJobs());
+    render(<BulkScanEditor view={view({ id: "1.1", ccd: [] })} signOff={vi.fn()} podConversationId="c1" />);
+
+    await openPicker();
+    await userEvent.selectOptions(select(), "sptribs/CriminalInjuriesCompensation");
+    expect(await screen.findByText("Unsure")).toBeTruthy();
+    await userEvent.type(screen.getByLabelText("Case type (CCD case type id)"), "X");
+
+    expect(screen.queryByText("Unsure")).toBeNull();
+    expect(select().value).toBe("");
+    expect((screen.getByLabelText("Case type (CCD case type id)") as HTMLInputElement).value).toBe("CriminalInjuriesCompensationX");
+  });
+
   it("should refresh the status of a CCD id the person set without changing it", async () => {
     fetchMock.mockImplementation(podJobs());
     render(<BulkScanEditor view={view({ ccd: ["cicCaseEmail"] })} signOff={vi.fn()} podConversationId="c1" />);
 
-    await waitFor(() => expect(select().disabled).toBe(false));
+    await openPicker();
     await userEvent.selectOptions(select(), "sptribs/CriminalInjuriesCompensation");
 
     expect(await screen.findByText("Existing")).toBeTruthy();

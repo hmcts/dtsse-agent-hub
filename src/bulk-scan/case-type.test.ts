@@ -71,6 +71,15 @@ describe("withCaseType", () => {
 });
 
 describe("withoutCaseType", () => {
+  it("should keep an id that came with the form, through a pick and through no case type", () => {
+    const sheet = spec(field("First name", { ccd: ["sheetId"] }));
+
+    const picked = withCaseType(sheet, CHOICE, FIELDS);
+    expect(rows(picked)[0]).toMatchObject({ ccd: ["sheetId"], ccdMatch: { status: "new", chosenBy: "form" } });
+    expect(rows(withCaseType(picked, { product: "pcs", caseType: "PCS" }, FIELDS))[0]?.ccd).toEqual(["sheetId"]);
+    expect(rows(withoutCaseType(picked))[0]?.ccd).toEqual(["sheetId"]);
+  });
+
   it("should clear the ids the matcher proposed and keep the ones the person chose, so a later pick does not take them for the person's", () => {
     const matched = withCaseType(spec(field("First name"), field("Email address")), CHOICE, FIELDS);
     const chosen = chooseCandidate(matched, 0, 1, "applicantEmailTwo");
@@ -117,6 +126,12 @@ describe("deciding an unsure row", () => {
       ccdMatch: { status: "new", newField: { id: "brandNewEmail", type: "Email" }, chosenBy: "person" }
     });
     expect(newCcdFields(typed).map((f) => f.id)).toEqual(["brandNewEmail"]);
+  });
+
+  it("should name the new field after the typed id the case type lacks, not the first typed", () => {
+    const typed = patchField(unsure(), 0, 0, { ccd: ["applicantEmail", "brandNewEmail"] });
+
+    expect(rows(typed)[0]?.ccdMatch).toMatchObject({ status: "new", newField: { id: "brandNewEmail" } });
   });
 
   it("should apply a choice to every row of an address, which share one decision", () => {

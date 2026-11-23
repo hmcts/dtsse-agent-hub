@@ -6,7 +6,7 @@ import { readWorkbook, selectSheet } from "./cells.ts";
 import type { Pattern } from "./code-keys.ts";
 import { loadCodeKeys, PATTERNS } from "./code-keys.ts";
 import type { Target } from "./codegen/index.ts";
-import { generateTarget, TARGETS } from "./codegen/index.ts";
+import { generateTarget, newCcdFieldFiles, TARGETS } from "./codegen/index.ts";
 import { unsatisfiedRules, unsatisfiedSamples } from "./codegen/scenarios.ts";
 import { classifyDrift, formatDrift, sheetInternalKeys, specKeys } from "./drift.ts";
 import { requireOneForm, selectForms } from "./form-select.ts";
@@ -221,6 +221,13 @@ async function runCodegen(opts: Map<string, string>): Promise<void> {
       save(join(out, f.path), f.content);
     }
     console.log(`${target}: ${files.length} files`);
+  }
+  const shared = newCcdFieldFiles(spec);
+  for (const f of shared) {
+    save(join(out, f.path), f.content);
+  }
+  if (shared.length > 0) {
+    console.log(`new case fields: ${shared.map((f) => f.path).join(", ")}`);
   }
   const noSample = unsatisfiedSamples(spec);
   if (noSample.length > 0) {

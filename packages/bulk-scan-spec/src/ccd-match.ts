@@ -11,6 +11,34 @@ export interface CcdField {
   hint?: string;
 }
 
+export interface CcdRow {
+  ID?: unknown;
+  Label?: unknown;
+  FieldType?: unknown;
+  FieldTypeParameter?: unknown;
+  HintText?: unknown;
+  CaseTypeID?: unknown;
+}
+
+const str = (value: unknown): string => (typeof value === "string" ? value : "");
+
+/** The rows as matching reads them, leaving out label fields and rows without an id. */
+export function ccdFieldsOf(rows: CcdRow[]): CcdField[] {
+  return rows.flatMap((r) =>
+    typeof r.ID === "string" && r.ID !== "" && r.FieldType !== "Label"
+      ? [
+          {
+            id: r.ID,
+            label: str(r.Label),
+            type: str(r.FieldType),
+            ...(str(r.FieldTypeParameter) ? { typeParameter: str(r.FieldTypeParameter) } : {}),
+            ...(str(r.HintText) ? { hint: str(r.HintText) } : {})
+          }
+        ]
+      : []
+  );
+}
+
 /** The CCD FieldTypes a new field may be given: every one the matcher proposes, and the ones a person may pick instead. */
 export const NEW_FIELD_TYPES = [
   "Text",
@@ -170,6 +198,11 @@ function sectionWords(title: string): string[] {
 
 const tokenStop = (w: string): boolean => tokens(w).size === 0;
 
+/** Whether `next` is a field of `ref`'s own section whose label is `word`: the box after a day box, not a row of another kind or section. */
+function isBox(next: Ref | undefined, ref: Ref, word: RegExp): boolean {
+  return next !== undefined && next.s === ref.s && next.field.role === "field" && word.test(firstLine(next.field.label));
+}
+
 function subjectsOf(refs: Ref[], titles: string[]): Subject[] {
   const subjects: Subject[] = [];
   const used = new Set<number>();
@@ -212,13 +245,8 @@ function subjectsOf(refs: Ref[], titles: string[]): Subject[] {
       return;
     }
     const day = /^(.*?)\s*\bday\b\s*$/i.exec(label);
-    if (
-      day &&
-      refs[i + 1] &&
-      /^month$/i.test(firstLine((refs[i + 1] as Ref).field.label)) &&
-      refs[i + 2] &&
-      /^year$/i.test(firstLine((refs[i + 2] as Ref).field.label))
-    ) {
+    const [month, year] = [refs[i + 1], refs[i + 2]];
+    if (day && isBox(month, ref, /^month$/i) && isBox(year, ref, /^year$/i)) {
       const members = [i, i + 1, i + 2];
       for (const m of members) {
         used.add(m);
@@ -330,7 +358,7 @@ function proposedId(subject: Subject, prefix: string, taken: Set<string>): strin
 }
 
 /** An id a person set, typed or chose, or one that came with the form: not one the matcher proposed against some case type. */
-const isKept = (field: Field): boolean => field.ccd.length > 0 && (field.ccdMatch === undefined || field.ccdMatch.chosenBy === "person");
+const isKept = (field: Field): boolean => field.ccd.length > 0 && (field.ccdMatch === undefined || field.ccdMatch.chosenBy !== undefined);
 
 export interface MatchOptions {
   /** Leave the ids a person set, typed or chose alone and only say whether they exist; ids the matcher proposed are matched again. */
@@ -382,7 +410,9 @@ export function matchCcd(spec: FormSpec, fields: CcdField[], options: MatchOptio
       ccd = set;
       const here = set.every((id) => known.has(id));
       const prior = subject.members.map((m) => (refs[m] as Ref).field.ccdMatch?.newField).find(Boolean);
-      const chosen = subject.members.some((m) => (refs[m] as Ref).field.ccdMatch?.chosenBy === "person") ? ({ chosenBy: "person" } as const) : {};
+      const chosen = {
+        chosenBy: subject.members.some((m) => (refs[m] as Ref).field.ccdMatch?.chosenBy === "person") ? ("person" as const) : ("form" as const)
+      };
       match = here
         ? { status: "existing", ...chosen }
         : {

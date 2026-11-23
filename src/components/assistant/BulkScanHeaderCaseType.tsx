@@ -1,7 +1,8 @@
 "use client";
 
 import type { FormSpec } from "@hmcts-cft/bulk-scan-spec";
-import { ccdCounts, ccdFieldsFromRows, withCaseType, withoutCaseType } from "@/bulk-scan/case-type";
+import { ccdFieldsOf } from "@hmcts-cft/bulk-scan-spec/ccd-match";
+import { ccdCounts, withCaseType, withoutCaseType } from "@/bulk-scan/case-type";
 import { BulkScanCaseTypePicker } from "@/components/assistant/BulkScanCaseTypePicker";
 
 /**
@@ -22,9 +23,7 @@ export function BulkScanHeaderCaseType({
         conversationId={conversationId}
         selected={ccdCaseTypeId && ccdProduct ? { product: ccdProduct, caseType: ccdCaseTypeId } : null}
         onPicked={(picked) =>
-          onSpec((current) =>
-            withCaseType(current, { product: picked.product, caseType: picked.caseType, config: picked.config }, ccdFieldsFromRows(picked.rows))
-          )
+          onSpec((current) => withCaseType(current, { product: picked.product, caseType: picked.caseType, config: picked.config }, ccdFieldsOf(picked.rows)))
         }
         onCleared={() => onSpec(withoutCaseType)}
       />

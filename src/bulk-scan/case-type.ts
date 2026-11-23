@@ -33,7 +33,7 @@ export function withCaseType(spec: FormSpec, choice: CaseTypeChoice, fields: Ccd
   return matchCcd(unreviewed, fields, { keepSet: true });
 }
 
-/** The spec with no case type: its fields lose their status and the ids the matcher proposed, and keep the ids a person set or chose. */
+/** The spec with no case type: its fields lose their status and the ids the matcher proposed, and keep the ids a person set or chose and those that came with the form. */
 export function withoutCaseType(spec: FormSpec): FormSpec {
   const { ccdCaseTypeId: _id, ccdProduct: _product, ccdConfig: _config, ...form } = spec.form;
   return {
@@ -41,7 +41,7 @@ export function withoutCaseType(spec: FormSpec): FormSpec {
     form,
     sections: spec.sections.map((section) => ({
       ...section,
-      fields: section.fields.map(({ ccdMatch, ...field }) => (ccdMatch !== undefined && ccdMatch.chosenBy !== "person" ? { ...field, ccd: [] } : field))
+      fields: section.fields.map(({ ccdMatch, ...field }) => (ccdMatch !== undefined && ccdMatch.chosenBy === undefined ? { ...field, ccd: [] } : field))
     }))
   };
 }
@@ -108,23 +108,4 @@ export function ccdCounts(spec: FormSpec): { newFields: number; unsure: number }
     spec.sections.flatMap((s) => s.fields.flatMap((f) => (f.ccdMatch?.status === "unsure" && f.ccdMatch.newField ? [f.ccdMatch.newField.id] : [])))
   );
   return { newFields: newCcdFields(spec).length, unsure: unsure.size };
-}
-
-/** The rows a CCD job answers, as matching reads them. */
-export function ccdFieldsFromRows(rows: readonly CcdRow[]): CcdField[] {
-  return rows.map((r) => ({
-    id: r.ID,
-    label: r.Label ?? "",
-    type: r.FieldType,
-    ...(r.FieldTypeParameter ? { typeParameter: r.FieldTypeParameter } : {}),
-    ...(r.HintText ? { hint: r.HintText } : {})
-  }));
-}
-
-export interface CcdRow {
-  ID: string;
-  Label?: string;
-  FieldType: string;
-  FieldTypeParameter?: string;
-  HintText?: string;
 }

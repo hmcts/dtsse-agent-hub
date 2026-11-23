@@ -47,12 +47,11 @@ function withTypedCcd(field: Field, known: Set<string>): Field {
     const { ccdMatch: _match, ...rest } = field;
     return rest;
   }
-  const exists = field.ccd.every((typed) => known.has(typed) || (match.candidates ?? []).some((c) => c.id === typed));
-  if (exists) {
+  const lacking = field.ccd.find((typed) => !known.has(typed) && !(match.candidates ?? []).some((c) => c.id === typed));
+  if (lacking === undefined) {
     return { ...field, ccdMatch: { status: "existing", chosenBy: "person" } };
   }
-  const type = match.newField?.type ?? "Text";
-  return { ...field, ccdMatch: { status: "new", newField: { id, type }, chosenBy: "person" } };
+  return { ...field, ccdMatch: { status: "new", newField: { id: lacking, type: match.newField?.type ?? "Text" }, chosenBy: "person" } };
 }
 
 /** The spec with one field replaced by what `change` makes of it. */

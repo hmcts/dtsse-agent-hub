@@ -27,6 +27,10 @@ export const CCD_JOB_ERRORS = [
   "unreadable"
 ] as const;
 
+/** How a service configures CCD, as the workspace's case type list says. */
+export const CCD_CONFIGS = ["config-generator", "json", "hybrid"] as const;
+export type CcdConfig = (typeof CCD_CONFIGS)[number];
+
 export const CASE_TYPE_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/;
 export const PRODUCT = /^[a-z][a-z0-9-]{0,39}$/;
 
@@ -39,7 +43,7 @@ export const CCD_CASE_TYPES = definePodJobKind({
         product: z.string().regex(PRODUCT),
         service: z.string().max(100),
         case_type: z.string().regex(CASE_TYPE_ID),
-        config: z.enum(["config-generator", "json", "hybrid"]).nullable()
+        config: z.enum(CCD_CONFIGS).nullable()
       }),
       MAX_LISTED_CASE_TYPES,
       { message: `at most ${MAX_LISTED_CASE_TYPES} case types` }

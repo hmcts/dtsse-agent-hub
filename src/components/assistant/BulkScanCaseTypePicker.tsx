@@ -1,7 +1,7 @@
 "use client";
 
+import type { CcdRow } from "@hmcts-cft/bulk-scan-spec/ccd-match";
 import { useEffect, useId, useRef, useState } from "react";
-import type { CcdRow } from "@/bulk-scan/case-type";
 import { type PodJobWords, runPodJob } from "@/components/assistant/podJobRun";
 import { FIELD } from "@/components/assistant/WelshParts";
 import { useHubSubscribe } from "@/components/live/HubStream";
@@ -31,10 +31,17 @@ const WORDS: PodJobWords = {
 export const WAKING_WORDS = "Your assistant is starting. This takes a minute or two, then this carries on by itself.";
 export const NO_CHAT = "Start a chat in the CFT Workspace first, so your assistant is running, and this list is read from your workspace.";
 
-type ListState = { state: "none" } | { state: "loading" } | { state: "ready"; types: ListedCaseType[] } | { state: "failed"; message: string; retry: boolean };
+type ListState =
+  | { state: "none" }
+  | { state: "idle" }
+  | { state: "loading" }
+  | { state: "ready"; types: ListedCaseType[] }
+  | { state: "failed"; message: string; retry: boolean };
 
-/** Not for an assistant that needs an update, or has no pod: the same request would be refused the same way. */
-const retryable = (status: string | undefined): boolean => status !== "unsupported" && status !== "no_pod" && status !== "assistant_gone";
+/** Failures that repeat: an assistant that needs an update or has no pod, and a workspace or case type the same request finds wrong again. */
+const FINAL_CODES: readonly string[] = ["script_missing", "tool_missing", "not_cloned", "unknown_case_type", "ambiguous_case_type"];
+const retryable = (outcome: { status?: string; code?: string }): boolean =>
+  outcome.status !== "unsupported" && outcome.status !== "no_pod" && outcome.status !== "assistant_gone" && !FINAL_CODES.includes(outcome.code ?? "");
 
 const byCode = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 const keyOf = (type: Pick<ListedCaseType, "product" | "case_type">): string => `${type.product}/${type.case_type}`;
@@ -59,8 +66,7 @@ export function BulkScanCaseTypePicker({
 }>) {
   const id = useId();
   const events = useHubSubscribe("assistant_pod_job");
-  const [list, setList] = useState<ListState>(conversationId === null ? { state: "none" } : { state: "loading" });
-  const [attempt, setAttempt] = useState(0);
+  const [list, setList] = useState<ListState>(conversationId === null ? { state: "none" } : { state: "idle" });
   const [fetching, setFetching] = useState<string | null>(null);
   const [waking, setWaking] = useState(false);
   const [error, setError] = useState<{ message: string; value: string; retry: boolean } | null>(null);
@@ -69,12 +75,16 @@ export function BulkScanCaseTypePicker({
   eventsRef.current = events;
   const control = useRef<AbortController | null>(null);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: another attempt is what makes the list worth asking for again
-  useEffect(() => {
+  const listing = useRef<AbortController | null>(null);
+
+  /** Asks the pod for the case types: when the person first opens the picker, and again on Try again. Never on page load, which would wake a stopped pod for a page that is only looked at. */
+  function loadList(): void {
     if (conversationId === null) {
       return;
     }
+    listing.current?.abort();
     const own = new AbortController();
+    listing.current = own;
     setList({ state: "loading" });
     setWaking(false);
     void runPodJob<{ case_types: ListedCaseType[] }>(conversationId, "ccd.case-types", {}, eventsRef.current, own.signal, {
@@ -83,14 +93,18 @@ export function BulkScanCaseTypePicker({
     })
       .then((outcome) => {
         setWaking(false);
-        setList(
-          outcome.ok ? { state: "ready", types: outcome.result.case_types } : { state: "failed", message: outcome.message, retry: retryable(outcome.status) }
-        );
+        setList(outcome.ok ? { state: "ready", types: outcome.result.case_types } : { state: "failed", message: outcome.message, retry: retryable(outcome) });
       })
       .catch(() => undefined);
-    return () => own.abort();
-  }, [conversationId, attempt]);
-  useEffect(() => () => control.current?.abort(), []);
+  }
+
+  useEffect(
+    () => () => {
+      control.current?.abort();
+      listing.current?.abort();
+    },
+    []
+  );
 
   async function choose(value: string): Promise<void> {
     control.current?.abort();
@@ -131,7 +145,7 @@ export function BulkScanCaseTypePicker({
           omitted: outcome.result.omitted
         });
       } else {
-        setError({ message: outcome.message, value, retry: retryable(outcome.status) });
+        setError({ message: outcome.message, value, retry: retryable(outcome) });
       }
     } catch {
       // Aborted: another case type was chosen, or the panel went away.
@@ -157,7 +171,9 @@ export function BulkScanCaseTypePicker({
         id={id}
         className={`${FIELD} max-w-md`}
         value={current}
-        disabled={disabled || list.state !== "ready" || fetching !== null}
+        disabled={disabled || list.state === "none" || fetching !== null}
+        onFocus={() => (list.state === "idle" ? loadList() : undefined)}
+        onMouseDown={() => (list.state === "idle" ? loadList() : undefined)}
         onChange={(event) => void choose(event.target.value)}
       >
         <option value="">{list.state === "loading" ? "Reading your workspace…" : "No case type"}</option>
@@ -196,7 +212,7 @@ export function BulkScanCaseTypePicker({
             <button
               type="button"
               className="rounded-lg border border-asst-line px-2.5 py-1 text-asst-text"
-              onClick={() => (error === null ? setAttempt((n) => n + 1) : void choose(error.value))}
+              onClick={() => (error === null ? loadList() : void choose(error.value))}
             >
               Try again
             </button>

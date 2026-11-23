@@ -5,7 +5,10 @@ import { type PodJobEvents, PodJobRefused, requestPodJob, waitForPodJob } from "
 export const WAKING_RETRY_MS = 3000;
 const WAKING_ATTEMPTS = 20;
 
-export type JobResult<T> = { ok: true; result: T } | { ok: false; message: string; status?: "unsupported" | "no_pod" | "assistant_gone" | "waking" };
+/** `status` is why the job could not be asked for, and `code` the error code a job that failed ended with, or `timeout`. */
+export type JobResult<T> =
+  | { ok: true; result: T }
+  | { ok: false; message: string; status?: "unsupported" | "no_pod" | "assistant_gone" | "waking"; code?: string };
 
 /** What the person is told when the job cannot be asked for, in the feature's own words. */
 export interface PodJobWords {
@@ -65,7 +68,7 @@ export async function runPodJob<T>(
       if (outcome.status === "done") {
         return { ok: true, result: outcome.result as T };
       }
-      return { ok: false, message: (words.failure ?? jobFailure)(outcome) };
+      return { ok: false, message: (words.failure ?? jobFailure)(outcome), code: outcome.status === "failed" ? (outcome.error ?? "failed") : outcome.status };
     }
   } catch (error) {
     if (signal.aborted) {

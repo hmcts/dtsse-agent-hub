@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import type { CcdField } from "./ccd-match.ts";
+import { type CcdField, type CcdRow, ccdFieldsOf } from "./ccd-match.ts";
 import { byCode } from "./compare.ts";
 
 /** The case fields of one CCD case type's definition. */
@@ -8,34 +8,6 @@ export interface CcdDefinition {
   /** The CaseTypeID the rows carry; absent when they are blank, as in a build made without the case type set. */
   caseType?: string;
   fields: CcdField[];
-}
-
-export interface CcdRow {
-  ID?: unknown;
-  Label?: unknown;
-  FieldType?: unknown;
-  FieldTypeParameter?: unknown;
-  HintText?: unknown;
-  CaseTypeID?: unknown;
-}
-
-const str = (value: unknown): string => (typeof value === "string" ? value : "");
-
-/** The rows as matching reads them, leaving out label fields and rows without an id. */
-export function ccdFieldsOf(rows: CcdRow[]): CcdField[] {
-  return rows.flatMap((r) =>
-    typeof r.ID === "string" && r.ID !== "" && r.FieldType !== "Label"
-      ? [
-          {
-            id: r.ID,
-            label: str(r.Label),
-            type: str(r.FieldType),
-            ...(str(r.FieldTypeParameter) ? { typeParameter: str(r.FieldTypeParameter) } : {}),
-            ...(str(r.HintText) ? { hint: str(r.HintText) } : {})
-          }
-        ]
-      : []
-  );
 }
 
 /** The case field rows of a definition: ids of the form's case type (or of every row when `caseType` is not given), leaving out label fields. Refuses rows that are not case fields. */
