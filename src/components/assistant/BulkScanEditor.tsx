@@ -47,7 +47,7 @@ export function BulkScanEditor({ view, signOff }: Readonly<{ view: BulkScanEdito
   const [tab, setTab] = useState<Tab>("Edit");
   const latest = Math.max(...view.versions.map((v) => v.version));
   const superseded = view.version !== latest;
-  const toReview = reviewTotal(spec);
+  const toReview = reviewTotal(spec, problems.fields);
   const current = view.versions.find((v) => v.version === view.version);
 
   function change(next: FormSpec, moved = false): void {

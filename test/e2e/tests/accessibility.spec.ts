@@ -195,17 +195,21 @@ test.describe("accessibility @nightly", () => {
       .setInputFiles({ name: `${name}.pdf`, mimeType: "application/pdf", buffer: Buffer.from(await pdf.save()) });
     await page.getByRole("button", { name: "Start the form" }).click();
 
+    let opened = false;
     try {
       await expect(page.getByRole("tab", { name: "Edit" })).toBeVisible();
+      opened = true;
       await page.getByRole("button", { name: "Add a branch" }).click();
       await page.getByRole("button", { name: "Add a condition to branch 1" }).click();
       await expectNoViolations(page);
     } finally {
-      // The spec belongs to the nightly persona and nothing else removes it, so it is deleted whether the audit passed or not.
-      await page.goto("/assistant/bulk-scan");
-      await page.getByRole("button", { name: `Delete ${name}`, exact: true }).click();
-      await page.getByRole("button", { name: `Delete ${name} and all its versions` }).click();
-      await expect(page.getByRole("link", { name })).toHaveCount(0);
+      // The spec belongs to the nightly persona and nothing else removes it, so once the editor has opened it is deleted whether the audit passed or not.
+      if (opened) {
+        await page.goto("/assistant/bulk-scan");
+        await page.getByRole("button", { name: `Delete ${name}`, exact: true }).click();
+        await page.getByRole("button", { name: `Delete ${name} and all its versions` }).click();
+        await expect(page.getByRole("link", { name })).toHaveCount(0);
+      }
     }
   });
 

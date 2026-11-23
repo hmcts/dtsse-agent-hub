@@ -340,7 +340,7 @@ describe("bulk scan editor", () => {
     expect(sent.sections[0].fields[1]).toMatchObject({ label: "Full name", maxLength: 40, minLength: 5, keys: ["name", "other"], ccd: ["ccdName"] });
   });
 
-  it("should mark the fields the schema refused, and keep the person's edits", async () => {
+  it("should mark the fields the schema refused and keep the person's edits when a save is refused", async () => {
     fetchMock.mockResolvedValue(
       reply(422, {
         error: "the spec has errors",
@@ -375,7 +375,7 @@ describe("bulk scan editor", () => {
     within(document.body).getByText("Unsaved changes");
   });
 
-  it("should offer an input type and mandatory choice per field", async () => {
+  it("should offer an input type and mandatory choice per field when a field is open", async () => {
     const user = userEvent.setup();
     render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
 
@@ -411,7 +411,7 @@ describe("typing into the editor", () => {
     expect([field.keys, field.ccd]).toEqual([["nameTwo"], ["ccdA", "ccdB"]]);
   });
 
-  it("should take digits only in the max length box, so it is never not a number", async () => {
+  it("should take digits only in the max length box, so it is never not a number, when letters are typed", async () => {
     fetchMock.mockResolvedValue(reply(201, { version: 2 }));
     const user = userEvent.setup();
     render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);

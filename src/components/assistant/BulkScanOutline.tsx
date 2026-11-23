@@ -191,9 +191,7 @@ export function BulkScanOutline({
                     disabled={forced}
                     className={`grid h-7 w-6 shrink-0 place-items-center rounded-lg text-asst-muted hover:bg-asst-hover disabled:opacity-40 ${FOCUS}`}
                   >
-                    <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className={`h-3 w-3 transition-transform ${open ? "rotate-90" : ""}`}>
-                      <path d="M7 5l6 5-6 5V5Z" />
-                    </svg>
+                    <Icon name="caret" className={`h-3 w-3 transition-transform ${open ? "rotate-90" : ""}`} />
                   </button>
                   <button
                     type="button"

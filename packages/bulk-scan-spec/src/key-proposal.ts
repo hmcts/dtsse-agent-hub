@@ -1,6 +1,5 @@
-import { cap } from "./codegen/java.ts";
 import type { Confidence } from "./similarity.ts";
-import { assign, confidenceOf, tokens, words } from "./similarity.ts";
+import { assign, cap, confidenceOf, tokens, words } from "./similarity.ts";
 
 export interface KeySlot {
   /** The words that name this one key: a checkbox's own label, a text box's label. */

@@ -86,11 +86,12 @@ function regroup(field: Field): Field {
   if (!field.group) {
     return field;
   }
-  if (field.keys.length < 2) {
+  const keys = field.keys.filter((key) => key !== "");
+  if (keys.length < 2) {
     const { group: _group, ...rest } = field;
     return rest;
   }
-  const options = field.keys.map((key) => field.group?.options.find((o) => o.key === key) ?? { key });
+  const options = keys.map((key) => field.group?.options.find((o) => o.key === key) ?? { key });
   return { ...field, group: { ...field.group, size: options.length, options } };
 }
 
@@ -256,11 +257,12 @@ export function withGroup(field: Field, grouped: boolean): Field {
     const { group: _group, ...rest } = field;
     return rest;
   }
-  return field.keys.length < 2
+  const keys = field.keys.filter((key) => key !== "");
+  return keys.length < 2
     ? field
     : {
         ...field,
-        group: { kind: "xor", size: field.keys.length, options: field.keys.map((key) => field.group?.options.find((o) => o.key === key) ?? { key }) }
+        group: { kind: "xor", size: keys.length, options: keys.map((key) => field.group?.options.find((o) => o.key === key) ?? { key }) }
       };
 }
 

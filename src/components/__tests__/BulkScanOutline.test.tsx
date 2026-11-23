@@ -108,7 +108,7 @@ describe("the outline", () => {
     expect(within(line("1.3")).getByText("Mandatory if…")).toBeTruthy();
   });
 
-  it("should move focus between lines with the arrow keys and open one with Enter", async () => {
+  it("should move focus between lines with the arrow keys and open one with Enter when the keys are pressed", async () => {
     const user = setup();
     line("1.1").focus();
 
@@ -413,6 +413,18 @@ describe("adding a field", () => {
 });
 
 describe("fields a save refused", () => {
+  it("should count a refused field as needing review in the outline and the header when a save is refused", async () => {
+    const user = setup();
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ error: "bad", issues: [{ path: "sections.0.fields.0.keys.0", message: "bad key" }] }), { status: 422 })
+    );
+    await user.type(screen.getByLabelText("Label"), "!");
+    await user.click(screen.getByRole("button", { name: /^Save as version/ }));
+
+    expect(await screen.findByRole("button", { name: /^Needs review \(3\)/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "3 to review" })).toBeTruthy();
+  });
+
   it("should list the refused field and open its collapsed section when a filter would hide it", async () => {
     const user = setup();
     fetchMock.mockResolvedValue(

@@ -288,7 +288,29 @@ describe("allowed values", () => {
   });
 });
 
+describe("allowed values after another change", () => {
+  it("should show the values the new input type gives when a checkbox field becomes text", async () => {
+    const user = await setup();
+    expect((screen.getByLabelText("marriage value 1") as HTMLInputElement).value).toBe("true");
+    await select(user, "Input type", "text");
+
+    expect(screen.queryByLabelText("marriage value 1")).toBeNull();
+    await select(user, "Input type", "checkbox");
+    expect((screen.getByLabelText("marriage value 1") as HTMLInputElement).value).toBe("true");
+  });
+});
+
 describe("XoR groups", () => {
+  it("should leave a blank key out of the group when the box is ticked with a blank key present", async () => {
+    const user = await setup();
+    await user.click(screen.getByRole("button", { name: "Add a key" }));
+    await user.click(screen.getByRole("checkbox", { name: /mutually exclusive/ }));
+
+    const grouped = (await savedField(user, 0)) as { group: { size: number; options: { key: string }[] } };
+    expect(grouped.group.options.map((o) => o.key)).toEqual(["marriage", "civil"]);
+    expect(grouped.group.size).toBe(2);
+  });
+
   it("should make a field's keys a group when the box is ticked, and ungroup them when it is cleared", async () => {
     const user = await setup();
     const box = screen.getByRole("checkbox", { name: /mutually exclusive/ }) as HTMLInputElement;

@@ -21,8 +21,9 @@ export function needsReview(field: Field): boolean {
   return field.todo.length > 0 || (field.review ?? []).length > 0;
 }
 
-export function reviewTotal(spec: FormSpec): number {
-  return spec.sections.reduce((sum, section) => sum + section.fields.filter(needsReview).length, 0);
+/** How many fields want a person: those with an open marker or TODO, and those the last save refused. */
+export function reviewTotal(spec: FormSpec, refused: ReadonlyMap<string, unknown> = new Map()): number {
+  return spec.sections.reduce((sum, section, s) => sum + section.fields.filter((field, f) => needsReview(field) || refused.has(`${s}.${f}`)).length, 0);
 }
 
 /** The words a field is found by: its id, label, keys and CCD ids. */

@@ -105,8 +105,11 @@ function LengthInput({ value, onChange }: Readonly<{ value: number | undefined; 
  */
 function AllowedValues({ field, keyName, onField }: Readonly<{ field: Field; keyName: string; onField: ChangeField }>) {
   const { values, blankAllowed } = allowedFor(field, keyName);
-  const [rows, setRows] = useState<string[]>(values);
+  const [typed, setTyped] = useState<string[]>(values);
   const focusNext = useRef(false);
+  // The boxes are what was typed while they still say the field's values, which an outside change such as a new input type does not.
+  const rows = typed.filter((v) => v !== "").join("\n") === values.join("\n") ? typed : values;
+  const setRows = setTyped;
   const send = (next: string[]) => {
     setRows(next);
     onField((f) =>
