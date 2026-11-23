@@ -2,18 +2,13 @@
 
 import type { Field } from "@hmcts-cft/bulk-scan-spec";
 import { casePathWords, clearLogicText, conditionsOf, type FieldPatch, logicWords, withRequired, wordsOf, writeAsRules } from "@/bulk-scan/edit";
+import { MANDATORY_CHOICES } from "@/bulk-scan/outline";
 import { BulkScanConditions, type KeyChoice } from "@/components/assistant/BulkScanConditions";
 import { BulkScanSends } from "@/components/assistant/BulkScanKeys";
 import { Card, CommitInput, FOCUS, Icon, INPUT, Labelled, SMALL_BUTTON } from "@/components/assistant/BulkScanParts";
 import { BulkScanRules } from "@/components/assistant/BulkScanRules";
 
 const INPUT_TYPES = ["text", "checkbox", "date", "qr", "none"] as const;
-const MANDATORY = [
-  ["mandatory", "Mandatory"],
-  ["optional", "Optional"],
-  ["conditional", "Mandatory if…"],
-  ["not-read", "Not read"]
-] as const;
 
 /** What a field's editor needs of the form around it. */
 export interface FormChoices {
@@ -83,7 +78,7 @@ export function BulkScanFieldDetails({
           </Labelled>
           <Labelled label="Mandatory">
             <select value={field.mandatory} className={INPUT} onChange={(e) => onPatch({ mandatory: e.target.value as FieldPatch["mandatory"] })}>
-              {MANDATORY.map(([value, label]) => (
+              {MANDATORY_CHOICES.map(({ value, label }) => (
                 <option key={value} value={value}>
                   {label}
                 </option>
@@ -113,7 +108,7 @@ export function BulkScanFieldDetails({
         <Labelled label="CCD ids, separated by spaces">
           <CcdIds value={field.ccd} onChange={(ccd) => onPatch({ ccd })} />
         </Labelled>
-        <p className="text-xs text-asst-muted">Status: not recorded yet</p>
+        {/* Slot for the picker's per-field status line (PR #297); nothing is drawn until that component exists. */}
       </Card>
 
       <Card title="Rules">

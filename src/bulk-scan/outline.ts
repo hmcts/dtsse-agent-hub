@@ -18,8 +18,7 @@ export function fieldFlags(field: Field): FieldFlags {
 
 /** A field needs review while it has a review marker or a TODO that nobody has marked done. */
 export function needsReview(field: Field): boolean {
-  const { review, todo } = fieldFlags(field);
-  return review + todo > 0;
+  return field.todo.length > 0 || (field.review ?? []).length > 0;
 }
 
 export function reviewTotal(spec: FormSpec): number {
@@ -37,14 +36,17 @@ export function fieldName(field: Field, index: number): string {
   return field.id || field.keys[0] || field.label.split("\n")[0]?.trim() || `field ${index + 1}`;
 }
 
-export type Badge = "mandatory" | "optional" | "conditional" | "not-read";
+/** The choices for whether a field is mandatory, with the words the select and the outline's badge both show. */
+export const MANDATORY_CHOICES: readonly { value: Field["mandatory"]; label: string }[] = [
+  { value: "mandatory", label: "Mandatory" },
+  { value: "optional", label: "Optional" },
+  { value: "conditional", label: "Mandatory if…" },
+  { value: "not-read", label: "Not read" }
+];
 
-export const BADGE_WORDS: Record<Badge, string> = {
-  mandatory: "Mandatory",
-  optional: "Optional",
-  conditional: "Conditional",
-  "not-read": "Not read"
-};
+export function mandatoryLabel(mandatory: Field["mandatory"]): string {
+  return MANDATORY_CHOICES.find((choice) => choice.value === mandatory)?.label ?? mandatory;
+}
 
 const RANK = { low: 0, medium: 1, high: 2 } as const;
 
@@ -77,4 +79,42 @@ export function afterSectionRemove(selection: Selection | null, s: number, count
     return { section: Math.min(s, count - 2), field: null };
   }
   return { section: selection.section > s ? selection.section - 1 : selection.section, field: selection.field };
+}
+
+/** What keeps a section and its fields the same across edits, which rebuild the objects: a key for each. */
+export interface Identity {
+  key: string;
+  fields: string[];
+}
+
+export function identitiesOf(spec: FormSpec, fresh: () => string): Identity[] {
+  return spec.sections.map((section) => ({ key: fresh(), fields: section.fields.map(fresh) }));
+}
+
+/**
+ * The identities after `prev` became `next`. A section or field that is the same object keeps its key wherever it
+ * went; one that was replaced in place (an edit rebuilds the object) takes the key of the one it replaced; one that is
+ * new gets a fresh key, and a removed one's key is dropped.
+ */
+export function reconcileIdentities(prev: FormSpec, next: FormSpec, ids: readonly Identity[], fresh: () => string): Identity[] {
+  const sectionAt = new Map(prev.sections.map((section, i) => [section, i]));
+  const fieldKey = new Map(prev.sections.flatMap((section, s) => section.fields.map((field, f): [Field, string] => [field, ids[s]?.fields[f] ?? ""])));
+  const kept = new Set(next.sections.flatMap((section) => section.fields));
+  return next.sections.map((section, j) => {
+    const same = sectionAt.get(section);
+    const replaced = same === undefined && !next.sections.includes(prev.sections[j] as never) ? j : undefined;
+    const from = same ?? replaced;
+    const before = from === undefined ? undefined : prev.sections[from];
+    return {
+      key: (from === undefined ? undefined : ids[from]?.key) ?? fresh(),
+      fields: section.fields.map((field, f) => {
+        const own = fieldKey.get(field);
+        if (own) {
+          return own;
+        }
+        const old = before?.fields[f];
+        return old && !kept.has(old) ? (fieldKey.get(old) ?? fresh()) : fresh();
+      })
+    };
+  });
 }

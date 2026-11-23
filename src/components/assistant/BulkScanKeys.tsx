@@ -2,8 +2,14 @@
 
 import type { Field } from "@hmcts-cft/bulk-scan-spec";
 import { useRef, useState } from "react";
-import { allowedFor, maxLengthOf, withAllowed, withGroup } from "@/bulk-scan/edit";
+import { allowedFor, maxLengthOf, withAllowed, withGroup, wordsOf } from "@/bulk-scan/edit";
 import { AddButton, Card, CommitInput, IconButton, INPUT, Labelled } from "@/components/assistant/BulkScanParts";
+
+/** A key box's text as keys: words split on spaces, commas or new lines, so a pasted list becomes several keys and none holds a space. */
+const keysOf = (text: string): string[] => {
+  const words = wordsOf(text);
+  return words.length > 0 ? words : [""];
+};
 
 type ChangeField = (change: (field: Field) => Field) => void;
 
@@ -27,7 +33,7 @@ export function BulkScanSends({
           // A key is named by its place until it is typed, which is also what a rename follows.
           <div key={i} className="flex items-end gap-1.5">
             <Labelled label={field.keys.length > 1 ? `Key ${i + 1}` : "Key"} className="flex-1">
-              <CommitInput label={`Key ${i + 1}`} value={key} onCommit={(text) => onKeys(field.keys.map((k, at) => (at === i ? text.trim() : k)))} />
+              <CommitInput label={`Key ${i + 1}`} value={key} onCommit={(text) => onKeys(field.keys.flatMap((k, at) => (at === i ? keysOf(text) : [k])))} />
             </Labelled>
             <IconButton label={`Remove key ${i + 1}`} icon="remove" onClick={() => onKeys(field.keys.filter((_, at) => at !== i))} />
           </div>

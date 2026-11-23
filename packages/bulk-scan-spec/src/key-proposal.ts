@@ -106,19 +106,33 @@ function stemOf(key: string): string {
 export function proposeKeys(slots: KeySlot[], houseKeys: string[], tags: string[]): ProposedKey[] {
   const contexts = slots.map((s) => new Set([...tokens(s.label), ...tokens(s.context)]));
   const own = slots.map((s) => tokens(s.label));
+  const lower = new Set(houseKeys.map((k) => k.toLowerCase()));
+  const dated = slots.flatMap((slot, i) => (slot.parts ? [i] : []));
+  const partsOf = (i: number): readonly string[] => slots[i]?.parts ?? [];
+
+  // A house key ending Day, Month or Year is a date's, never a plain slot's: a date slot takes its stem, and a stem whose
+  // three keys all exist is the house's own date.
+  const stems = [...new Set(houseKeys.flatMap((k) => (/(Day|Month|Year)$/.test(k) ? [stemOf(k)] : [])))];
+  const dateMatches = assign(
+    dated.map((i) => ({ context: contexts[i] as Set<string>, own: own[i] as Set<string> })),
+    stems.map((stem) => ({ id: stem, words: tokens(stem) })),
+    MIN_REUSE,
+    true
+  );
+  const dateOf = new Map([...dateMatches].map(([n, match]) => [dated[n] as number, match]));
+  const reservedByDates = new Set([...dateOf].flatMap(([i, match]) => partsOf(i).map((part) => `${match.candidate}${part}`.toLowerCase())));
+
   const reused = assign(
-    contexts.map((context, i) => ({ context, own: own[i] as Set<string> })),
-    houseKeys.map((id) => ({ id, words: tokens(id) })),
+    contexts.map((context, i) => ({ context: slots[i]?.parts ? new Set<string>() : context, own: own[i] as Set<string> })),
+    houseKeys.filter((k) => !reservedByDates.has(k.toLowerCase())).map((id) => ({ id, words: tokens(id) })),
     MIN_REUSE,
     true
   );
   const prefixes = prefixesOf(houseKeys).map((p) => ({ prefix: p, words: tokens(p) }));
-  const used = new Set([...reused.values()].map((r) => r.candidate.toLowerCase()));
-  const lower = new Set(houseKeys.map((k) => k.toLowerCase()));
+  const used = new Set([...reused.values()].map((r) => r.candidate.toLowerCase()).concat([...reservedByDates]));
   return slots.map((slot, i) => {
     const subject = slot.section ? subjectOf(slot.section) : undefined;
     const tag = tags[i] ?? "";
-    const match = reused.get(i);
     const party = prefixes
       .map((p) => ({ ...p, shared: [...p.words].filter((w) => contexts[i]?.has(w)).length }))
       .filter((p) => p.shared > 0)
@@ -127,25 +141,22 @@ export function proposeKeys(slots: KeySlot[], houseKeys: string[], tags: string[
     const proposed = party ? `${party.prefix}${capitalised(base)}` : base;
     const { parts } = slot;
     if (parts) {
-      if (match) {
-        used.delete(match.candidate.toLowerCase());
-      }
-      const stem = stemOf(match?.candidate ?? proposed);
-      const house = parts.every((part) => lower.has(`${stem}${part}`.toLowerCase()));
-      const final = house ? stem : distinct(stem, (k) => parts.some((part) => used.has(`${k}${part}`.toLowerCase())), tag, subject);
+      const match = dateOf.get(i);
+      const final = match ? match.candidate : distinct(proposed, (k) => parts.some((part) => used.has(`${k}${part}`.toLowerCase())), tag, subject);
       const keys = parts.map((part) => `${final}${part}`);
       for (const key of keys) {
         used.add(key.toLowerCase());
       }
-      const confidence = house ? confidenceOf(match?.score ?? 1) : match ? confidenceOf(match.score) : "low";
+      const house = match !== undefined && keys.every((key) => lower.has(key.toLowerCase()));
+      const confidence = match ? confidenceOf(match.score) : "low";
       const reason = house
-        ? `matches existing keys ${keys.join(", ")}`
+        ? `matches existing keys ${keys.join(", ")} (similarity ${match.score.toFixed(2)})`
         : match
-          ? `keys ${keys.join(", ")}: the stem of existing key ${match.candidate} with ${parts.join(", ")} (similarity ${match.score.toFixed(2)})`
+          ? `keys ${keys.join(", ")}: built on the existing ${final} keys with ${parts.join(", ")} (similarity ${match.score.toFixed(2)})`
           : `keys ${keys.join(", ")}: new from the label with ${parts.join(", ")}${party ? ` and house prefix ${party.prefix}` : ""}`;
-      const made = keys.map((key) => ({ key, reason, confidence }));
-      return { key: keys[0] as string, reason, confidence, parts: made };
+      return { key: keys[0] as string, reason, confidence, parts: keys.map((key) => ({ key, reason, confidence })) };
     }
+    const match = reused.get(i);
     if (match) {
       return {
         key: match.candidate,

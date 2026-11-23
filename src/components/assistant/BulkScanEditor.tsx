@@ -2,10 +2,10 @@
 
 import type { FormSpec } from "@hmcts-cft/bulk-scan-spec";
 import { useRouter } from "next/navigation";
-import { type KeyboardEvent, useState } from "react";
+import { type KeyboardEvent, useRef, useState } from "react";
 import { issuesByField, patchHeader } from "@/bulk-scan/edit";
 import type { BulkScanEditorView } from "@/bulk-scan/editor-view";
-import { reviewTotal } from "@/bulk-scan/outline";
+import { identitiesOf, reconcileIdentities, reviewTotal } from "@/bulk-scan/outline";
 import { BulkScanDetail } from "@/components/assistant/BulkScanDetail";
 import { BulkScanDownloads } from "@/components/assistant/BulkScanDownloads";
 import { BulkScanOutline, type Selection } from "@/components/assistant/BulkScanOutline";
@@ -38,6 +38,9 @@ export function BulkScanEditor({ view, signOff }: Readonly<{ view: BulkScanEdito
   const [saving, setSaving] = useState(false);
   const [problems, setProblems] = useState<ReturnType<typeof issuesByField>>({ fields: new Map(), form: [] });
   const [error, setError] = useState<string | null>(null);
+  const counter = useRef(0);
+  const fresh = () => `k${counter.current++}`;
+  const [ids, setIds] = useState(() => identitiesOf(view.spec, fresh));
   const [selection, setSelection] = useState<Selection | null>(() => firstSelection(view.spec));
   const [query, setQuery] = useState("");
   const [onlyReview, setOnlyReview] = useState(false);
@@ -48,6 +51,7 @@ export function BulkScanEditor({ view, signOff }: Readonly<{ view: BulkScanEdito
   const current = view.versions.find((v) => v.version === view.version);
 
   function change(next: FormSpec, moved = false): void {
+    setIds(reconcileIdentities(spec, next, ids, fresh));
     setSpec(next);
     setDirty(true);
     if (moved) {
@@ -135,6 +139,8 @@ export function BulkScanEditor({ view, signOff }: Readonly<{ view: BulkScanEdito
             <BulkScanOutline
               spec={spec}
               selection={selection}
+              ids={ids}
+              reviewCount={toReview}
               issues={problems.fields}
               query={query}
               onlyReview={onlyReview}
@@ -144,7 +150,7 @@ export function BulkScanEditor({ view, signOff }: Readonly<{ view: BulkScanEdito
               onOnlyReview={setOnlyReview}
             />
           </div>
-          <BulkScanDetail spec={spec} selection={selection} issues={problems.fields} onSpec={change} />
+          <BulkScanDetail spec={spec} ids={ids} selection={selection} issues={problems.fields} onSpec={change} />
         </div>
       </div>
 

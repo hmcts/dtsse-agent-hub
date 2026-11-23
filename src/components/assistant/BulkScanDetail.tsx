@@ -3,7 +3,7 @@
 import type { FormSpec } from "@hmcts-cft/bulk-scan-spec";
 import { useId } from "react";
 import { ccdIds, clearReview, clearTodo, type FieldPatch, formKeys, mapField, patchField, patchSection, sheetIds } from "@/bulk-scan/edit";
-import { fieldName } from "@/bulk-scan/outline";
+import { fieldName, type Identity } from "@/bulk-scan/outline";
 import { BulkScanFieldDetails, type FormChoices } from "@/components/assistant/BulkScanFieldDetails";
 import type { Selection } from "@/components/assistant/BulkScanOutline";
 import { Card, INPUT, Labelled } from "@/components/assistant/BulkScanParts";
@@ -11,10 +11,17 @@ import { Card, INPUT, Labelled } from "@/components/assistant/BulkScanParts";
 /** The right-hand pane: the cards of the field chosen in the outline, or the id and title of the section chosen. */
 export function BulkScanDetail({
   spec,
+  ids,
   selection,
   issues,
   onSpec
-}: Readonly<{ spec: FormSpec; selection: Selection | null; issues: ReadonlyMap<string, string[]>; onSpec: (spec: FormSpec, moved: boolean) => void }>) {
+}: Readonly<{
+  spec: FormSpec;
+  ids: readonly Identity[];
+  selection: Selection | null;
+  issues: ReadonlyMap<string, string[]>;
+  onSpec: (spec: FormSpec, moved: boolean) => void;
+}>) {
   const headingId = useId();
   const section = selection ? spec.sections[selection.section] : undefined;
   if (!selection || !section) {
@@ -61,7 +68,7 @@ export function BulkScanDetail({
         {name === firstLine ? name : `${name} ${firstLine}`.trim()}
       </h2>
       <BulkScanFieldDetails
-        key={`${s}.${f}`}
+        key={ids[s]?.fields[f] ?? `${s}.${f}`}
         field={field}
         choices={choices}
         problems={issues.get(`${s}.${f}`) ?? []}

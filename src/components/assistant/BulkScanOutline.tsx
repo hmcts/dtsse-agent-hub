@@ -6,21 +6,20 @@ import { addField, addSection, moveField, moveSection, removeField, removeSectio
 import {
   afterSectionMove,
   afterSectionRemove,
-  BADGE_WORDS,
-  type Badge,
   fieldFlags,
   fieldName,
+  type Identity,
+  mandatoryLabel,
   matchesQuery,
   needsReview,
   reviewRank,
-  reviewTotal,
   type Selection
 } from "@/bulk-scan/outline";
 import { AddButton, FOCUS, Icon, IconButton, type IconName, INPUT } from "@/components/assistant/BulkScanParts";
 
 export type { Selection };
 
-const BADGE_CLASS: Record<Badge, string> = {
+const BADGE_CLASS: Record<Field["mandatory"], string> = {
   mandatory: "border border-asst-accent-line bg-asst-active text-asst-accent-soft",
   optional: "border border-asst-line text-asst-muted",
   conditional: "bg-asst-warn/25 text-asst-text",
@@ -44,6 +43,8 @@ function Flag({ icon, label, count }: Readonly<{ icon: IconName; label: string; 
 export function BulkScanOutline({
   spec,
   selection,
+  ids,
+  reviewCount,
   issues,
   query,
   onlyReview,
@@ -54,6 +55,10 @@ export function BulkScanOutline({
 }: Readonly<{
   spec: FormSpec;
   selection: Selection | null;
+  /** The stable key of each section and of its fields, which survives edits and moves. */
+  ids: readonly Identity[];
+  /** How many fields have open markers or TODOs. */
+  reviewCount: number;
   issues: ReadonlyMap<string, string[]>;
   query: string;
   onlyReview: boolean;
@@ -66,7 +71,6 @@ export function BulkScanOutline({
   const list = useRef<HTMLDivElement>(null);
   const headingId = useId();
   const filtering = onlyReview || query.trim() !== "";
-  const total = reviewTotal(spec);
 
   const toggle = (key: string) =>
     setClosed((before) => {
@@ -82,7 +86,7 @@ export function BulkScanOutline({
   const rows = spec.sections.map((section, s) => ({
     section,
     s,
-    key: section.id || `#${s}`,
+    key: ids[s]?.key ?? `s${s}`,
     fields: section.fields.map((field, f) => ({ field, f })).filter(({ field, f }) => shown(field, `${s}.${f}`))
   }));
   const none = filtering && rows.every((row) => row.fields.length === 0);
@@ -132,7 +136,7 @@ export function BulkScanOutline({
         >
           <span className="flex items-center gap-1.5">
             <Icon name="review" className="h-3.5 w-3.5" />
-            {`Needs review (${total})`}
+            {`Needs review (${reviewCount})`}
           </span>
           <span className="text-asst-muted">{onlyReview ? "Showing only these" : "Show only these"}</span>
         </button>
@@ -144,7 +148,7 @@ export function BulkScanOutline({
           <ul aria-label="Fields that need review, lowest confidence first" className="flex flex-col gap-0.5">
             {flagged.map(({ field, f, row }) => (
               <FieldLine
-                key={`${row.s}.${f}`}
+                key={ids[row.s]?.fields[f] ?? `${row.s}.${f}`}
                 field={field}
                 name={fieldName(field, f)}
                 section={`${row.section.id} ${row.section.title}`.trim()}
@@ -243,7 +247,7 @@ export function BulkScanOutline({
                   <ul id={listId} aria-label={`Fields of section ${s + 1}`} className="flex flex-col gap-0.5 pl-3">
                     {fields.map(({ field, f }) => (
                       <FieldLine
-                        key={f}
+                        key={ids[s]?.fields[f] ?? f}
                         field={field}
                         name={fieldName(field, f)}
                         selected={selection?.section === s && selection.field === f}
@@ -331,7 +335,7 @@ function FieldLine({
           <span className="w-9 shrink-0 truncate font-mono text-xs text-asst-muted">{field.id ?? ""}</span>{" "}
           <span className="min-w-0 flex-1 truncate">{field.label.split("\n")[0] || field.keys[0] || "Untitled field"}</span>{" "}
           <span className="shrink-0 text-[11px] text-asst-muted">{field.inputType}</span>{" "}
-          <span className={`shrink-0 rounded-full px-1.5 py-px text-[11px] ${BADGE_CLASS[field.mandatory]}`}>{BADGE_WORDS[field.mandatory]}</span>{" "}
+          <span className={`shrink-0 rounded-full px-1.5 py-px text-[11px] ${BADGE_CLASS[field.mandatory]}`}>{mandatoryLabel(field.mandatory)}</span>{" "}
           {flags.review > 0 ? (
             <Flag icon="review" count={flags.review} label={`${flags.review} ${flags.review === 1 ? "review marker" : "review markers"}`} />
           ) : null}

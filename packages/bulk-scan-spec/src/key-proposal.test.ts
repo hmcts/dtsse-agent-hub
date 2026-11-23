@@ -98,13 +98,42 @@ describe("a date's keys", () => {
     const house = ["soleOrApplicant1DateOfBirthDay", "soleOrApplicant1DateOfBirthMonth", "soleOrApplicant1DateOfBirthYear"];
     const [one] = proposeKeys([{ ...date, context: "soleOrApplicant1" }], house, ["Q1"]);
     expect(one?.parts?.map((k) => k.key)).toEqual(house);
-    expect(one?.reason).toBe(`matches existing keys ${house.join(", ")}`);
+    expect(one?.reason).toContain(`matches existing keys ${house.join(", ")}`);
   });
 
   it("should strip a trailing Day, Month or Year from a reused key before adding the parts when the house lacks the other two", () => {
     const [one] = proposeKeys([date], ["dateOfBirthDay"], ["Q1"]);
     expect(one?.parts?.map((k) => k.key)).toEqual(["dateOfBirthDay", "dateOfBirthMonth", "dateOfBirthYear"]);
     expect(one?.reason).toContain("dateOfBirthDay, dateOfBirthMonth, dateOfBirthYear");
+  });
+
+  it("should give a house date's three keys to one date slot only when two slots want them", () => {
+    const house = ["soleOrApplicant1DateOfBirthDay", "soleOrApplicant1DateOfBirthMonth", "soleOrApplicant1DateOfBirthYear"];
+    const [one, two] = proposeKeys(
+      [
+        { ...date, context: "soleOrApplicant1" },
+        { ...date, context: "soleOrApplicant1" }
+      ],
+      house,
+      ["Q1", "Q2"]
+    );
+    const keys = [...(one?.parts ?? []), ...(two?.parts ?? [])].map((k) => k.key);
+    expect(new Set(keys).size).toBe(6);
+    expect(one?.parts?.map((k) => k.key)).toEqual(house);
+  });
+
+  it("should not hand a house date's Month key to a text slot when the date took the triple", () => {
+    const house = ["soleOrApplicant1DateOfBirthDay", "soleOrApplicant1DateOfBirthMonth", "soleOrApplicant1DateOfBirthYear"];
+    const keys = proposeKeys(
+      [
+        { ...date, context: "soleOrApplicant1" },
+        { label: "Month of birth", context: "soleOrApplicant1 date of birth month" }
+      ],
+      house,
+      ["Q1", "Q2"]
+    );
+    const all = [...(keys[0]?.parts ?? []).map((k) => k.key), keys[1]?.key];
+    expect(new Set(all).size).toBe(4);
   });
 
   it("should name every key the date carries in its reason when the keys are new", () => {

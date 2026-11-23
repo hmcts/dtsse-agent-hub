@@ -105,7 +105,7 @@ describe("the outline", () => {
     expect(within(line("1.2")).getByRole("img", { name: "Unparsed English" })).toBeTruthy();
     expect(within(line("1.1")).queryByRole("img")).toBeNull();
     expect(within(line("1.1")).getByText("Mandatory")).toBeTruthy();
-    expect(within(line("1.3")).getByText("Conditional")).toBeTruthy();
+    expect(within(line("1.3")).getByText("Mandatory if…")).toBeTruthy();
   });
 
   it("should move focus between lines with the arrow keys and open one with Enter", async () => {
@@ -278,6 +278,67 @@ describe("sections that move or collapse", () => {
     const user = setup();
     await user.click(screen.getByRole("button", { name: "Remove section 1" }));
     expect(screen.getByRole("heading", { level: 2, name: "Section 1" })).toBeTruthy();
+  });
+});
+
+describe("what stays with a section or field", () => {
+  const twin = (over: object = {}) =>
+    view({
+      spec: {
+        form: { name: "T210", formType: "T210" },
+        sections: [
+          {
+            id: "1",
+            title: "A",
+            fields: [
+              field({
+                id: "1.1",
+                label: "One",
+                keys: ["k"],
+                emits: [
+                  { key: "k", value: "a1" },
+                  { key: "k", value: "a2" }
+                ]
+              }),
+              field({ id: "1.2", label: "Two", keys: ["k"], emits: [{ key: "k", value: "b1" }] })
+            ]
+          },
+          { id: "1", title: "B", fields: [field({ id: "2.1", label: "Three", keys: ["z"] })] }
+        ],
+        composes: [],
+        pageOrder: [],
+        expectedDocuments: []
+      },
+      ...over
+    });
+
+  it("should show the next field's own allowed values when the field before it is removed", async () => {
+    const user = userEvent.setup();
+    render(<BulkScanEditor view={twin()} signOff={vi.fn()} />);
+    expect((screen.getByLabelText("k value 2") as HTMLInputElement).value).toBe("a2");
+    await user.click(screen.getByRole("button", { name: "Remove 1.1" }));
+
+    expect((screen.getByLabelText("k value 1") as HTMLInputElement).value).toBe("b1");
+    expect(screen.queryByLabelText("k value 2")).toBeNull();
+  });
+
+  it("should collapse only the section pressed when two sections share an id", async () => {
+    const user = userEvent.setup();
+    render(<BulkScanEditor view={twin()} signOff={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Collapse section 1" }));
+
+    expect(screen.getByRole("button", { name: "Expand section 1" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Collapse section 2" })).toBeTruthy();
+  });
+
+  it("should keep a section collapsed when its id is edited", async () => {
+    const user = userEvent.setup();
+    render(<BulkScanEditor view={twin()} signOff={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Collapse section 1" }));
+    await user.click(screen.getByRole("button", { name: /^1 A/ }));
+    await user.type(screen.getByLabelText("Section ID"), "9");
+
+    expect(screen.getByRole("button", { name: "Expand section 1" })).toBeTruthy();
   });
 });
 

@@ -1,6 +1,18 @@
 import type { Field, FormSpec } from "@hmcts-cft/bulk-scan-spec";
 import { describe, expect, it } from "vitest";
-import { afterSectionMove, afterSectionRemove, fieldFlags, fieldName, matchesQuery, needsReview, reviewRank, reviewTotal } from "./outline.ts";
+import {
+  afterSectionMove,
+  afterSectionRemove,
+  fieldFlags,
+  fieldName,
+  identitiesOf,
+  mandatoryLabel,
+  matchesQuery,
+  needsReview,
+  reconcileIdentities,
+  reviewRank,
+  reviewTotal
+} from "./outline.ts";
 
 const field = (over: Partial<Field>): Field => ({
   role: "field",
@@ -55,7 +67,7 @@ describe("matchesQuery", () => {
 });
 
 describe("fieldName", () => {
-  it("should prefer the id, then the first key, then the label, then the place", () => {
+  it("should name a field by its id, else its first key, else its label, else its place when the earlier ones are missing", () => {
     expect(fieldName(field({ id: "1.1", keys: ["k"], label: "L" }), 0)).toBe("1.1");
     expect(fieldName(field({ keys: ["k"], label: "L" }), 0)).toBe("k");
     expect(fieldName(field({ label: "L" }), 0)).toBe("L");
@@ -64,7 +76,7 @@ describe("fieldName", () => {
 });
 
 describe("reviewRank", () => {
-  it("should rank a TODO or low marker first, then medium, then high, and an unflagged field last", () => {
+  it("should rank a TODO or low marker first, then medium, then high, and an unflagged field last when fields differ in confidence", () => {
     const marker = (confidence: "low" | "medium" | "high") => ({ about: "key" as const, reason: "r", confidence });
     expect(reviewRank(field({ todo: ["TODO: a"] }))).toBe(0);
     expect(reviewRank(field({ review: [marker("high"), marker("low")] }))).toBe(0);
@@ -93,5 +105,59 @@ describe("afterSectionRemove", () => {
     expect(afterSectionRemove({ section: 2, field: 1 }, 2, 3)).toEqual({ section: 1, field: null });
     expect(afterSectionRemove({ section: 0, field: 1 }, 0, 3)).toEqual({ section: 0, field: null });
     expect(afterSectionRemove({ section: 0, field: 1 }, 0, 1)).toBeNull();
+  });
+});
+
+describe("mandatoryLabel", () => {
+  it("should word each kind once when it is shown in a select or a badge", () => {
+    expect(["mandatory", "optional", "conditional", "not-read"].map((m) => mandatoryLabel(m as Field["mandatory"]))).toEqual([
+      "Mandatory",
+      "Optional",
+      "Mandatory if…",
+      "Not read"
+    ]);
+  });
+});
+
+describe("reconcileIdentities", () => {
+  const sec = (id: string, fields: Field[]) => ({ id, title: id, fields });
+  const make = () => {
+    let n = 0;
+    return () => `k${n++}`;
+  };
+  const a = field({ id: "a" });
+  const b = field({ id: "b" });
+  const c = field({ id: "c" });
+  const spec = { sections: [sec("1", [a, b]), sec("1", [c])] } as unknown as FormSpec;
+
+  it("should keep every key when a field is edited in place, which rebuilds only its object", () => {
+    const fresh = make();
+    const ids = identitiesOf(spec, fresh);
+    const edited = { sections: [{ ...spec.sections[0], fields: [{ ...a, label: "x" }, b] }, spec.sections[1]] } as unknown as FormSpec;
+    expect(reconcileIdentities(spec, edited, ids, fresh)).toEqual(ids);
+  });
+
+  it("should keep the other fields' keys when the first field is removed", () => {
+    const fresh = make();
+    const ids = identitiesOf(spec, fresh);
+    const removed = { sections: [{ ...spec.sections[0], fields: [b] }, spec.sections[1]] } as unknown as FormSpec;
+    expect(reconcileIdentities(spec, removed, ids, fresh)[0]?.fields).toEqual([ids[0]?.fields[1]]);
+  });
+
+  it("should carry a section's key and its fields' keys when sections swap places, even when their ids are equal", () => {
+    const fresh = make();
+    const ids = identitiesOf(spec, fresh);
+    const swapped = { sections: [spec.sections[1], spec.sections[0]] } as unknown as FormSpec;
+    expect(reconcileIdentities(spec, swapped, ids, fresh)).toEqual([ids[1], ids[0]]);
+  });
+
+  it("should keep a section's key when its id is edited, and give a new field a new key when it is added", () => {
+    const fresh = make();
+    const ids = identitiesOf(spec, fresh);
+    const next = { sections: [{ ...spec.sections[0], id: "9", fields: [a, b, field({})] }, spec.sections[1]] } as unknown as FormSpec;
+    const result = reconcileIdentities(spec, next, ids, fresh);
+    expect(result[0]?.key).toBe(ids[0]?.key);
+    expect(result[0]?.fields.slice(0, 2)).toEqual(ids[0]?.fields);
+    expect(new Set(result.flatMap((r) => r.fields)).size).toBe(4);
   });
 });

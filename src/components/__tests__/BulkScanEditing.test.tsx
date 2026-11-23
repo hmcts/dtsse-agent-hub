@@ -190,6 +190,18 @@ describe("the keys card", () => {
     expect(await savedField(user, 1)).toMatchObject({ regex: "^[A-Z]+$", minLength: 2, maxLength: 9 });
   });
 
+  it("should split pasted text on spaces and commas into separate keys when the box is left", async () => {
+    const user = await setup();
+    await open(user, "1.2");
+    const key = screen.getByLabelText("Key 1");
+    await user.clear(key);
+    await user.type(key, "alpha, beta  gamma");
+    await user.tab();
+
+    expect(((await savedField(user, 1)) as { keys: string[] }).keys).toEqual(["alpha", "beta", "gamma"]);
+    expect(screen.getByLabelText("Key 3")).toBeTruthy();
+  });
+
   it("should add and remove keys when their buttons are pressed", async () => {
     const user = await setup();
     await open(user, "1.2");
@@ -202,6 +214,11 @@ describe("the keys card", () => {
 });
 
 describe("the where-it-goes card", () => {
+  it("should draw no status line until the picker provides one", () => {
+    render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
+    expect(screen.queryByText(/Status:/)).toBeNull();
+  });
+
   it("should send the CCD ids as words when the box is left", async () => {
     const user = await setup();
     const box = screen.getByLabelText("CCD ids");
