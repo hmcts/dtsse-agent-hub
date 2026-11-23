@@ -66,15 +66,21 @@ export async function fromPdf(input: FromPdfInput): Promise<FromPdfResult> {
     return { bundle: bundleSchema.parse({ forms: [{ form }] }), checklist: [], needsReview: { reason, promptText: promptFor(input.pdf, content) } };
   }
   const drafts = draftFields(content);
-  const slots = drafts.flatMap((d) => d.slotLabels.map((label) => ({ label, context: `${d.sectionTitle} ${d.question}`, section: d.sectionTitle })));
+  const slots = drafts.flatMap((d) =>
+    d.slotLabels.map((label) => ({
+      label,
+      context: `${d.sectionTitle} ${d.question}`,
+      section: d.sectionTitle,
+      ...(d.dateParts ? { parts: d.dateParts } : {})
+    }))
+  );
   const tags = drafts.flatMap((d) => d.slotLabels.map(() => `Q${(d.field.id ?? `p${d.page}`).replace(/\./g, "_")}`));
   const keys = proposeKeys(slots, input.houseKeys ?? [], tags);
   let next = 0;
   const withKeys = drafts.map((d) => {
     const slotKeys = keys.slice(next, next + d.slotLabels.length);
     next += d.slotLabels.length;
-    const base = slotKeys[0];
-    const mine = d.dateParts && base ? d.dateParts.map((part) => ({ ...base, key: `${base.key}${part}` })) : slotKeys;
+    const mine = slotKeys.flatMap((k) => k.parts ?? [k]);
     return { d, mine };
   });
   const ccd = proposeCcd(

@@ -470,40 +470,6 @@ export function issuesByField(issues: readonly { path: string; message: string }
   return { fields, form };
 }
 
-export interface ReviewLine {
-  /** `section.field` index. */
-  at: string;
-  section: number;
-  field: number;
-  /** Position among the field's review markers. */
-  index: number;
-  where: string;
-  about: string;
-  reason: string;
-  confidence: "low" | "medium" | "high";
-}
-
-const RANK = { low: 0, medium: 1, high: 2 } as const;
-
-/** Every guess a PDF's draft marked for a person to confirm, lowest confidence first. */
-export function reviewChecklist(spec: FormSpec): ReviewLine[] {
-  const lines = spec.sections.flatMap((section, s) =>
-    section.fields.flatMap((field, f) =>
-      (field.review ?? []).map((r, index) => ({
-        at: `${s}.${f}`,
-        section: s,
-        field: f,
-        index,
-        where: [field.id, field.label].filter(Boolean).join(" ") || field.keys[0] || "field",
-        about: r.about,
-        reason: r.reason,
-        confidence: r.confidence
-      }))
-    )
-  );
-  return lines.sort((a, b) => RANK[a.confidence] - RANK[b.confidence]);
-}
-
 /** A field's rules as the transformation sheet words them; the English the sheet kept when the field has no rules. */
 export function logicWords(field: Field): string {
   return (field.rules.length > 0 || field.logicPreamble ? renderLogic(field.rules, field.logicPreamble) : field.logicText) ?? "";

@@ -54,10 +54,11 @@ export function BulkScanDetail({
     ccd: ccdIds(spec)
   };
   const name = fieldName(field, f);
+  const firstLine = field.label.split("\n")[0]?.trim() ?? "";
   return (
     <section aria-labelledby={headingId} className="flex min-w-0 flex-col gap-4">
       <h2 id={headingId} className="truncate text-base font-semibold">
-        {`${name}${field.label && name !== field.label ? ` ${field.label.split("\n")[0]}` : ""}`}
+        {name === firstLine ? name : `${name} ${firstLine}`.trim()}
       </h2>
       <BulkScanFieldDetails
         key={`${s}.${f}`}

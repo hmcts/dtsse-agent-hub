@@ -177,7 +177,7 @@ describe("finding fields", () => {
     expect(screen.getByRole("status").textContent).toBe("No fields match.");
   });
 
-  it("should keep only the fields with open markers or TODOs when Needs review is on", async () => {
+  it("should list the flagged fields as one flat list when Needs review is on, each with its section", async () => {
     const user = setup();
     const toggle = screen.getByRole("button", { name: /^Needs review \(2\)/ });
     expect(toggle.getAttribute("aria-pressed")).toBe("false");
@@ -185,15 +185,51 @@ describe("finding fields", () => {
     await user.click(toggle);
 
     expect(toggle.getAttribute("aria-pressed")).toBe("true");
-    expect(outlineLines().map((b) => b.textContent)).toEqual([
-      expect.stringContaining("Appeal"),
-      expect.stringContaining("Review date"),
-      expect.stringContaining("Decision"),
-      expect.stringContaining("Decision date")
-    ]);
+    expect(outlineLines().map((b) => b.textContent)).toEqual([expect.stringContaining("Review date"), expect.stringContaining("Decision date")]);
+    expect(within(line("1.2")).getByText("1 Appeal")).toBeTruthy();
+    expect(within(line("2.1")).getByText("2 Decision")).toBeTruthy();
 
     await user.click(toggle);
     expect(line("1.1")).toBeTruthy();
+  });
+
+  it("should order the flagged fields by their lowest open confidence, low first, when Needs review is on", async () => {
+    const marker = (confidence: string) => [{ about: "key", reason: "r", confidence }];
+    const user = userEvent.setup();
+    render(
+      <BulkScanEditor
+        view={view({
+          spec: {
+            form: { name: "T210", formType: "T210" },
+            sections: [
+              {
+                id: "1",
+                title: "A",
+                fields: [
+                  field({ id: "1.1", label: "High one", keys: ["a"], review: marker("high") }),
+                  field({ id: "1.2", label: "Medium one", keys: ["b"], review: marker("medium") })
+                ]
+              },
+              {
+                id: "2",
+                title: "B",
+                fields: [
+                  field({ id: "2.1", label: "Low one", keys: ["c"], review: marker("low") }),
+                  field({ id: "2.2", label: "Todo one", keys: ["d"], todo: ["TODO: x"] })
+                ]
+              }
+            ],
+            composes: [],
+            pageOrder: [],
+            expectedDocuments: []
+          }
+        })}
+        signOff={vi.fn()}
+      />
+    );
+    await user.click(screen.getByRole("button", { name: /^Needs review/ }));
+
+    expect(outlineLines().map((b) => b.textContent?.match(/(High|Medium|Low|Todo) one/)?.[0])).toEqual(["Low one", "Todo one", "Medium one", "High one"]);
   });
 
   it("should count down when a field's last marker is done while Needs review is on", async () => {
@@ -213,6 +249,72 @@ describe("finding fields", () => {
 
     expect(screen.getByRole("tab", { name: "Edit" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("button", { name: /^Needs review/ }).getAttribute("aria-pressed")).toBe("true");
+  });
+});
+
+describe("sections that move or collapse", () => {
+  it("should keep a collapsed section collapsed when it moves", async () => {
+    const user = setup();
+    await user.click(screen.getByRole("button", { name: "Collapse section 1" }));
+    await user.click(screen.getByRole("button", { name: "Move section 1 down" }));
+
+    expect(screen.getByRole("button", { name: "Expand section 2" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Collapse section 1" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^2\.1 / })).toBeTruthy();
+  });
+
+  it("should keep the open field open when another section moves or is removed", async () => {
+    const user = setup();
+    await user.click(line("2.1"));
+    await user.click(screen.getByRole("button", { name: "Move section 1 down" }));
+    expect(line("2.1").getAttribute("aria-current")).toBe("true");
+    await user.click(screen.getByRole("button", { name: "Remove section 2" }));
+
+    expect(line("2.1").getAttribute("aria-current")).toBe("true");
+    expect(screen.getByRole("heading", { level: 2, name: "2.1 Decision date" })).toBeTruthy();
+  });
+
+  it("should open the section beside it when the removed section held the open field", async () => {
+    const user = setup();
+    await user.click(screen.getByRole("button", { name: "Remove section 1" }));
+    expect(screen.getByRole("heading", { level: 2, name: "Section 1" })).toBeTruthy();
+  });
+});
+
+describe("fields a save refused", () => {
+  it("should list the refused field and open its collapsed section when a filter would hide it", async () => {
+    const user = setup();
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ error: "bad", issues: [{ path: "sections.1.fields.0.keys.0", message: "bad key" }] }), { status: 422 })
+    );
+    await user.type(screen.getByLabelText("Label"), "!");
+    await user.click(screen.getByRole("button", { name: "Collapse section 2" }));
+    await user.click(screen.getByRole("button", { name: /^Save as version/ }));
+
+    expect((await screen.findByRole("button", { name: "Collapse section 2" })).getAttribute("aria-expanded")).toBe("true");
+    await user.type(screen.getByRole("searchbox", { name: "Search fields" }), "zzz");
+    expect(line("2.1")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^1\.1 / })).toBeNull();
+  });
+});
+
+describe("the open field's heading", () => {
+  it("should show a label once when the field has no id or key and the label has a padded first line", () => {
+    render(
+      <BulkScanEditor
+        view={view({
+          spec: {
+            form: { name: "T210", formType: "T210" },
+            sections: [{ id: "1", title: "A", fields: [field({ label: "  Solo  \nsecond line", inputType: "none" })] }],
+            composes: [],
+            pageOrder: [],
+            expectedDocuments: []
+          }
+        })}
+        signOff={vi.fn()}
+      />
+    );
+    expect(screen.getByRole("heading", { level: 2, name: "Solo" })).toBeTruthy();
   });
 });
 
@@ -289,6 +391,11 @@ describe("the header and tabs", () => {
     expect((screen.getByLabelText("Form name") as HTMLInputElement).value).toBe("T210");
     expect(screen.getByLabelText("PO box")).toBeTruthy();
     expect(screen.getByLabelText("Case type (CCD case type id)")).toBeTruthy();
+  });
+
+  it("should show the UK day a version was saved on when it was saved after midnight BST", () => {
+    setup({ versions: [{ ...VERSIONS[1], savedAt: "2026-07-01T23:30:00Z" }] });
+    expect(within(screen.getByRole("region", { name: "Form details" })).getByText(/saved by Ann, 2 July 2026/)).toBeTruthy();
   });
 
   it("should switch panels with the arrow keys when a tab has focus", async () => {

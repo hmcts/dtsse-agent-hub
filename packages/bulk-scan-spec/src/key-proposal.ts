@@ -8,12 +8,16 @@ export interface KeySlot {
   context: string;
   /** The section's own title, whose subject names a key that another section already has. */
   section?: string;
+  /** The suffixes of a slot that carries several keys, such as a date's Day, Month and Year: its keys share one stem. */
+  parts?: readonly string[];
 }
 
 export interface ProposedKey {
   key: string;
   reason: string;
   confidence: Confidence;
+  /** The keys of a slot with `parts`, in order; `key` is the first. */
+  parts?: ProposedKey[];
 }
 
 const MIN_REUSE = 0.55;
@@ -66,20 +70,33 @@ export function subjectOf(title: string): string | undefined {
     .at(-1);
 }
 
-/** The key, led by the section's subject when it is already used, and suffixed with the question's tag only when that is used too or there is no subject. */
+const capitalised = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+
+/**
+ * The first of these that `taken` allows: the key, then the key led by the section's subject, then that with the
+ * question's tag, then with the tag and a number. The subject stays in the numbered form.
+ */
+function distinct(key: string, taken: (candidate: string) => boolean, tag: string, subject?: string): string {
+  const lead = taken(key) && subject ? `${subject}${capitalised(key)}` : key;
+  let candidate = lead;
+  if (taken(candidate)) {
+    candidate = `${lead}${tag}`;
+  }
+  for (let n = 2; taken(candidate); n++) {
+    candidate = `${lead}${tag}${n}`;
+  }
+  return candidate;
+}
+
 function uniqueKey(key: string, used: Set<string>, tag: string, subject?: string): string {
-  let candidate = key;
-  if (used.has(candidate.toLowerCase()) && subject) {
-    candidate = `${subject}${key.charAt(0).toUpperCase()}${key.slice(1)}`;
-  }
-  if (used.has(candidate.toLowerCase())) {
-    candidate = `${candidate}${tag}`;
-  }
-  for (let n = 2; used.has(candidate.toLowerCase()); n++) {
-    candidate = `${key}${tag}${n}`;
-  }
+  const candidate = distinct(key, (k) => used.has(k.toLowerCase()), tag, subject);
   used.add(candidate.toLowerCase());
   return candidate;
+}
+
+/** A reused or proposed key without its trailing Day, Month or Year, which a date's own keys add back. */
+function stemOf(key: string): string {
+  return key.replace(/(Day|Month|Year)$/, "");
 }
 
 /**
@@ -97,8 +114,38 @@ export function proposeKeys(slots: KeySlot[], houseKeys: string[], tags: string[
   );
   const prefixes = prefixesOf(houseKeys).map((p) => ({ prefix: p, words: tokens(p) }));
   const used = new Set([...reused.values()].map((r) => r.candidate.toLowerCase()));
+  const lower = new Set(houseKeys.map((k) => k.toLowerCase()));
   return slots.map((slot, i) => {
+    const subject = slot.section ? subjectOf(slot.section) : undefined;
+    const tag = tags[i] ?? "";
     const match = reused.get(i);
+    const party = prefixes
+      .map((p) => ({ ...p, shared: [...p.words].filter((w) => contexts[i]?.has(w)).length }))
+      .filter((p) => p.shared > 0)
+      .sort((a, b) => b.shared - a.shared || b.words.size - a.words.size)[0];
+    const base = camelCase(slot.label, party ? new Set(words(party.prefix)) : undefined) || "field";
+    const proposed = party ? `${party.prefix}${capitalised(base)}` : base;
+    const { parts } = slot;
+    if (parts) {
+      if (match) {
+        used.delete(match.candidate.toLowerCase());
+      }
+      const stem = stemOf(match?.candidate ?? proposed);
+      const house = parts.every((part) => lower.has(`${stem}${part}`.toLowerCase()));
+      const final = house ? stem : distinct(stem, (k) => parts.some((part) => used.has(`${k}${part}`.toLowerCase())), tag, subject);
+      const keys = parts.map((part) => `${final}${part}`);
+      for (const key of keys) {
+        used.add(key.toLowerCase());
+      }
+      const confidence = house ? confidenceOf(match?.score ?? 1) : match ? confidenceOf(match.score) : "low";
+      const reason = house
+        ? `matches existing keys ${keys.join(", ")}`
+        : match
+          ? `keys ${keys.join(", ")}: the stem of existing key ${match.candidate} with ${parts.join(", ")} (similarity ${match.score.toFixed(2)})`
+          : `keys ${keys.join(", ")}: new from the label with ${parts.join(", ")}${party ? ` and house prefix ${party.prefix}` : ""}`;
+      const made = keys.map((key) => ({ key, reason, confidence }));
+      return { key: keys[0] as string, reason, confidence, parts: made };
+    }
     if (match) {
       return {
         key: match.candidate,
@@ -106,14 +153,8 @@ export function proposeKeys(slots: KeySlot[], houseKeys: string[], tags: string[
         confidence: confidenceOf(match.score)
       };
     }
-    const party = prefixes
-      .map((p) => ({ ...p, shared: [...p.words].filter((w) => contexts[i]?.has(w)).length }))
-      .filter((p) => p.shared > 0)
-      .sort((a, b) => b.shared - a.shared || b.words.size - a.words.size)[0];
-    const base = camelCase(slot.label, party ? new Set(words(party.prefix)) : undefined) || "field";
-    const key = party ? `${party.prefix}${base.charAt(0).toUpperCase()}${base.slice(1)}` : base;
     return {
-      key: uniqueKey(key, used, tags[i] ?? "", slot.section ? subjectOf(slot.section) : undefined),
+      key: uniqueKey(proposed, used, tag, subject),
       reason: party ? `new key from the label with house prefix ${party.prefix}` : "new key from the label; no existing key matched",
       confidence: "low"
     };

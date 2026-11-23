@@ -13,11 +13,12 @@ import { FOCUS, INPUT, Labelled } from "@/components/assistant/BulkScanParts";
 import { BulkScanSimulator } from "@/components/assistant/BulkScanSimulator";
 import { BulkScanVersions, type SignOffAction } from "@/components/assistant/BulkScanVersions";
 import { PRIMARY } from "@/components/assistant/WelshParts";
+import { ukDate } from "@/web/format";
 
 const TABS = ["Edit", "Simulate", "Download", "Versions"] as const;
 type Tab = (typeof TABS)[number];
 
-const day = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+const day = (iso: string) => ukDate(new Date(iso));
 
 /** The first thing there is to look at: the first field of the first section that has one, else the first section. */
 function firstSelection(spec: FormSpec): Selection | null {

@@ -31,7 +31,6 @@ import {
   removeField,
   removeRule,
   removeSection,
-  reviewChecklist,
   whenOf,
   withAllowed,
   withAssignments,
@@ -108,18 +107,6 @@ describe("issues", () => {
     ]);
     expect(fields.get("0.1")).toEqual(["keys.0: Too small", "bad group"]);
     expect(form).toEqual(["sections: the key is not a word", "Invalid input"]);
-  });
-});
-
-describe("review checklist", () => {
-  it("should list every marked guess, lowest confidence first, naming its field", () => {
-    expect(reviewChecklist(spec)).toEqual([{ at: "1.0", section: 1, field: 0, index: 0, where: "2.1", about: "key", reason: "guess", confidence: "low" }]);
-    const first = spec.sections[0]?.fields[0];
-    const mixed = {
-      ...spec,
-      sections: [{ ...(spec.sections[0] as object), fields: [{ ...first, review: [{ about: "ccd", reason: "r", confidence: "high" }] }] }, spec.sections[1]]
-    } as unknown as FormSpec;
-    expect(reviewChecklist(mixed).map((l) => l.confidence)).toEqual(["low", "high"]);
   });
 });
 

@@ -45,3 +45,36 @@ export const BADGE_WORDS: Record<Badge, string> = {
   conditional: "Conditional",
   "not-read": "Not read"
 };
+
+const RANK = { low: 0, medium: 1, high: 2 } as const;
+
+/** How soon a field wants a person: 0 for a TODO or a low-confidence marker, up to 2 for a high one, 3 when nothing is open. */
+export function reviewRank(field: Field): number {
+  const ranks = [...(field.todo.length > 0 ? [0] : []), ...(field.review ?? []).map((r) => RANK[r.confidence])];
+  return ranks.length > 0 ? Math.min(...ranks) : 3;
+}
+
+export interface Selection {
+  section: number;
+  field: number | null;
+}
+
+/** The open item after section `s` moves by `by`: the same item wherever it went. */
+export function afterSectionMove(selection: Selection | null, s: number, by: -1 | 1): Selection | null {
+  if (!selection) {
+    return null;
+  }
+  const section = selection.section === s ? s + by : selection.section === s + by ? s : selection.section;
+  return { section, field: selection.field };
+}
+
+/** The open item after section `s` is removed from `count` sections: the same item, or the section beside it when it was in the removed one. */
+export function afterSectionRemove(selection: Selection | null, s: number, count: number): Selection | null {
+  if (!selection || count <= 1) {
+    return null;
+  }
+  if (selection.section === s) {
+    return { section: Math.min(s, count - 2), field: null };
+  }
+  return { section: selection.section > s ? selection.section - 1 : selection.section, field: selection.field };
+}
