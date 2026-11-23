@@ -11,6 +11,25 @@ export interface CcdField {
   hint?: string;
 }
 
+/** The CCD FieldTypes a new field may be given: every one the matcher proposes, and the ones a person may pick instead. */
+export const NEW_FIELD_TYPES = [
+  "Text",
+  "TextArea",
+  "Email",
+  "PhoneUK",
+  "Postcode",
+  "Number",
+  "Date",
+  "DateTime",
+  "YesOrNo",
+  "FixedRadioList",
+  "FixedList",
+  "MultiSelectList",
+  "AddressUK",
+  "AddressGlobalUK"
+] as const;
+export type NewFieldType = (typeof NEW_FIELD_TYPES)[number];
+
 /** What a form field is, for deciding which CCD field types it can be stored in. */
 export type Shape = "text" | "date" | "yesno" | "choice" | "checkbox" | "address" | "number";
 
@@ -328,7 +347,8 @@ export function matchCcd(spec: FormSpec, fields: CcdField[], options: MatchOptio
   const refs: Ref[] = spec.sections.flatMap((section, s) => section.fields.map((field, f) => ({ s, f, field })));
   const titles = spec.sections.map((s) => s.title);
   const subjects = subjectsOf(refs, titles);
-  const taken = new Set<string>([...known, ...refs.flatMap((r) => r.field.ccd)]);
+  // The matcher's own earlier proposals are proposed again, so only ids that stay and the case type's own are taken.
+  const taken = new Set<string>([...known, ...refs.flatMap((r) => (options.keepSet && isKept(r.field) ? r.field.ccd : []))]);
   const out = new Map<number, { ccd: string[]; match: CcdMatch }>();
 
   const decisions = subjects.map((subject) => {

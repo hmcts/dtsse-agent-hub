@@ -14,6 +14,7 @@ import {
   importSip,
   importTransformSheet,
   isModelKey,
+  matchCcd,
   modelByKey,
   readsKeys,
   readWorkbookBytes,
@@ -102,13 +103,28 @@ export async function importUpload(fileName: string, bytes: Uint8Array, caseType
     if (forms.length === 0) {
       throw new HttpError(422, "that SIP has no filled-in form tab");
     }
-    return openable({ kind: "sip", forms: withCaseType(forms, caseType) });
+    return openable({ kind: "sip", forms: withPicked(withCaseType(forms, caseType), picked) });
   }
   const { spec } = readSheet(() => importTransformSheet(selectSheet(workbook, undefined)));
   if (spec.sections.every((s) => s.fields.length === 0)) {
     throw new HttpError(422, "no field rows were found in the first sheet: is it a transformation sheet?");
   }
-  return openable({ kind: "transformation sheet", forms: withCaseType([spec], caseType) });
+  return openable({ kind: "transformation sheet", forms: withPicked(withCaseType([spec], caseType), picked) });
+}
+
+/** The forms with the case type the person picked: its product and configuration in the header, and each row's ids checked against its fields, keeping those the sheet has. */
+function withPicked(forms: FormSpec[], picked: PickedCaseType | undefined): FormSpec[] {
+  return picked
+    ? forms.map((f) =>
+        matchCcd(
+          { ...f, form: { ...f.form, ccdCaseTypeId: picked.caseType, ccdProduct: picked.product, ...(picked.config ? { ccdConfig: picked.config } : {}) } },
+          picked.fields,
+          {
+            keepSet: true
+          }
+        )
+      )
+    : forms;
 }
 
 /** The forms with the CCD case type the person typed as their header's, when one was typed. */

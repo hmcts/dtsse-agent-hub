@@ -140,8 +140,24 @@ describe("fitFields", () => {
 });
 
 describe("scriptFailure", () => {
-  it("should word exit 127 as a missing script and cut long words", () => {
-    expect(scriptFailure("", 127).code).toBe("script_missing");
+  it("should report the script's own words for exit 127, not that the script is missing", () => {
+    const failure = scriptFailure("/ws/scripts/ccd-case-types: line 40: gradlew: command not found", 127);
+
+    expect(failure.code).toBe("failed");
+    expect(failure.detail).toContain("gradlew: command not found");
+  });
+
+  it.each([
+    ["yq not on PATH. Install via the devcontainer feature", "yq"],
+    ["jq not on PATH.", "jq"]
+  ])("should name the missing tool when the script says %s", (stderr, tool) => {
+    const failure = scriptFailure(stderr, 1);
+
+    expect(failure.code).toBe("tool_missing");
+    expect(failure.detail).toContain(tool);
+  });
+
+  it("should still cut long words", () => {
     expect(scriptFailure("x".repeat(1000), 1).detail).toHaveLength(280);
   });
 });

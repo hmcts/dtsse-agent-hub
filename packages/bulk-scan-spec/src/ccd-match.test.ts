@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type CcdField, compatible, matchCcd, newCcdFields, stylePrefix } from "./ccd-match.ts";
+import { type CcdField, compatible, matchCcd, NEW_FIELD_TYPES, newCcdFields, stylePrefix } from "./ccd-match.ts";
 import { caseDataSnippet, newCcdFieldFiles } from "./codegen/new-ccd-fields.ts";
 import { type Field, type FormSpec, fieldSchema, formSpecSchema } from "./schema.ts";
 
@@ -168,6 +168,24 @@ describe("matchCcd", () => {
   });
 });
 
+describe("matching again", () => {
+  it("should propose the same id for a new field each time, not one numbered after its own earlier proposal", () => {
+    const first = matchCcd(spec([field("National insurance number")]), CASE_TYPE);
+    const again = matchCcd(first, CASE_TYPE, { keepSet: true });
+
+    expect(rowsOf(again)[0]?.ccd).toEqual(rowsOf(first)[0]?.ccd);
+    expect(rowsOf(again)[0]?.ccd).toEqual(["nationalInsuranceNumber"]);
+  });
+
+  it("should still avoid an id another row keeps or the case type has", () => {
+    const rows2 = rowsOf(
+      matchCcd(spec([field("Email address 2", { ccd: ["emailAddress"] }), field("Email address")]), [ccd("zzz", "Text")], { keepSet: true })
+    );
+
+    expect(rows2[1]?.ccd).not.toEqual(["emailAddress"]);
+  });
+});
+
 describe("stylePrefix", () => {
   it("should find the lead words most ids share, and none when they are spread", () => {
     expect(stylePrefix(Array.from({ length: 20 }, (_, i) => (i < 8 ? `cicCaseX${i}` : `other${i}Thing`)))).toBe("cicCase");
@@ -206,12 +224,33 @@ describe("new case fields", () => {
     expect(json.map((f) => f.path)).toEqual(["new-ccd-fields.json"]);
   });
 
+  it("should declare every type a new field is offered", () => {
+    for (const type of NEW_FIELD_TYPES) {
+      const text = caseDataSnippet([{ id: "someField", type, label: "Some field" }]);
+      expect(text, type).toContain("private ");
+      expect(text, type).not.toContain("undefined");
+    }
+  });
+
+  it("should write list fields as the enum the services declare, with the type parameter", () => {
+    const text = caseDataSnippet([
+      { id: "kind", type: "FixedList", label: "Kind" },
+      { id: "recipients", type: "MultiSelectList", label: "Recipients" },
+      { id: "movedAt", type: "DateTime", label: "Moved at" }
+    ]);
+    expect(text).toContain('typeOverride = FixedList,\n    typeParameterOverride = "Kind"');
+    expect(text).toContain("private Kind kind;");
+    expect(text).toContain('typeOverride = MultiSelectList,\n    typeParameterOverride = "Recipients"');
+    expect(text).toContain("private Set<Recipients> recipients;");
+    expect(text).toContain("private LocalDateTime movedAt;");
+  });
+
   it("should give a date and a list field their Java types and overrides", () => {
     const text = caseDataSnippet([
       { id: "movedIn", type: "Date", label: "Moved in" },
       { id: "kind", type: "FixedRadioList", label: "Kind" }
     ]);
     expect(text).toContain("private LocalDate movedIn;");
-    expect(text).toContain('typeOverride = FixedRadioList,\n    typeParameterOverride = "Kind"');
+    expect(text).toContain("private Kind kind;");
   });
 });

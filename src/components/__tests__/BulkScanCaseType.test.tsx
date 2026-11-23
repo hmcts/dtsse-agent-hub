@@ -299,6 +299,31 @@ describe("the editor's case type", () => {
     expect(screen.getByText(/choose which case field this is/)).toBeTruthy();
   });
 
+  it("should keep what was typed while the fields were being fetched when they arrive", async () => {
+    fetchMock.mockImplementation(podJobs());
+    answers[1] = { kind: "ccd.case-type-fields", answer: { status: "pending" } };
+    render(<BulkScanEditor view={view({ id: "1.1", ccd: [] })} signOff={vi.fn()} podConversationId="c1" />);
+
+    await waitFor(() => expect(select().disabled).toBe(false));
+    await userEvent.selectOptions(select(), "sptribs/CriminalInjuriesCompensation");
+    const label = screen.getByLabelText("Label of 1.1") as HTMLInputElement;
+    await userEvent.type(label, " (edited)");
+    for (const id of Object.keys(pending)) {
+      pending[id] = { status: "done", kind: "ccd.case-type-fields", result: { fields: ROWS, total: 2, omitted: 0 } };
+    }
+
+    expect(await screen.findByText("Unsure", {}, { timeout: 5000 })).toBeTruthy();
+    expect((screen.getByLabelText("Label of 1.1") as HTMLInputElement).value).toBe("Email address (edited)");
+  });
+
+  it("should set the case type from the typed field when the person has no chat to read their workspace in", async () => {
+    render(<BulkScanEditor view={view({ id: "1.1", ccd: [] })} signOff={vi.fn()} podConversationId={null} />);
+
+    await userEvent.type(screen.getByLabelText("Case type (CCD case type id)"), "CIC");
+
+    expect((screen.getByLabelText("Case type (CCD case type id)") as HTMLInputElement).value).toBe("CIC");
+  });
+
   it("should refresh the status of a CCD id the person set without changing it", async () => {
     fetchMock.mockImplementation(podJobs());
     render(<BulkScanEditor view={view({ ccd: ["cicCaseEmail"] })} signOff={vi.fn()} podConversationId="c1" />);

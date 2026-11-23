@@ -32,8 +32,9 @@ export function BulkScanEditor({
   const latest = Math.max(...view.versions.map((v) => v.version));
   const superseded = view.version !== latest;
 
-  function change(next: FormSpec, moved = false): void {
-    setSpec(next);
+  /** `next` as a function is applied to the latest spec, for a change that arrives after others have been made. */
+  function change(next: FormSpec | ((current: FormSpec) => FormSpec), moved = false): void {
+    setSpec((current) => (typeof next === "function" ? next(current) : next));
     setDirty(true);
     if (moved) {
       setProblems({ fields: new Map(), form: problems.form });

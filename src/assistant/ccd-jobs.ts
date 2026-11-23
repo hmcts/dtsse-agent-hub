@@ -9,7 +9,7 @@ import { definePodJobKind } from "./pod-jobs.ts";
  */
 
 export const MAX_LISTED_CASE_TYPES = 500;
-/** The case fields one answer carries: the largest definition in the workspace reads 13,000 rows before labels are dropped. */
+/** The most case fields one answer carries. */
 export const MAX_CASE_TYPE_FIELDS = 20_000;
 /**
  * What the pod's answer may hold of the fields, in JSON bytes, so that the same text still fits the upload the form
@@ -17,7 +17,15 @@ export const MAX_CASE_TYPE_FIELDS = 20_000;
  */
 export const MAX_FIELDS_BYTES = 900_000;
 
-export const CCD_JOB_ERRORS = ["script_missing", "unknown_case_type", "ambiguous_case_type", "not_cloned", "generation_failed", "unreadable"] as const;
+export const CCD_JOB_ERRORS = [
+  "script_missing",
+  "tool_missing",
+  "unknown_case_type",
+  "ambiguous_case_type",
+  "not_cloned",
+  "generation_failed",
+  "unreadable"
+] as const;
 
 export const CASE_TYPE_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/;
 export const PRODUCT = /^[a-z][a-z0-9-]{0,39}$/;

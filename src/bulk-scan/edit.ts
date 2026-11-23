@@ -27,8 +27,17 @@ export function patchHeader(spec: FormSpec, patch: HeaderPatch): FormSpec {
 /** The field values the editor changes in a row. */
 export type FieldPatch = Partial<Pick<Field, "id" | "label" | "keys" | "ccd" | "inputType" | "mandatory" | "regex" | "maxLength" | "minLength">>;
 
-/** A field whose CCD ids were typed: an id typed over an unsure row decides it, and a new field's id follows what is typed. */
-function withTypedCcd(field: Field): Field {
+/** The ids the form already knows the case type has: those of rows matched to an existing field. */
+function existingIds(spec: FormSpec): Set<string> {
+  return new Set(spec.sections.flatMap((s) => s.fields.flatMap((f) => (f.ccdMatch?.status === "existing" ? f.ccd : []))));
+}
+
+/**
+ * A field whose CCD ids were typed. The form does not hold the case type's fields, so an id is an existing field only if
+ * the row listed it as a candidate or another row already matches it; any other is a field to add, with the id typed as
+ * its proposal, and is checked against the case type again when one is picked.
+ */
+function withTypedCcd(field: Field, known: Set<string>): Field {
   const match = field.ccdMatch;
   if (!match) {
     return field;
@@ -38,12 +47,12 @@ function withTypedCcd(field: Field): Field {
     const { ccdMatch: _match, ...rest } = field;
     return rest;
   }
-  if (match.status === "new" && match.newField) {
-    return { ...field, ccdMatch: { ...match, newField: { ...match.newField, id }, chosenBy: "person" } };
+  const exists = field.ccd.every((typed) => known.has(typed) || (match.candidates ?? []).some((c) => c.id === typed));
+  if (exists) {
+    return { ...field, ccdMatch: { status: "existing", chosenBy: "person" } };
   }
-  return match.status === "unsure"
-    ? { ...field, ccdMatch: { status: "existing", chosenBy: "person" } }
-    : { ...field, ccdMatch: { ...match, chosenBy: "person" } };
+  const type = match.newField?.type ?? "Text";
+  return { ...field, ccdMatch: { status: "new", newField: { id, type }, chosenBy: "person" } };
 }
 
 /** The spec with one field replaced by what `change` makes of it. */
@@ -139,7 +148,7 @@ export function patchField(spec: FormSpec, sectionIndex: number, fieldIndex: num
       delete next.required;
     }
     if (patch.ccd !== undefined) {
-      next = withTypedCcd(next);
+      next = withTypedCcd(next, existingIds(spec));
     }
     return next;
   });

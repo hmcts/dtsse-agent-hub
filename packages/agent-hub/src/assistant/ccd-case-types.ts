@@ -88,9 +88,10 @@ export function scriptFailure(stderr: string, code: number): PodJobError {
     .map((l) => l.trim())
     .filter(Boolean);
   const message = lines.at(-1) ?? "";
-  const detail = Array.from(message).slice(0, 280).join("") || "That did not work. Try again.";
-  if (code === 127) {
-    return new PodJobError("script_missing", SCRIPT_MISSING);
+  const detail = Array.from(message).slice(0, 280).join("") || `The CCD case type tool stopped with exit code ${code} and said nothing. Try again.`;
+  const tool = /\b(yq|jq)\b[^\n]*(not on PATH|not found)/i.exec(stderr)?.[1]?.toLowerCase();
+  if (tool) {
+    return new PodJobError("tool_missing", `Your assistant has no ${tool}, which the CCD case type tool needs. ${detail}`.slice(0, 280));
   }
   if (/unknown case type/i.test(stderr)) {
     return new PodJobError("unknown_case_type", detail);

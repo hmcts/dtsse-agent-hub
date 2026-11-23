@@ -157,6 +157,18 @@ describe("uploads", () => {
     expect(() => parseCcdFields("x")).toThrow("not in the shape");
   });
 
+  it("should match a spreadsheet's rows against the case type picked, keeping the ids the sheet has, and record the product and configuration", async () => {
+    const fields = parseCcdFields([{ ID: "applicantFirstName", Label: "First name", FieldType: "Text" }]);
+    const picked = { caseType: "NFD", product: "nfdiv", config: "config-generator" as const, fields };
+
+    const imported = await importUpload("t.xlsx", await bytesOf(generateTransformWorkbook(SPEC)), "NFD", picked);
+
+    const [form] = imported.forms;
+    expect(form?.form).toMatchObject({ ccdCaseTypeId: "NFD", ccdProduct: "nfdiv", ccdConfig: "config-generator" });
+    expect(form?.sections[0]?.fields[0]).toMatchObject({ ccd: ["applicantFirstName"], ccdMatch: { status: "existing" } });
+    expect(form?.sections[0]?.fields[1]?.ccdMatch).toBeDefined();
+  });
+
   it("should set the case type on a spreadsheet's forms when one is typed", async () => {
     const imported = await importUpload("t.xlsx", await bytesOf(generateTransformWorkbook(SPEC)), "CIC");
     expect(imported.forms.map((f) => f.form.ccdCaseTypeId)).toEqual(["CIC"]);

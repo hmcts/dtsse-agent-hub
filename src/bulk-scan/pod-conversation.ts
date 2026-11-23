@@ -1,3 +1,4 @@
+import { findAssistant } from "../assistant/assistant-store.ts";
 import type { Database } from "../store/prisma.ts";
 
 /**
@@ -6,12 +7,8 @@ import type { Database } from "../store/prisma.ts";
  * pod yet, which the builder says in words: the jobs have nowhere to run until they have started one.
  */
 export async function podConversationId(db: Database, ownerOid: string): Promise<string | null> {
-  const assistant = await db.virtualAgent.findFirst({
-    where: { ownerOid, desired: { not: "deleted" } },
-    select: { id: true },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }]
-  });
-  if (assistant === null) {
+  const assistant = await findAssistant(db, ownerOid);
+  if (assistant === undefined) {
     return null;
   }
   const conversation = await db.assistantConversation.findFirst({

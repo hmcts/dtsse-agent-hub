@@ -1,6 +1,8 @@
 import type { Field, FormSpec } from "@hmcts-cft/bulk-scan-spec";
 import { type CcdField, matchCcd, newCcdFields } from "@hmcts-cft/bulk-scan-spec/ccd-match";
 
+export { NEW_FIELD_TYPES } from "@hmcts-cft/bulk-scan-spec/ccd-match";
+
 /**
  * The editor's changes to which case type a form maps into and how each field stands against it, as pure functions on the
  * spec. Browser-safe, like `edit.ts`: matching is the spec package's `ccd-match` module, which has no dependency on the
@@ -17,10 +19,21 @@ export interface CaseTypeChoice {
 export function withCaseType(spec: FormSpec, choice: CaseTypeChoice, fields: CcdField[]): FormSpec {
   const { ccdConfig: _config, ...form } = spec.form;
   const header = { ...form, ccdCaseTypeId: choice.caseType, ccdProduct: choice.product, ...(choice.config ? { ccdConfig: choice.config } : {}) };
-  return matchCcd({ ...spec, form: header }, fields, { keepSet: true });
+  const unreviewed = {
+    ...spec,
+    form: header,
+    sections: spec.sections.map((section) => ({
+      ...section,
+      fields: section.fields.map(({ review, ...field }) => {
+        const kept = (review ?? []).filter((r) => r.about !== "ccd");
+        return kept.length > 0 ? { ...field, review: kept } : field;
+      })
+    }))
+  };
+  return matchCcd(unreviewed, fields, { keepSet: true });
 }
 
-/** The spec with no case type: its fields keep their ids and lose their status. */
+/** The spec with no case type: its fields lose their status and the ids the matcher proposed, and keep the ids a person set or chose. */
 export function withoutCaseType(spec: FormSpec): FormSpec {
   const { ccdCaseTypeId: _id, ccdProduct: _product, ccdConfig: _config, ...form } = spec.form;
   return {
@@ -28,7 +41,7 @@ export function withoutCaseType(spec: FormSpec): FormSpec {
     form,
     sections: spec.sections.map((section) => ({
       ...section,
-      fields: section.fields.map(({ ccdMatch: _match, ...field }) => field)
+      fields: section.fields.map(({ ccdMatch, ...field }) => (ccdMatch !== undefined && ccdMatch.chosenBy !== "person" ? { ...field, ccd: [] } : field))
     }))
   };
 }
@@ -115,20 +128,3 @@ export interface CcdRow {
   FieldTypeParameter?: string;
   HintText?: string;
 }
-
-/** The CCD FieldTypes a new field is offered, beside whatever type it already has. */
-export const NEW_FIELD_TYPES = [
-  "Text",
-  "TextArea",
-  "Email",
-  "PhoneUK",
-  "Postcode",
-  "Number",
-  "Date",
-  "YesOrNo",
-  "FixedRadioList",
-  "FixedList",
-  "MultiSelectList",
-  "AddressUK",
-  "AddressGlobalUK"
-] as const;

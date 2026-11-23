@@ -12,7 +12,7 @@ export function BulkScanHeaderCaseType({
   spec,
   conversationId,
   onSpec
-}: Readonly<{ spec: FormSpec; conversationId: string | null; onSpec: (spec: FormSpec) => void }>) {
+}: Readonly<{ spec: FormSpec; conversationId: string | null; onSpec: (update: (current: FormSpec) => FormSpec) => void }>) {
   const { ccdCaseTypeId, ccdProduct } = spec.form;
   const counts = ccdCounts(spec);
   const matched = spec.sections.some((s) => s.fields.some((f) => f.ccdMatch));
@@ -22,9 +22,11 @@ export function BulkScanHeaderCaseType({
         conversationId={conversationId}
         selected={ccdCaseTypeId && ccdProduct ? { product: ccdProduct, caseType: ccdCaseTypeId } : null}
         onPicked={(picked) =>
-          onSpec(withCaseType(spec, { product: picked.product, caseType: picked.caseType, config: picked.config }, ccdFieldsFromRows(picked.rows)))
+          onSpec((current) =>
+            withCaseType(current, { product: picked.product, caseType: picked.caseType, config: picked.config }, ccdFieldsFromRows(picked.rows))
+          )
         }
-        onCleared={() => onSpec(withoutCaseType(spec))}
+        onCleared={() => onSpec(withoutCaseType)}
       />
       {matched ? (
         <p role="status" className="text-[13px] text-asst-body">
