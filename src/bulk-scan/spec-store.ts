@@ -2,6 +2,7 @@ import { isOwner } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import { isUuid } from "../agents/store.ts";
 import { nameHasTerms } from "../assistant/search-store.ts";
+import { SIDEBAR_LIMIT } from "../assistant/sidebar.ts";
 import { notify } from "../realtime/notify.ts";
 import { clientPrisma } from "../store/client-namespace.ts";
 import type { Database, Prisma, PrismaClient } from "../store/prisma.ts";
@@ -62,9 +63,6 @@ export interface SpecRow {
   signedOff: boolean;
 }
 
-/** As many forms as the sidebar reads of a person's chats. */
-export const SIDEBAR_FORM_LIMIT = 200;
-
 /** Up to `limit` of the owner's specs that meet `where`, each at its latest version, most recently saved first. */
 async function latestSpecs(db: Database, ownerOid: string, where: Prisma.Sql, limit: number): Promise<SpecRow[]> {
   return await db.$queryRaw<SpecRow[]>`
@@ -77,8 +75,8 @@ async function latestSpecs(db: Database, ownerOid: string, where: Prisma.Sql, li
   `;
 }
 
-/** The forms the sidebar lists: the owner's, at most `SIDEBAR_FORM_LIMIT`, with no spec JSON read. */
-export async function sidebarSpecs(db: Database, ownerOid: string, limit = SIDEBAR_FORM_LIMIT): Promise<SpecRow[]> {
+/** The forms the sidebar lists: the owner's, at most `SIDEBAR_LIMIT`, with no spec JSON read. */
+export async function sidebarSpecs(db: Database, ownerOid: string, limit = SIDEBAR_LIMIT): Promise<SpecRow[]> {
   return await latestSpecs(db, ownerOid, clientPrisma().sql`true`, limit);
 }
 

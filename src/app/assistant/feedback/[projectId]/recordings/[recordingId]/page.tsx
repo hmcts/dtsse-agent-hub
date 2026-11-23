@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { AssistantFrame } from "@/app/assistant/frame";
+import { AssistantFrame, loadFrame } from "@/app/assistant/frame";
 import { FeedbackHeader } from "@/components/feedback/dev/ProjectList";
 import { RecordingView } from "@/components/feedback/dev/RecordingView";
 import { requireViewer } from "@/viewer/current";
@@ -14,12 +14,12 @@ export default async function FeedbackRecordingPage({ params }: Readonly<{ param
   requireFeedback();
   const viewer = await requireViewer();
   const { projectId, recordingId } = await params;
-  const data = await feedbackRecordingPage(viewer, projectId, recordingId);
+  const [frame, data] = await Promise.all([loadFrame(viewer), feedbackRecordingPage(viewer, projectId, recordingId)]);
   if (data === undefined) {
     notFound();
   }
   return (
-    <AssistantFrame viewer={viewer} activeId={data.project.id}>
+    <AssistantFrame frame={frame} activeId={data.project.id}>
       <div className="mx-auto flex max-w-[1100px] flex-col gap-5 px-5 pb-10 pt-5">
         <FeedbackHeader
           title={`${data.recording.author.name}'s recording`}

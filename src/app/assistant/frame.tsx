@@ -106,11 +106,15 @@ export function AssistantShellFrame({
 /**
  * The frame of the Assistant's pages that are not a chat: the sidebar and settings around the page, in a scrolling pane.
  * It holds no getting-ready gate, since nothing here runs on the person's assistant. `activeId` is the id of the sidebar
- * row the page is about, shown as the current one.
+ * row the page is about, shown as the current one. A page reads `loadFrame` beside its own data.
  */
-export async function AssistantFrame({ viewer, activeId = null, children }: Readonly<{ viewer: Viewer; activeId?: string | null; children: React.ReactNode }>) {
+export function AssistantFrame({
+  frame,
+  activeId = null,
+  children
+}: Readonly<{ frame: Awaited<ReturnType<typeof loadFrame>>; activeId?: string | null; children: React.ReactNode }>) {
   return (
-    <AssistantShellFrame frame={await loadFrame(viewer)} activeId={activeId}>
+    <AssistantShellFrame frame={frame} activeId={activeId}>
       <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
     </AssistantShellFrame>
   );

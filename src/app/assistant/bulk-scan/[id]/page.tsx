@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { signOffSpec } from "@/app/_actions/bulk-scan";
-import { AssistantFrame } from "@/app/assistant/frame";
+import { AssistantFrame, loadFrame } from "@/app/assistant/frame";
 import { versionOf } from "@/bulk-scan/spec";
 import { BulkScanEditor } from "@/components/assistant/BulkScanEditor";
 import { requireViewer } from "@/viewer/current";
@@ -26,18 +26,16 @@ export default async function BulkScanSpecPage({
 }: Readonly<{ params: Promise<{ id: string }>; searchParams: Promise<{ version?: string | string[] }> }>) {
   const viewer = await requireViewer();
   const [{ id }, { version }] = await Promise.all([params, searchParams]);
-  const [view, podConversationId] = await Promise.all([
-    bulkScanEditor(viewer, id, versionOf(Array.isArray(version) ? version[0] : version)),
-    bulkScanPodConversation(viewer)
-  ]);
+  const requested = versionOf(Array.isArray(version) ? version[0] : version);
+  const [frame, view, podConversationId] = await Promise.all([loadFrame(viewer), bulkScanEditor(viewer, id, requested), bulkScanPodConversation(viewer)]);
   if (!view) {
     notFound();
   }
   return (
-    <AssistantFrame viewer={viewer} activeId={view.id}>
+    <AssistantFrame frame={frame} activeId={view.id}>
       <div className="mx-auto flex max-w-[1440px] flex-col gap-6 px-5 pb-10 pt-7">
         <h1 className="text-[22px] font-semibold tracking-tight">{view.name}</h1>
-        <BulkScanEditor key={`${view.id}:${view.version}`} view={view} signOff={signOffSpec} podConversationId={podConversationId} />
+        <BulkScanEditor view={view} requested={requested} signOff={signOffSpec} podConversationId={podConversationId} />
         <p className="text-[13px]">
           <Link href="/assistant/bulk-scan" className="text-asst-accent underline hover:text-asst-accent-hover">
             Back to Bulk Scan forms

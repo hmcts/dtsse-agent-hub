@@ -1,11 +1,8 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useHubEvent } from "@/components/live/HubStream";
 import { useSettled } from "@/components/live/useSettled";
-
-/** A Bulk Scan form's editor, whose page keeps edits that are not saved. */
-const BULK_SCAN_EDITOR = /^\/assistant\/bulk-scan\/[^/]+/;
 
 /**
  * Re-renders the Assistant's server components when the viewer's assistant, one of their conversations, one of their
@@ -13,22 +10,12 @@ const BULK_SCAN_EDITOR = /^\/assistant\/bulk-scan\/[^/]+/;
  * Every one of them is refreshed here rather than where it is shown, so a cold chat coming up — which reports its
  * status, its skills and its conversation from the one transaction — re-reads the page once.
  *
- * Nothing is refreshed while a Bulk Scan form's editor is the page: a refresh there starts the editor afresh from the
- * newest version and drops edits not yet saved. A save made elsewhere shows as the conflict the editor's own save
- * reports, and the sidebar catches up on the next page.
- *
  * The settled refresh waits for the network, because refreshing without one takes the page to the error boundary;
  * see `live/connectivity.ts` and `live/useSettled.ts`.
  */
 export function AssistantRefresh() {
   const router = useRouter();
-  const editing = BULK_SCAN_EDITOR.test(usePathname());
-  const { settle } = useSettled(() => router.refresh());
-  const refresh = () => {
-    if (!editing) {
-      settle();
-    }
-  };
+  const { settle: refresh } = useSettled(() => router.refresh());
   useHubEvent("assistant_conversation", refresh);
   useHubEvent("virtual_agent", refresh);
   // Unfiltered: the stream scopes it, to the open conversation's agent on its page, and to any of the viewer's own

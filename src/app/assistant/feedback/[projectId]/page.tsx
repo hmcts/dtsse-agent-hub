@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { markFeedbackProjectSeen } from "@/app/_actions/feedback";
-import { AssistantFrame } from "@/app/assistant/frame";
+import { AssistantFrame, loadFrame } from "@/app/assistant/frame";
 import { projectTab } from "@/components/feedback/dev/look";
 import { MarkSeen } from "@/components/feedback/dev/MarkSeen";
 import { FeedbackHeader } from "@/components/feedback/dev/ProjectList";
@@ -28,13 +28,13 @@ export default async function FeedbackProjectPage({
   requireFeedback();
   const viewer = await requireViewer();
   const [{ projectId }, query] = await Promise.all([params, searchParams]);
-  const data = await feedbackProjectPage(viewer, projectId);
+  const [frame, data] = await Promise.all([loadFrame(viewer), feedbackProjectPage(viewer, projectId)]);
   if (data === undefined) {
     notFound();
   }
   const tab = projectTab(query.tab, data.project.access === "owner");
   return (
-    <AssistantFrame viewer={viewer} activeId={data.project.id}>
+    <AssistantFrame frame={frame} activeId={data.project.id}>
       <MarkSeen projectId={data.project.id} markSeen={markFeedbackProjectSeen} />
       <div className="mx-auto flex max-w-[1280px] flex-col gap-5 px-5 pb-10 pt-5">
         <FeedbackHeader title={data.project.name} back={{ href: "/assistant/feedback", label: "Feedback projects" }} />

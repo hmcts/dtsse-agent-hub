@@ -113,11 +113,11 @@ export function showsMarks(kinds: ReadonlySet<SidebarKind>): boolean {
   return kinds.size > 1;
 }
 
-/** `feedback` given, whether the person has a feedback project, from projects the caller has read already. */
-async function listMarked(db: Database, ownerOid: string, feedback?: Promise<boolean>): Promise<boolean> {
+/** `feedback` and `forms` given, whether the person has any of each, from rows the caller has read already. */
+async function listMarked(db: Database, ownerOid: string, known: { feedback?: Promise<boolean>; forms?: Promise<boolean> } = {}): Promise<boolean> {
   const [{ local, pod, form }, hasFeedback] = await Promise.all([
-    sidebarKinds(db, ownerOid),
-    feedback ?? (feedbackEnabled() ? hasFeedbackProjects(db, ownerOid) : false)
+    (known.forms ?? Promise.resolve(false)).then((has) => sidebarKinds(db, ownerOid, has)),
+    known.feedback ?? (feedbackEnabled() ? hasFeedbackProjects(db, ownerOid) : false)
   ]);
   const kinds: [SidebarKind, boolean][] = [
     ["local", local],
@@ -288,11 +288,7 @@ export async function sidebarGroups(db: Database, ownerOid: string, now: Date = 
     sidebarConversations(db, ownerOid),
     read,
     readForms,
-    listMarked(
-      db,
-      ownerOid,
-      read.then((rows) => rows.length > 0)
-    )
+    listMarked(db, ownerOid, { feedback: read.then((rows) => rows.length > 0), forms: readForms.then((rows) => rows.length > 0) })
   ]);
   const items: SidebarItem[] = [...pinned, ...recent].map((row) => listLink(row, marked));
   items.push(...projects.map((row) => projectLink(row, marked)), ...forms.map((row) => formLink(row, marked)));

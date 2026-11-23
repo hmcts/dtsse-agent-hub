@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { AssistantFrame } from "@/app/assistant/frame";
+import { AssistantFrame, loadFrame } from "@/app/assistant/frame";
 import { ProjectList } from "@/components/feedback/dev/ProjectList";
 import { requireViewer } from "@/viewer/current";
 import { feedbackProjects } from "@/web/feedback-data";
@@ -14,9 +14,9 @@ export default async function FeedbackProjectsPage({ searchParams }: Readonly<{ 
   requireFeedback();
   const viewer = await requireViewer();
   const archived = (await searchParams).archived === "1";
-  const projects = await feedbackProjects(viewer, archived);
+  const [frame, projects] = await Promise.all([loadFrame(viewer), feedbackProjects(viewer, archived)]);
   return (
-    <AssistantFrame viewer={viewer}>
+    <AssistantFrame frame={frame}>
       <ProjectList projects={projects} archived={archived} />
     </AssistantFrame>
   );

@@ -1,6 +1,7 @@
 import { canChangeFeedbackProject, feedbackProjectAccess } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import { nameHasTerms } from "../assistant/search-store.ts";
+import { SIDEBAR_LIMIT } from "../assistant/sidebar.ts";
 import { clientPrisma } from "../store/client-namespace.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { teamProject } from "./store.ts";
@@ -51,8 +52,7 @@ function onTeam(viewerOid: string) {
     AND (p.owner_oid = ${viewerOid} OR EXISTS (SELECT 1 FROM feedback_member m WHERE m.project_id = p.id AND m.member_oid = ${viewerOid}))`;
 }
 
-/** As many as the sidebar reads of a person's chats. Pinned ones first, so the limit never drops a pin. */
-const NAV_LIMIT = 200;
+/** Pinned ones first, so the limit never drops a pin. */
 
 export async function navProjects(db: Database, viewerOid: string): Promise<NavProjectRow[]> {
   const rows = await db.$queryRaw<RawProject[]>`
@@ -70,7 +70,7 @@ export async function navProjects(db: Database, viewerOid: string): Promise<NavP
       LEFT JOIN feedback_project_person s ON s.project_id = p.id AND s.person_oid = ${viewerOid}
      WHERE ${onTeam(viewerOid)}
      ORDER BY s.pinned_at IS NULL, "lastActiveAt" DESC, p.id
-     LIMIT ${NAV_LIMIT}
+     LIMIT ${SIDEBAR_LIMIT}
   `;
   const links = await db.feedbackLink.findMany({
     where: { projectId: { in: rows.map((row) => row.id) }, revokedAt: null },

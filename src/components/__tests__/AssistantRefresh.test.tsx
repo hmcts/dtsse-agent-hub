@@ -11,8 +11,7 @@ import { AssistantRefresh } from "@/components/assistant/AssistantRefresh";
  */
 
 const refresh = vi.fn();
-const route = vi.hoisted(() => ({ pathname: "/assistant" }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }), usePathname: () => route.pathname }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
 
 const hubHandlers = new Map<string, (data: unknown) => void>();
 vi.mock("@/components/live/HubStream", () => ({
@@ -20,7 +19,6 @@ vi.mock("@/components/live/HubStream", () => ({
 }));
 
 beforeEach(() => {
-  route.pathname = "/assistant";
   refresh.mockReset();
   hubHandlers.clear();
   vi.useFakeTimers();
@@ -91,43 +89,15 @@ describe("AssistantRefresh", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
-  it("should refresh once when a Bulk Scan form changed in another tab", async () => {
-    render(<AssistantRefresh />);
+  it.each(["assistant_conversation", "virtual_agent", "agent_skills", "feedback", "bulk_scan_spec"])(
+    "should refresh for %s when the page is any Assistant page",
+    async (type) => {
+      render(<AssistantRefresh />);
 
-    hubHandlers.get("bulk_scan_spec")?.({});
-    await settle();
+      hubHandlers.get(type)?.({});
+      await settle();
 
-    expect(refresh).toHaveBeenCalledTimes(1);
-  });
-
-  const EVENTS = ["assistant_conversation", "virtual_agent", "agent_skills", "feedback", "bulk_scan_spec"];
-
-  it.each(EVENTS)("should not refresh for %s when a Bulk Scan form's editor is the page", async (type) => {
-    route.pathname = "/assistant/bulk-scan/f1";
-    render(<AssistantRefresh />);
-
-    hubHandlers.get(type)?.({});
-    await settle();
-
-    expect(refresh).not.toHaveBeenCalled();
-  });
-
-  it.each(EVENTS)("should refresh for %s when the page is the Assistant's", async (type) => {
-    render(<AssistantRefresh />);
-
-    hubHandlers.get(type)?.({});
-    await settle();
-
-    expect(refresh).toHaveBeenCalledTimes(1);
-  });
-
-  it("should refresh when a Bulk Scan form changed and the page is the Bulk Scan list", async () => {
-    route.pathname = "/assistant/bulk-scan";
-    render(<AssistantRefresh />);
-
-    hubHandlers.get("bulk_scan_spec")?.({});
-    await settle();
-
-    expect(refresh).toHaveBeenCalledTimes(1);
-  });
+      expect(refresh).toHaveBeenCalledTimes(1);
+    }
+  );
 });

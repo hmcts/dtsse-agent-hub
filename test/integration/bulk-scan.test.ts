@@ -331,7 +331,7 @@ describe("who can reach a spec", () => {
 
     expect(await actions.deleteBulkScanSpec(formOf({ id: "not-a-uuid" }))).toMatchObject({ ok: false });
     expect(await actions.deleteBulkScanSpec(formOf({ id }))).toMatchObject({ ok: true });
-    expect(revalidated).toEqual([]);
+    expect(revalidated).toEqual(["/assistant/bulk-scan"]);
     expect([await prisma.bulkScanSpec.count(), await prisma.bulkScanSpecVersion.count()]).toEqual([0, 0]);
     expect(await readSpec(prisma, own(ALICE), "not-a-uuid")).toBeUndefined();
   });

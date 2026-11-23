@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { createFeedbackProject, probeFeedbackLink } from "@/app/_actions/feedback";
-import { AssistantFrame } from "@/app/assistant/frame";
+import { AssistantFrame, loadFrame } from "@/app/assistant/frame";
 import { FeedbackWizard, type WizardActions } from "@/components/feedback/dev/FeedbackWizard";
 import { FeedbackHeader } from "@/components/feedback/dev/ProjectList";
 import { allowPrivateTargets } from "@/feedback/targets";
@@ -16,9 +16,9 @@ const ACTIONS: WizardActions = { probe: probeFeedbackLink, create: createFeedbac
 /** Setting up a new feedback project, which ends with the links to send to reviewers. */
 export default async function NewFeedbackProjectPage() {
   requireFeedback();
-  const viewer = await requireViewer();
+  const frame = await loadFrame(await requireViewer());
   return (
-    <AssistantFrame viewer={viewer}>
+    <AssistantFrame frame={frame}>
       <div className="mx-auto flex max-w-[960px] flex-col gap-6 px-5 pb-10 pt-5">
         <FeedbackHeader title="New feedback project" back={{ href: "/assistant/feedback", label: "Feedback projects" }} />
         <FeedbackWizard actions={ACTIONS} allowHttp={allowPrivateTargets()} />
