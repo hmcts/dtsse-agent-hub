@@ -26,10 +26,10 @@ import { CONFLUENCE_EXPORT_TIMEOUT_MS } from "../../src/assistant/confluence.ts"
 import {
   createConversation,
   findConversation,
-  hasLocalConversation,
   listConversations,
   pinConversation,
-  sidebarConversations
+  sidebarConversations,
+  sidebarKinds
 } from "../../src/assistant/conversation-store.ts";
 import { ITEMS_CREATE_REFUSED, ITEMS_EXPORT_REFUSED } from "../../src/assistant/documents.ts";
 import { readExportDefaults, saveExportDefaults } from "../../src/assistant/export-default-store.ts";
@@ -41,6 +41,7 @@ import { LOOKUP_RATE_LIMIT, LOOKUP_RETENTION_MS } from "../../src/assistant/look
 import { searchConversations } from "../../src/assistant/search-store.ts";
 import { linkSession, pendingWakes } from "../../src/assistant/session-store.ts";
 import { accessToConversation, conversationsSharedBy, conversationsSharedWith, shareConversation } from "../../src/assistant/shares.ts";
+import { isChat } from "../../src/assistant/sidebar.ts";
 import { credentialBackend } from "../../src/credentials/backend.ts";
 import { putCredential } from "../../src/credentials/store.ts";
 import { directAsPerson } from "../../src/messages/send.ts";
@@ -933,7 +934,7 @@ describe("conversations", () => {
     expect(await actions.deleteConversation({ conversationId: id })).toEqual({ ok: false, error: "no such conversation" });
     expect((await openAssistant(VIEWER)).conversations).toEqual([]);
     expect(await listConversations(prisma, ALICE.oid)).toEqual([]);
-    expect(await hasLocalConversation(prisma, ALICE.oid)).toBe(false);
+    expect((await sidebarKinds(prisma, ALICE.oid)).local).toBe(false);
     expect(await searchConversations(prisma, ALICE.oid, "claim")).toEqual([]);
     expect(await accessToConversation(prisma, BOB.oid, id)).toBeUndefined();
     expect(await conversationsSharedWith(prisma, BOB.oid)).toEqual([]);
@@ -955,7 +956,7 @@ describe("conversations", () => {
 
     expect(fresh).not.toBe(removed);
     expect((await listConversations(prisma, ALICE.oid)).map((chat) => chat.id)).toEqual([fresh]);
-    expect(await hasLocalConversation(prisma, ALICE.oid)).toBe(true);
+    expect((await sidebarKinds(prisma, ALICE.oid)).local).toBe(true);
   });
 
   /**
@@ -972,7 +973,7 @@ describe("conversations", () => {
     expect((await assistantConversation(VIEWER, onLaptop))!.local).toBe(true);
     expect((await assistantConversation(VIEWER, onPod))!.local).toBe(false);
     const listed = (await openAssistant(VIEWER)).conversations.flatMap((group) => group.items);
-    expect(new Map(listed.map((item) => [item.id, item.kind === "feedback" ? null : (item.mark?.where ?? null)]))).toEqual(
+    expect(new Map(listed.map((item) => [item.id, !isChat(item) ? null : (item.mark?.where ?? null)]))).toEqual(
       new Map([
         [onLaptop, "computer"],
         [onPod, "assistant"]
@@ -998,7 +999,7 @@ describe("conversations", () => {
 
     const listed = (await openAssistant(VIEWER)).conversations.flatMap((group) => group.items);
 
-    expect(listed.flatMap((item) => (item.id === onLaptop && item.kind !== "feedback" ? [item.mark] : []))).toEqual([{ where: "computer", session }]);
+    expect(listed.flatMap((item) => (item.id === onLaptop && isChat(item) ? [item.mark] : []))).toEqual([{ where: "computer", session }]);
   });
 
   /**
@@ -1012,7 +1013,7 @@ describe("conversations", () => {
 
     const listed = (await openAssistant(VIEWER)).conversations.flatMap((group) => group.items);
 
-    expect(listed.map((item) => [item.id, item.kind === "feedback" ? null : item.mark])).toEqual([[onPod, null]]);
+    expect(listed.map((item) => [item.id, !isChat(item) ? null : item.mark])).toEqual([[onPod, null]]);
   });
 
   it("should wake a conversation when its composer is focused and the session is offline", async () => {

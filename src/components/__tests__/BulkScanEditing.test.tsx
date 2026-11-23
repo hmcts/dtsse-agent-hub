@@ -747,3 +747,52 @@ describe("a new section", () => {
     expect((screen.getByLabelText("Section ID") as HTMLInputElement).value).toBe("3");
   });
 });
+
+describe("a refresh while editing", () => {
+  const newer = (over: object = {}): BulkScanEditorView =>
+    ({
+      ...VIEW,
+      version: 2,
+      versions: [{ ...VIEW.versions[0], version: 2 }, ...VIEW.versions],
+      ...over
+    }) as unknown as BulkScanEditorView;
+
+  async function editedLabel(user: User): Promise<void> {
+    await open(user, "1.2");
+    await user.type(screen.getByLabelText("Label"), "!");
+  }
+
+  it("should keep unsaved edits and save them against the version they started from when a newer latest version arrives", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<BulkScanEditor view={VIEW} signOff={vi.fn()} handToAssistant={vi.fn()} />);
+    await editedLabel(user);
+
+    rerender(<BulkScanEditor view={newer()} signOff={vi.fn()} handToAssistant={vi.fn()} />);
+    expect((screen.getByLabelText("Label") as HTMLInputElement).value).toBe("Name!");
+    await user.click(screen.getByRole("button", { name: "Save as version 3" }));
+
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body).baseVersion).toBe(1);
+  });
+
+  it("should start afresh when the version asked for changes", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<BulkScanEditor view={VIEW} signOff={vi.fn()} handToAssistant={vi.fn()} />);
+    await editedLabel(user);
+
+    rerender(<BulkScanEditor view={newer({ version: 1 })} requested={1} signOff={vi.fn()} handToAssistant={vi.fn()} />);
+    await open(user, "1.2");
+
+    expect((screen.getByLabelText("Label") as HTMLInputElement).value).toBe("Name");
+  });
+
+  it("should start afresh when the form changes", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<BulkScanEditor view={VIEW} signOff={vi.fn()} handToAssistant={vi.fn()} />);
+    await editedLabel(user);
+
+    rerender(<BulkScanEditor view={{ ...VIEW, id: "s2" }} signOff={vi.fn()} handToAssistant={vi.fn()} />);
+    await open(user, "1.2");
+
+    expect((screen.getByLabelText("Label") as HTMLInputElement).value).toBe("Name");
+  });
+});

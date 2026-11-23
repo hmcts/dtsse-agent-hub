@@ -1,8 +1,18 @@
 import type { AgentStatus } from "../realtime/events.ts";
+import { clientPrisma } from "../store/client-namespace.ts";
 import type { Database } from "../store/prisma.ts";
 import type { SessionState } from "./conversation-row.ts";
 import { storedProduct } from "./products.ts";
 import { SEARCH_LIMIT, SNIPPET_MAX_WORDS, SNIPPET_MIN_WORDS, searchTerms, visibleMatches } from "./search.ts";
+
+/**
+ * The SQL condition that `column`, the name of a row, holds every one of `terms`, which are lower-case already: what the
+ * sidebar's search asks of the name of a feedback project or a Bulk Scan form.
+ */
+export function nameHasTerms(column: "p.name" | "s.name", terms: readonly string[]) {
+  const { sql, raw } = clientPrisma();
+  return sql`NOT EXISTS (SELECT 1 FROM unnest(${terms}::text[]) AS u(term) WHERE strpos(lower(${raw(column)}), u.term) = 0)`;
+}
 
 export interface ConversationMatchRow {
   id: string;

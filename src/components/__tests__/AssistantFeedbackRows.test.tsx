@@ -1,9 +1,11 @@
 /**
  * @vitest-environment jsdom
  */
+
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ConversationLink, FeedbackProjectLink, SidebarItem } from "@/assistant/views";
+import type { ConversationLink, FeedbackProjectLink, FormLink, SidebarItem } from "@/assistant/views";
 import { AssistantShell, type ConversationActions } from "@/components/assistant/AssistantShell";
 
 const refresh = vi.fn();
@@ -59,6 +61,19 @@ function chat(): ConversationLink {
     lastActiveAt: "2026-10-21T09:00:00.000Z",
     pinnedAt: null,
     mark: { where: "assistant", session: "ready" }
+  };
+}
+
+function form(overrides: Partial<FormLink> = {}): FormLink {
+  return {
+    kind: "form",
+    id: "f1",
+    title: "T210 claim form",
+    lastActiveAt: "2026-10-21T09:00:00.000Z",
+    pinnedAt: null,
+    marked: true,
+    signedOff: false,
+    ...overrides
   };
 }
 
@@ -241,5 +256,61 @@ describe("a feedback project's menu", () => {
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Archive" })));
 
     expect(screen.getByRole("alert").textContent).toBe("only the project's owner can change it");
+  });
+});
+
+describe("a Bulk Scan form's row", () => {
+  it("should link to the form's editor with the form icon and its name when the list holds another kind", () => {
+    render(shell([form()]));
+
+    const link = within(nav()).getByRole("link", { name: /^Bulk Scan form:\s*T210 claim form$/ });
+    expect(link.getAttribute("href")).toBe("/assistant/bulk-scan/f1");
+    expect(link.querySelector("svg")).not.toBeNull();
+  });
+
+  it("should carry no icon when the list holds forms alone", () => {
+    render(shell([form({ marked: false })]));
+
+    expect(within(nav()).getByRole("link", { name: "T210 claim form" }).querySelector("svg")).toBeNull();
+  });
+
+  it("should say the latest version is signed off in words when it is", () => {
+    render(shell([form({ signedOff: true })]));
+
+    expect(within(nav()).getByRole("link", { name: /T210 claim form, signed off$/ })).toBeTruthy();
+  });
+
+  it("should say nothing of sign-off when the latest version is not signed off", () => {
+    render(shell([form()]));
+
+    expect(within(nav()).getByRole("link", { name: /^Bulk Scan form:\s*T210 claim form$/ }).textContent).not.toContain("signed off");
+  });
+
+  it("should be the current page when its editor is the one open", () => {
+    render(shell([form()], { activeId: "f1" }));
+
+    expect(
+      within(nav())
+        .getByRole("link", { name: /T210 claim form/ })
+        .getAttribute("aria-current")
+    ).toBe("page");
+  });
+
+  it("should offer no options menu when it is a form's row", () => {
+    render(shell([form()]));
+
+    expect(within(nav()).queryByRole("button", { name: /Options for/ })).toBeNull();
+  });
+
+  it("should be reachable and openable by keyboard when tabbing through the list", async () => {
+    const user = userEvent.setup();
+    render(shell([form()]));
+
+    const link = within(nav()).getByRole("link", { name: /T210 claim form/ });
+    for (let presses = 0; presses < 20 && document.activeElement !== link; presses++) {
+      await user.tab();
+    }
+
+    expect(document.activeElement).toBe(link);
   });
 });

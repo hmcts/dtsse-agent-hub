@@ -96,6 +96,14 @@ describe("selectFrame", () => {
     expect(await selectFrame({ type: "assistant_docmosis_library", owner_oid: "dev-bob" }, TOPICS, sources())).toBeUndefined();
   });
 
+  it("should tell the owner's tab that their Bulk Scan forms changed", async () => {
+    expect(await selectFrame({ type: "bulk_scan_spec", owner_oid: VIEWER }, TOPICS, sources())).toBe("event: bulk_scan_spec\ndata: {}\n\n");
+  });
+
+  it("should tell nobody else of a change to Bulk Scan forms when they are another person's", async () => {
+    expect(await selectFrame({ type: "bulk_scan_spec", owner_oid: "dev-bob" }, TOPICS, sources())).toBeUndefined();
+  });
+
   it("should send a post on a watched topic when the page watches it", async () => {
     const frame = await selectFrame({ type: "post", message_id: "5" }, TOPICS, sources({ posts: [post("5", ["pcs-api"])] }));
 

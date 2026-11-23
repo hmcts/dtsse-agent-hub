@@ -8,9 +8,9 @@ import {
   createConversation,
   deleteConversation,
   findConversation,
-  hasLocalConversation,
   listConversations,
   renameConversation,
+  sidebarKinds,
   touchConversation,
   unsentConversation
 } from "../../src/assistant/conversation-store.ts";
@@ -203,7 +203,7 @@ describe("a chat on the person's own computer whose thread shows nothing but not
 
     expect(await listed()).toEqual([]);
     expect(await found("possession")).toEqual([]);
-    expect(await hasLocalConversation(prisma, ALICE.oid)).toBe(false);
+    expect((await sidebarKinds(prisma, ALICE.oid)).local).toBe(false);
   });
 
   it("should be left out when its only answer has no words in it", async () => {
@@ -226,7 +226,7 @@ describe("a chat on the person's own computer whose thread shows nothing but not
     await uploaded(agentId, [entry("1", "user", text)]);
 
     expect(await listed()).toEqual([conversationId]);
-    expect(await hasLocalConversation(prisma, ALICE.oid)).toBe(true);
+    expect((await sidebarKinds(prisma, ALICE.oid)).local).toBe(true);
   });
 
   it("should be listed when its only content is a tool call", async () => {
@@ -277,7 +277,7 @@ describe("a chat linked to a session that has already said something", () => {
     expect(await prisma.assistantConversation.count()).toBe(0);
     expect(await listed()).toEqual([]);
     expect(await found("possession")).toEqual([]);
-    expect(await hasLocalConversation(prisma, ALICE.oid)).toBe(false);
+    expect((await sidebarKinds(prisma, ALICE.oid)).local).toBe(false);
   });
 
   it("should link a session a new chat on its next heartbeat when the sweep, not the person, collected its empty one", async () => {

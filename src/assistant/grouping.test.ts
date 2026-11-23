@@ -100,6 +100,15 @@ describe("groupForSidebar", () => {
 describe("bySidebarOrder", () => {
   const item = (id: string, lastActiveAt: string, pinnedAt: string | null = null) => ({ id, lastActiveAt, pinnedAt });
 
+  /** The sidebar's sections as labels and ids: the merged list in its order, grouped as the sidebar groups it. */
+  const layout = (items: ReturnType<typeof item>[]) =>
+    groupForSidebar(
+      [...items].sort(bySidebarOrder),
+      (entry) => new Date(entry.lastActiveAt),
+      (entry) => entry.pinnedAt !== null,
+      NOW
+    ).map((group) => [group.label, group.items.map((entry) => entry.id)]);
+
   it("should put the pinned items first, most recently pinned first, whatever their activity", () => {
     const items = [
       item("recent", "2026-10-21T08:00:00.000Z"),
@@ -117,17 +126,25 @@ describe("bySidebarOrder", () => {
       { ...item("chat-new", "2026-10-21T08:00:00.000Z"), kind: "cloud" }
     ];
 
-    const grouped = groupForSidebar(
-      [...items].sort(bySidebarOrder),
-      (entry) => new Date(entry.lastActiveAt),
-      (entry) => entry.pinnedAt !== null,
-      NOW
-    );
-
-    expect(grouped.map((group) => [group.label, group.items.map((entry) => entry.id)])).toEqual([
+    expect(layout(items)).toEqual([
       ["Today", ["chat-new"]],
       ["Yesterday", ["project"]],
       ["Previous 7 days", ["chat-old"]]
+    ]);
+  });
+
+  it("should put a Bulk Scan form among the chats by when its latest version was saved", () => {
+    const items = [
+      { ...item("chat-old", "2026-10-19T08:00:00.000Z"), kind: "cloud" },
+      { ...item("form", "2026-10-21T08:30:00.000Z"), kind: "form" },
+      { ...item("chat-new", "2026-10-21T08:00:00.000Z"), kind: "cloud" },
+      { ...item("form-old", "2026-08-01T08:00:00.000Z"), kind: "form" }
+    ];
+
+    expect(layout(items)).toEqual([
+      ["Today", ["form", "chat-new"]],
+      ["Previous 7 days", ["chat-old"]],
+      ["Older", ["form-old"]]
     ]);
   });
 

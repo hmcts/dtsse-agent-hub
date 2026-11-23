@@ -88,4 +88,16 @@ describe("AssistantRefresh", () => {
 
     expect(refresh).not.toHaveBeenCalled();
   });
+
+  it.each(["assistant_conversation", "virtual_agent", "agent_skills", "feedback", "bulk_scan_spec"])(
+    "should refresh for %s when the page is any Assistant page",
+    async (type) => {
+      render(<AssistantRefresh />);
+
+      hubHandlers.get(type)?.({});
+      await settle();
+
+      expect(refresh).toHaveBeenCalledTimes(1);
+    }
+  );
 });

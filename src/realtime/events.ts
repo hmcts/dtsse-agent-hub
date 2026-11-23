@@ -116,6 +116,8 @@ export type HubEvent =
   | { type: "assistant_docmosis_index"; request_id: string; virtual_agent_id: string; owner_oid: string }
   /** The pod answered a check of `owner_oid`'s template library, so their open tabs read its status again. */
   | { type: "assistant_docmosis_library"; owner_oid: string }
+  /** `owner_oid`'s Bulk Scan forms changed: one was added, saved, signed off or deleted, so their sidebar lists them again. */
+  | { type: "bulk_scan_spec"; owner_oid: string }
   /**
    * Something of a prototype feedback project changed: a thread, a comment, a recording, or the project itself, its
    * links or its team. `link_id` is the link it came through, null for a change to the project. Ids only, as every
@@ -244,6 +246,8 @@ export function decodeEvent(payload: string | undefined): NotifiedEvent | undefi
         : undefined;
     case "assistant_docmosis_library":
       return isId(event.owner_oid) ? { type: "assistant_docmosis_library", owner_oid: event.owner_oid } : undefined;
+    case "bulk_scan_spec":
+      return isId(event.owner_oid) ? { type: "bulk_scan_spec", owner_oid: event.owner_oid } : undefined;
     case "feedback":
       return isId(event.project_id) && isOptionalId(event.link_id) ? { type: "feedback", project_id: event.project_id, link_id: event.link_id } : undefined;
     default:

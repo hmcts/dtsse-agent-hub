@@ -3,6 +3,16 @@
  * the server renders the page with the sidebar already as they left it and it never shows open and then collapses.
  */
 
+import type { SidebarKind } from "./views.ts";
+
+/** As many rows of one kind as the sidebar reads of a person's chats or Bulk Scan forms. */
+export const SIDEBAR_LIMIT = 200;
+
+/** Whether a sidebar row or search result is a chat, the only kind that carries a session `mark`, as against a feedback project or a Bulk Scan form. */
+export function isChat<T extends { kind: SidebarKind }>(item: T): item is Extract<T, { kind: "local" | "cloud" }> {
+  return item.kind === "local" || item.kind === "cloud";
+}
+
 export const SIDEBAR_COOKIE = "asst_sidebar";
 
 /** A year: the choice is a preference, not a session. */

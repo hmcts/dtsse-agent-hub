@@ -56,6 +56,7 @@ export const HUB_EVENT_TYPES = [
   "assistant_conversation",
   "assistant_pod_job",
   "assistant_docmosis_library",
+  "bulk_scan_spec",
   "feedback",
   "resync"
 ] as const satisfies readonly HubEventType[];

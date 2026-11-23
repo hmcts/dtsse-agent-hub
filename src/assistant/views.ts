@@ -2,6 +2,7 @@ import { canPostVideo, conversationAccess } from "../access/rules.ts";
 import { storedClientFeatures } from "../agents/client-features.ts";
 import { repoFileBase } from "../agents/github.ts";
 import { type Skill, storedSkills } from "../agents/skills.ts";
+import { type SpecRow, searchSpecs, sidebarSpecs } from "../bulk-scan/spec-store.ts";
 import type { CredentialKind } from "../credentials/names.ts";
 import { type NavProjectRow, navProjects, searchProjects } from "../feedback/nav-store.ts";
 import { feedbackEnabled } from "../feedback/settings.ts";
@@ -20,14 +21,7 @@ import { neededCredentials, optionalCredentials } from "../virtual-agents/views.
 import { type Artefact, DOCUMENT_SELECT, OLDEST_FIRST, toDocument } from "./artefact-store.ts";
 import { CONFLUENCE_SELECT, type ConfluenceExportView, confluenceExportView } from "./confluence.ts";
 import type { ConversationRow, ProductChange, SessionState, StopMark } from "./conversation-row.ts";
-import {
-  type ConversationListRow,
-  hasLocalConversation,
-  hasPodConversation,
-  listConversations,
-  sidebarConversations,
-  unsentConversation
-} from "./conversation-store.ts";
+import { type ConversationListRow, listConversations, sidebarConversations, sidebarKinds, unsentConversation } from "./conversation-store.ts";
 import { type DeckSummary, listDeckSummaries } from "./deck-store.ts";
 import { type DocmosisSummary, listDocmosisSummaries } from "./docmosis-store.ts";
 import type { DocumentKind } from "./documents.ts";
@@ -107,8 +101,8 @@ export function podSessionOf(agentStatus: AgentStatus, sessionState: SessionStat
  */
 export type ConversationMark = { where: "computer"; session: LocalSession } | { where: "assistant"; session: PodSession } | null;
 
-/** The kinds of item the sidebar lists: a chat on the person's computer, one on their pod, and a feedback project. */
-export type SidebarKind = "local" | "cloud" | "feedback";
+/** The kinds of item the sidebar lists: a chat on the person's computer, one on their pod, a feedback project and a Bulk Scan form. */
+export type SidebarKind = "local" | "cloud" | "feedback" | "form";
 
 /**
  * Whether every row carries the icon of its kind. Only when the person's list holds more than one kind: an icon
@@ -119,17 +113,17 @@ export function showsMarks(kinds: ReadonlySet<SidebarKind>): boolean {
   return kinds.size > 1;
 }
 
-/** `feedback` given, whether the person has a feedback project, from projects the caller has read already. */
-async function listMarked(db: Database, ownerOid: string, feedback?: Promise<boolean>): Promise<boolean> {
-  const [local, cloud, hasFeedback] = await Promise.all([
-    hasLocalConversation(db, ownerOid),
-    hasPodConversation(db, ownerOid),
-    feedback ?? (feedbackEnabled() ? hasFeedbackProjects(db, ownerOid) : false)
+/** `feedback` and `forms` given, whether the person has any of each, from rows the caller has read already. */
+async function listMarked(db: Database, ownerOid: string, known: { feedback?: Promise<boolean>; forms?: Promise<boolean> } = {}): Promise<boolean> {
+  const [{ local, pod, form }, hasFeedback] = await Promise.all([
+    (known.forms ?? Promise.resolve(false)).then((has) => sidebarKinds(db, ownerOid, has)),
+    known.feedback ?? (feedbackEnabled() ? hasFeedbackProjects(db, ownerOid) : false)
   ]);
   const kinds: [SidebarKind, boolean][] = [
     ["local", local],
-    ["cloud", cloud],
-    ["feedback", hasFeedback]
+    ["cloud", pod],
+    ["feedback", hasFeedback],
+    ["form", form]
   ];
   return showsMarks(new Set(kinds.flatMap(([kind, has]) => (has ? [kind] : []))));
 }
@@ -162,7 +156,23 @@ export interface FeedbackProjectLink {
   links: { label: string; token: string }[];
 }
 
-export type SidebarItem = ConversationLink | FeedbackProjectLink;
+/**
+ * One of the viewer's Bulk Scan forms as a sidebar row. Never pinned, so it sits among the date groups, by when its
+ * latest version was saved.
+ */
+export interface FormLink {
+  kind: "form";
+  id: string;
+  title: string;
+  lastActiveAt: string;
+  pinnedAt: null;
+  /** Whether the row carries the form icon; see `showsMarks`. */
+  marked: boolean;
+  /** Whether the latest version is signed off. */
+  signedOff: boolean;
+}
+
+export type SidebarItem = ConversationLink | FeedbackProjectLink | FormLink;
 
 export const UNTITLED = "New chat";
 
@@ -259,6 +269,10 @@ function projectLink(row: NavProjectRow, marked: boolean): FeedbackProjectLink {
   };
 }
 
+function formLink(row: SpecRow, marked: boolean): FormLink {
+  return { kind: "form", id: row.id, title: row.name, lastActiveAt: row.savedAt.toISOString(), pinnedAt: null, marked, signedOff: row.signedOff };
+}
+
 /** The chats running on one of the owner's virtual agents, for its page in the hub. */
 export async function conversationLinks(db: Database, ownerOid: string, virtualAgentId: string): Promise<ConversationLink[]> {
   // `mark` is a statement about the person's whole list, not about the page that happens to be reading it.
@@ -266,20 +280,18 @@ export async function conversationLinks(db: Database, ownerOid: string, virtualA
   return rows.map((row) => listLink(row, marked));
 }
 
-/** The sidebar: the viewer's chats and, while prototype feedback is on, their feedback projects, in one list. */
+/** The sidebar: the viewer's chats, their Bulk Scan forms and, while prototype feedback is on, their feedback projects, in one list. */
 export async function sidebarGroups(db: Database, ownerOid: string, now: Date = new Date()): Promise<{ label: SidebarGroup; items: SidebarItem[] }[]> {
   const read = feedbackEnabled() ? navProjects(db, ownerOid) : Promise.resolve([]);
-  const [{ pinned, recent }, projects, marked] = await Promise.all([
+  const readForms = sidebarSpecs(db, ownerOid);
+  const [{ pinned, recent }, projects, forms, marked] = await Promise.all([
     sidebarConversations(db, ownerOid),
     read,
-    listMarked(
-      db,
-      ownerOid,
-      read.then((rows) => rows.length > 0)
-    )
+    readForms,
+    listMarked(db, ownerOid, { feedback: read.then((rows) => rows.length > 0), forms: readForms.then((rows) => rows.length > 0) })
   ]);
   const items: SidebarItem[] = [...pinned, ...recent].map((row) => listLink(row, marked));
-  items.push(...projects.map((row) => projectLink(row, marked)));
+  items.push(...projects.map((row) => projectLink(row, marked)), ...forms.map((row) => formLink(row, marked)));
   return groupForSidebar(
     items.sort(bySidebarOrder),
     (item) => new Date(item.lastActiveAt),
@@ -297,7 +309,10 @@ export interface ConversationMatch extends Omit<ConversationLink, "pinnedAt"> {
 /** A feedback project found by the sidebar's search, by its name. */
 export type FeedbackProjectMatch = Pick<FeedbackProjectLink, "kind" | "id" | "title" | "lastActiveAt" | "marked">;
 
-export type SidebarMatch = ConversationMatch | FeedbackProjectMatch;
+/** A Bulk Scan form found by the sidebar's search, by its name. */
+export type FormMatch = Pick<FormLink, "kind" | "id" | "title" | "lastActiveAt" | "marked">;
+
+export type SidebarMatch = ConversationMatch | FeedbackProjectMatch | FormMatch;
 
 function chatMatch(row: ConversationMatchRow, marked: boolean): ConversationMatch {
   return { ...toLink(row, marked), snippet: snippetOf(row.excerpt) };
@@ -312,17 +327,21 @@ export async function conversationMatches(db: Database, ownerOid: string, query:
   return rows.map((row) => chatMatch(row, marked));
 }
 
-/** The sidebar's search: the chats `conversationMatches` finds, and the feedback projects the sidebar lists whose name matches. */
+/** The sidebar's search: the chats `conversationMatches` finds, and the feedback projects and forms the sidebar lists whose name matches. */
 export async function sidebarMatches(db: Database, ownerOid: string, query: string): Promise<SidebarMatch[]> {
-  const [rows, projects, marked] = await Promise.all([
+  const terms = searchTerms(query);
+  const [rows, projects, forms, marked] = await Promise.all([
     searchConversations(db, ownerOid, query),
-    feedbackEnabled() ? searchProjects(db, ownerOid, searchTerms(query), SEARCH_LIMIT) : [],
+    feedbackEnabled() ? searchProjects(db, ownerOid, terms, SEARCH_LIMIT) : [],
+    searchSpecs(db, ownerOid, terms, SEARCH_LIMIT),
     listMarked(db, ownerOid)
   ]);
-  return mergeMatches<SidebarMatch>(
+  const merged = mergeMatches<SidebarMatch>(
     rows.map((row) => chatMatch(row, marked)),
-    projects.map(({ id, name, lastActiveAt }) => ({ kind: "feedback", id, title: name, lastActiveAt: lastActiveAt.toISOString(), marked }))
+    projects.map(({ id, name, lastActiveAt }) => ({ kind: "feedback", id, title: name, lastActiveAt: lastActiveAt.toISOString(), marked })),
+    forms.map(({ id, name, savedAt }) => ({ kind: "form", id, title: name, lastActiveAt: savedAt.toISOString(), marked }))
   );
+  return merged.slice(0, SEARCH_LIMIT);
 }
 
 /**

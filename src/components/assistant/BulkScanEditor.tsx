@@ -29,20 +29,32 @@ function firstSelection(spec: FormSpec): Selection | null {
   return s >= 0 ? { section: s, field: 0 } : spec.sections.length > 0 ? { section: 0, field: null } : null;
 }
 
+type EditorProps = Readonly<{
+  view: BulkScanEditorView;
+  signOff: SignOffAction;
+  handToAssistant: HandToAssistantAction;
+  podConversationId?: string | null;
+}>;
+
 /**
- * One spec: its form details, an outline of its fields beside the details of the one chosen, a save that makes the next
- * version, and tabs for the simulator, the downloads and the sign-off, which all work on the version saved. The page
- * keys this on the spec and version, so a save or a change of version starts it afresh from what was stored.
+ * One spec, started afresh from what was stored when the form or the version asked for (`requested`, the address's
+ * `?version`) changes. A refresh that brings a newer latest version leaves it as it is, with the edits not yet saved and
+ * the version they started from, so saving them after another save elsewhere is refused as a conflict.
  */
-export function BulkScanEditor({
-  view,
-  signOff,
-  handToAssistant,
-  podConversationId = null
-}: Readonly<{ view: BulkScanEditorView; signOff: SignOffAction; handToAssistant: HandToAssistantAction; podConversationId?: string | null }>) {
+export function BulkScanEditor({ requested, ...props }: EditorProps & Readonly<{ requested?: number }>) {
+  return <EditorBody key={`${props.view.id}:${requested ?? "latest"}`} {...props} />;
+}
+
+/**
+ * The spec's form details, an outline of its fields beside the details of the one chosen, a save that makes the next
+ * version, and tabs for the simulator, the downloads and the sign-off, which all work on the version saved.
+ */
+function EditorBody({ view, signOff, handToAssistant, podConversationId = null }: EditorProps) {
   const router = useRouter();
   const [spec, setSpec] = useState<FormSpec>(view.spec);
   const [dirty, setDirty] = useState(false);
+  /** The version the edits started from, which a save is made against whatever newer version a refresh brings. */
+  const [base, setBase] = useState(view.version);
   const [saving, setSaving] = useState(false);
   const [problems, setProblems] = useState<ReturnType<typeof issuesByField>>({ fields: new Map(), form: [] });
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +68,7 @@ export function BulkScanEditor({
   const latest = Math.max(...view.versions.map((v) => v.version));
   const superseded = view.version !== latest;
   const toReview = reviewTotal(spec, problems.fields);
-  const current = view.versions.find((v) => v.version === view.version);
+  const current = view.versions.find((v) => v.version === base);
 
   /** The spec as the last change left it, which a change that arrives later (a case type's fields) is made against, not the one rendered when it began. */
   const latestSpec = useRef(spec);
@@ -81,11 +93,13 @@ export function BulkScanEditor({
       const response = await fetch(`/api/ui/assistant/bulk-scan/${encodeURIComponent(view.id)}/versions`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ baseVersion: view.version, spec })
+        body: JSON.stringify({ baseVersion: base, spec })
       });
       const body = (await response.json().catch(() => ({}))) as { version?: unknown; issues?: { path: string; message: string }[]; error?: unknown };
       if (response.ok && typeof body.version === "number") {
         setProblems({ fields: new Map(), form: [] });
+        setBase(body.version);
+        setDirty(false);
         router.push(`/assistant/bulk-scan/${view.id}`);
         router.refresh();
         return;
@@ -101,14 +115,14 @@ export function BulkScanEditor({
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="@container flex flex-col gap-4">
       <section aria-labelledby="bulk-scan-form" className="flex flex-col gap-3 rounded-xl border border-asst-line bg-asst-panel p-4">
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
           <h2 id="bulk-scan-form" className="text-sm font-semibold">
             Form details
           </h2>
           <p className="flex flex-wrap items-center gap-x-3 text-xs text-asst-muted">
-            <span>{`Version ${view.version}${current ? `, saved by ${current.savedBy}, ${day(current.savedAt)}` : ""}`}</span>
+            <span>{`Version ${base}${current ? `, saved by ${current.savedBy}, ${day(current.savedAt)}` : ""}`}</span>
             {current?.signedOffAt && current.signedOffBy ? (
               <span className="text-asst-ok">{`Signed off by ${current.signedOffBy}, ${day(current.signedOffAt)}`}</span>
             ) : (
@@ -131,7 +145,7 @@ export function BulkScanEditor({
             )}
           </p>
         </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,2fr)]">
+        <div className="grid grid-cols-1 gap-3 @min-[640px]:grid-cols-2 @min-[960px]:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,2fr)]">
           <Labelled label="Form name">
             <input value={spec.form.name} className={INPUT} onChange={(e) => change(patchHeader(spec, { name: e.target.value }))} />
           </Labelled>
@@ -148,8 +162,8 @@ export function BulkScanEditor({
       <Tabs tab={tab} onTab={setTab} />
 
       <div role="tabpanel" id="bulk-scan-panel-Edit" aria-labelledby="bulk-scan-tab-Edit" hidden={tab !== "Edit"}>
-        <div className="grid grid-cols-[minmax(0,1fr)] gap-4 xl:grid-cols-[440px_minmax(0,1fr)] xl:items-start">
-          <div className="max-h-[60dvh] overflow-y-auto rounded-xl xl:sticky xl:top-3 xl:max-h-[calc(100dvh-7rem)]">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-4 @min-[960px]:grid-cols-[440px_minmax(0,1fr)] @min-[960px]:items-start">
+          <div className="max-h-[60dvh] overflow-y-auto rounded-xl @min-[960px]:sticky @min-[960px]:top-3 @min-[960px]:max-h-[calc(100dvh-7rem)]">
             <BulkScanOutline
               spec={spec}
               selection={selection}

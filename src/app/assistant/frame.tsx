@@ -1,5 +1,4 @@
 import { cookies } from "next/headers";
-import { notFound } from "next/navigation";
 import { deleteConversation, pinConversation, renameConversation, saveAssistantModel, startConversation } from "@/app/_actions/assistant";
 import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/assistant-files";
 import { readAssistantAgent, readGitIdentity, readSchedule, saveSchedule } from "@/app/_actions/assistant-settings";
@@ -14,6 +13,7 @@ import { savedCredentialsData } from "@/assistant/saved-credentials";
 import { assistantPluginsData } from "@/assistant/settings";
 import { SIDEBAR_COOKIE, sidebarCollapsedOf } from "@/assistant/sidebar";
 import { THEME_COOKIE, themeOf } from "@/assistant/theme";
+import { WAITING_COOKIE } from "@/assistant/waiting";
 import { AssistantShell, type ConversationActions } from "@/components/assistant/AssistantShell";
 import { feedbackEnabled } from "@/feedback/settings";
 import type { Viewer } from "@/viewer/identity";
@@ -27,25 +27,9 @@ const ROW_ACTIONS: ConversationActions = {
   archiveFeedback: archiveFeedbackProject
 };
 
-/** Not found while prototype feedback is off, so its pages say nothing about a feature that is not there. */
-export function requireFeedback(): void {
-  if (!feedbackEnabled()) {
-    notFound();
-  }
-}
-
-/**
- * The feedback pages' frame: the Assistant's sidebar and settings, as every Assistant page has them, around the page.
- * It holds no getting-ready gate, since nothing here runs on the person's assistant. `projectId` is the project the
- * page is about, whose row the sidebar shows as the current one.
- */
-export async function FeedbackFrame({
-  viewer,
-  projectId = null,
-  children
-}: Readonly<{ viewer: Viewer; projectId?: string | null; children: React.ReactNode }>) {
+/** What every Assistant page's shell is drawn from, read once per request: the sidebar, the settings and the viewer's cookies. */
+export async function loadFrame(viewer: Viewer) {
   const jar = await cookies();
-  const theme = themeOf(jar.get(THEME_COOKIE)?.value);
   const [home, claudeMd, mine, files, size, defaults, model] = await Promise.all([
     openAssistant(viewer),
     claudeMdSettings(viewer),
@@ -55,19 +39,43 @@ export async function FeedbackFrame({
     assistantExportDefaults(viewer),
     assistantModel(viewer)
   ]);
+  // The sign-in the settings' searches and a chat's document panel export with.
   const atlassian = {
     connected: home.credentials.available && home.credentials.statuses.some((status) => status.kind === "atlassian" && status.stored),
     login: home.assistant.logins.find((login) => login.kind === "atlassian") ?? null
   };
+  return {
+    viewerName: viewer.name,
+    theme: themeOf(jar.get(THEME_COOKIE)?.value),
+    collapsed: sidebarCollapsedOf(jar.get(SIDEBAR_COOKIE)?.value),
+    waiting: jar.get(WAITING_COOKIE)?.value,
+    home,
+    claudeMd,
+    mine,
+    files,
+    size,
+    defaults,
+    model,
+    atlassian
+  };
+}
+
+/** The Assistant's sidebar and settings around `children`, from what `loadFrame` read. `activeId` is the sidebar row shown as the current one. */
+export function AssistantShellFrame({
+  frame,
+  activeId = null,
+  children
+}: Readonly<{ frame: Awaited<ReturnType<typeof loadFrame>>; activeId?: string | null; children: React.ReactNode }>) {
+  const { home, claudeMd, mine, files, size, defaults, model, atlassian } = frame;
   const plugins = assistantPluginsData(home.assistant, home.plugins);
   const pluginSettings = plugins && { ...plugins, save: saveVirtualAgentPod };
   return (
     <AssistantShell
-      viewerName={viewer.name}
+      viewerName={frame.viewerName}
       groups={home.conversations}
-      activeId={projectId}
-      theme={theme}
-      collapsed={sidebarCollapsedOf(jar.get(SIDEBAR_COOKIE)?.value)}
+      activeId={activeId}
+      theme={frame.theme}
+      collapsed={frame.collapsed}
       actions={ROW_ACTIONS}
       connections={connectionsData(home.assistant, home.credentials)}
       viewerRoute={home.credentials.modelRoute}
@@ -90,7 +98,24 @@ export async function FeedbackFrame({
       schedule={{ load: readSchedule, save: saveSchedule }}
       tokens={{ ...savedCredentialsData(home.credentials, home.assistant.modelRoute), save: saveCredential, remove: removeCredential }}
     >
-      <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+      {children}
     </AssistantShell>
+  );
+}
+
+/**
+ * The frame of the Assistant's pages that are not a chat: the sidebar and settings around the page, in a scrolling pane.
+ * It holds no getting-ready gate, since nothing here runs on the person's assistant. `activeId` is the id of the sidebar
+ * row the page is about, shown as the current one. A page reads `loadFrame` beside its own data.
+ */
+export function AssistantFrame({
+  frame,
+  activeId = null,
+  children
+}: Readonly<{ frame: Awaited<ReturnType<typeof loadFrame>>; activeId?: string | null; children: React.ReactNode }>) {
+  return (
+    <AssistantShellFrame frame={frame} activeId={activeId}>
+      <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+    </AssistantShellFrame>
   );
 }

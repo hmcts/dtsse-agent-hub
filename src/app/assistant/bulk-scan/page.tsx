@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { deleteBulkScanSpec } from "@/app/_actions/bulk-scan";
+import { AssistantFrame, loadFrame } from "@/app/assistant/frame";
 import { BulkScanList } from "@/components/assistant/BulkScanList";
 import { BulkScanUpload } from "@/components/assistant/BulkScanUpload";
 import { requireViewer } from "@/viewer/current";
@@ -17,9 +18,9 @@ export const metadata: Metadata = { title: "Bulk Scan forms" };
  */
 export default async function BulkScanFormsPage() {
   const viewer = await requireViewer();
-  const [specs, podConversationId] = await Promise.all([bulkScanSpecs(viewer), bulkScanPodConversation(viewer)]);
+  const [frame, specs, podConversationId] = await Promise.all([loadFrame(viewer), bulkScanSpecs(viewer), bulkScanPodConversation(viewer)]);
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
+    <AssistantFrame frame={frame}>
       <div className="mx-auto flex max-w-[960px] flex-col gap-6 px-5 pb-10 pt-7">
         <div className="flex flex-col gap-2">
           <h1 className="text-[22px] font-semibold tracking-tight">Bulk Scan forms</h1>
@@ -36,6 +37,6 @@ export default async function BulkScanFormsPage() {
           </Link>
         </p>
       </div>
-    </div>
+    </AssistantFrame>
   );
 }

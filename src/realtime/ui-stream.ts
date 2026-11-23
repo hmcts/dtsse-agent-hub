@@ -220,6 +220,9 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
     // The owner's template library has a new answer; only their own tabs hear of it, and read the status again.
     case "assistant_docmosis_library":
       return isOwner(sources.viewerOid, { ownerOid: event.owner_oid }) ? sseEvent({ event: "assistant_docmosis_library", data: "{}" }) : undefined;
+    // The owner's forms are rows of their sidebar: only their own tabs hear of a change, and read the list again.
+    case "bulk_scan_spec":
+      return isOwner(sources.viewerOid, { ownerOid: event.owner_oid }) ? sseEvent({ event: "bulk_scan_spec", data: "{}" }) : undefined;
     case "feedback": {
       const team = await sources.feedbackTeam?.(event.project_id);
       if (team === undefined || feedbackProjectAccess(sources.viewerOid, team, team.memberOids) === "none") {

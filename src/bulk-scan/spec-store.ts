@@ -1,6 +1,10 @@
 import { isOwner } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import { isUuid } from "../agents/store.ts";
+import { nameHasTerms } from "../assistant/search-store.ts";
+import { SIDEBAR_LIMIT } from "../assistant/sidebar.ts";
+import { notify } from "../realtime/notify.ts";
+import { clientPrisma } from "../store/client-namespace.ts";
 import type { Database, Prisma, PrismaClient } from "../store/prisma.ts";
 
 /**
@@ -30,7 +34,7 @@ export interface SpecSummary {
   signedOff: boolean;
 }
 
-/** The owner's specs, newest first, each as its latest version. */
+/** The owner's specs, newest first, each as its latest version: what the list page shows, with no spec JSON read. */
 export async function listSpecs(db: Database, target: SpecTarget): Promise<SpecSummary[]> {
   allow(target);
   const rows = await db.bulkScanSpec.findMany({
@@ -49,6 +53,36 @@ export async function listSpecs(db: Database, target: SpecTarget): Promise<SpecS
       ? [{ id: row.id, name: row.name, version: latest.version, savedAt: latest.createdAt.toISOString(), signedOff: latest.signedOffAt !== null }]
       : [];
   });
+}
+
+/** One spec as the sidebar lists it, at its latest version. */
+export interface SpecRow {
+  id: string;
+  name: string;
+  savedAt: Date;
+  signedOff: boolean;
+}
+
+/** Up to `limit` of the owner's specs that meet `where`, each at its latest version, most recently saved first. */
+async function latestSpecs(db: Database, ownerOid: string, where: Prisma.Sql, limit: number): Promise<SpecRow[]> {
+  return await db.$queryRaw<SpecRow[]>`
+    SELECT s.id::text AS id, s.name, v.created_at AS "savedAt", v.signed_off_at IS NOT NULL AS "signedOff"
+      FROM bulk_scan_spec s
+      JOIN LATERAL (SELECT created_at, signed_off_at FROM bulk_scan_spec_version WHERE spec_id = s.id ORDER BY version DESC LIMIT 1) v ON true
+     WHERE s.owner_oid = ${ownerOid} AND ${where}
+     ORDER BY v.created_at DESC, s.id
+     LIMIT ${limit}
+  `;
+}
+
+/** The forms the sidebar lists: the owner's, at most `SIDEBAR_LIMIT`, with no spec JSON read. */
+export async function sidebarSpecs(db: Database, ownerOid: string, limit = SIDEBAR_LIMIT): Promise<SpecRow[]> {
+  return await latestSpecs(db, ownerOid, clientPrisma().sql`true`, limit);
+}
+
+/** Up to `limit` of the owner's specs whose name holds every one of `terms`, which are lower-case already. */
+export async function searchSpecs(db: Database, ownerOid: string, terms: readonly string[], limit: number): Promise<SpecRow[]> {
+  return terms.length === 0 ? [] : await latestSpecs(db, ownerOid, nameHasTerms("s.name", terms), limit);
 }
 
 export interface VersionEntry {
@@ -124,6 +158,7 @@ export async function createSpecs(prisma: PrismaClient, target: SpecTarget, spec
       });
       ids.push(created.id);
     }
+    await notify(tx, { type: "bulk_scan_spec", owner_oid: target.ownerOid });
     return ids;
   });
 }
@@ -155,31 +190,40 @@ export async function saveVersion(prisma: PrismaClient, target: SpecTarget, id: 
     const version = newest + 1;
     await tx.bulkScanSpecVersion.create({ data: { specId: id, version, spec: next.spec, savedByOid: target.actorOid } });
     await tx.bulkScanSpec.update({ where: { id }, data: { name: next.name } });
+    await notify(tx, { type: "bulk_scan_spec", owner_oid: target.ownerOid });
     return version;
   });
 }
 
 /** Marks one version signed off by the actor now. A version signed off once keeps its first sign-off. */
-export async function signOffVersion(db: Database, target: SpecTarget, id: string, version: number): Promise<void> {
+export async function signOffVersion(prisma: PrismaClient, target: SpecTarget, id: string, version: number): Promise<void> {
   allow(target);
   if (!isUuid(id)) {
     throw new HttpError(404, GONE);
   }
-  const { count } = await db.bulkScanSpecVersion.updateMany({
-    where: { specId: id, version, signedOffAt: null, bulkScanSpec: { ownerOid: target.ownerOid } },
-    data: { signedOffByOid: target.actorOid, signedOffAt: new Date() }
+  await prisma.$transaction(async (tx) => {
+    const { count } = await tx.bulkScanSpecVersion.updateMany({
+      where: { specId: id, version, signedOffAt: null, bulkScanSpec: { ownerOid: target.ownerOid } },
+      data: { signedOffByOid: target.actorOid, signedOffAt: new Date() }
+    });
+    if (count === 0) {
+      throw new HttpError(409, "that version is already signed off, or no longer exists");
+    }
+    await notify(tx, { type: "bulk_scan_spec", owner_oid: target.ownerOid });
   });
-  if (count === 0) {
-    throw new HttpError(409, "that version is already signed off, or no longer exists");
-  }
 }
 
 /** Deletes one of the owner's specs with every version of it, and reports whether there was one. */
-export async function deleteSpec(db: Database, target: SpecTarget, id: string): Promise<boolean> {
+export async function deleteSpec(prisma: PrismaClient, target: SpecTarget, id: string): Promise<boolean> {
   allow(target);
   if (!isUuid(id)) {
     return false;
   }
-  const { count } = await db.bulkScanSpec.deleteMany({ where: { id, ownerOid: target.ownerOid } });
-  return count > 0;
+  return await prisma.$transaction(async (tx) => {
+    const { count } = await tx.bulkScanSpec.deleteMany({ where: { id, ownerOid: target.ownerOid } });
+    if (count > 0) {
+      await notify(tx, { type: "bulk_scan_spec", owner_oid: target.ownerOid });
+    }
+    return count > 0;
+  });
 }
