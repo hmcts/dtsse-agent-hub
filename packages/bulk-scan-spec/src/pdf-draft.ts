@@ -1,4 +1,5 @@
 import { noteFor } from "./hints.ts";
+import { DATE_PARTS } from "./key-proposal.ts";
 import type { Line, PdfContent, Widget } from "./pdf-extract.ts";
 import type { Field } from "./schema.ts";
 
@@ -22,7 +23,10 @@ export interface Choice {
   route?: Route;
 }
 
-/** One field of the draft before keys and CCD ids are proposed. `slotLabels` has one entry per key the field will carry. */
+/**
+ * One field of the draft before keys and CCD ids are proposed. `slotLabels` has one entry per key the field will carry,
+ * except a date, whose one entry names the question and whose three keys are that key's base with Day, Month and Year.
+ */
 export interface DraftField {
   page: number;
   sectionId: string;
@@ -31,6 +35,8 @@ export interface DraftField {
   question: string;
   field: Field;
   slotLabels: string[];
+  /** A date's boxes: its keys are the one proposed key with each of these appended. */
+  dateParts?: readonly string[];
   /** The number of boxes in an XoR group, which a Yes/No pair keeps although it has one key. */
   groupSize?: number;
   /** The margin note the form prints beside the question, which may state the format an answer takes. */
@@ -290,7 +296,8 @@ export function draftFields(content: PdfContent): DraftField[] {
       drafts.push({
         ...base,
         ...(note ? { note } : {}),
-        slotLabels: date ? date.map((p) => `${label} ${p.label}`) : [label],
+        slotLabels: [label],
+        ...(date ? { dateParts: DATE_PARTS } : {}),
         reasons: date ? [{ about: "type", reason: "three boxes labelled day, month and year", confidence: "medium" }] : [],
         field: {
           ...common,

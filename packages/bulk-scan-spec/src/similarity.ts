@@ -44,6 +44,9 @@ const STOPWORDS = new Set([
   "tick"
 ]);
 
+/** The text with its first letter in capitals. */
+export const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
+
 /** Lower-case words of a label or camelCase key, in order, as written; "applicant 1" is one word, and possessives and filler words are dropped. */
 export function words(text: string): string[] {
   return text

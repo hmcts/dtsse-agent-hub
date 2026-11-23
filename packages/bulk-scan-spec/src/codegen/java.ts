@@ -1,6 +1,7 @@
 import { renderLogic } from "../logic.ts";
 import type { Field, FormSpec, Operand, Rule } from "../schema.ts";
 import { allFields, isNegation, isTickedTest } from "../schema.ts";
+import { cap } from "../similarity.ts";
 import type { OutputFile } from "./envelopes.ts";
 import type { KeyModel } from "./model.ts";
 import {
@@ -27,7 +28,6 @@ export interface JavaOptions {
 }
 
 const q = (s: string): string => JSON.stringify(s);
-const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
 const low = (s: string): string => s.charAt(0).toLowerCase() + s.slice(1);
 
 /**

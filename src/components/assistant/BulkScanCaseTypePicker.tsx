@@ -199,7 +199,7 @@ export function BulkScanCaseTypePicker({
           </optgroup>
         ))}
       </select>
-      <output className="block text-[13px] text-asst-muted">
+      <p aria-live="polite" className="text-[13px] text-asst-muted">
         {list.state === "none"
           ? NO_CHAT
           : waking
@@ -207,7 +207,7 @@ export function BulkScanCaseTypePicker({
             : fetching !== null
               ? "Reading the case type's fields. A service that builds its definition takes up to a minute…"
               : ""}
-      </output>
+      </p>
       {omitted > 0 ? (
         <p role="status" className="text-[13px] text-asst-muted">
           {`The case type has more fields than fit in one answer (1 MiB): ${omitted} were left out, the nested ones first. Fields not listed read as new.`}

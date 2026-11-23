@@ -297,32 +297,39 @@ const VIEW: BulkScanEditorView = {
   simulatorProblem: null
 };
 
+const SAVE = { name: /^Save as version/ };
+const open = (user: ReturnType<typeof userEvent.setup>, id: string) =>
+  user.click(screen.getByRole("button", { name: new RegExp(`^${id.replace(".", "\\.")} `) }));
+
 describe("bulk scan editor", () => {
-  it("should show each field's group, allowed values, TODOs and review markers", () => {
+  it("should show a field's group, allowed values, TODOs and review markers when it is open", () => {
     render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
 
     expect(screen.getByText("decide the outcome")).toBeTruthy();
-    expect(screen.getAllByText(/Check the group \(low confidence\)/).length).toBeGreaterThan(0);
-    expect((screen.getByLabelText(/keys of 1.1 are a mutually exclusive group/) as HTMLInputElement).checked).toBe(true);
-    expect((screen.getByLabelText("Allowed values of a in 1.1") as HTMLTextAreaElement).value).toBe("true\nfalse");
+    expect(screen.getByText(/Check the group/)).toBeTruthy();
+    expect((screen.getByRole("checkbox", { name: /mutually exclusive/ }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText("a value 1") as HTMLInputElement).value).toBe("true");
+    expect((screen.getByLabelText("a value 2") as HTMLInputElement).value).toBe("false");
     expect(screen.getByText(/The sheet says "joint"/)).toBeTruthy();
-    expect(screen.getByRole("heading", { name: /Review checklist \(1 guesses/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "1 to review" })).toBeTruthy();
   });
 
   it("should save only after a change, as the next version, and go to it", async () => {
     fetchMock.mockResolvedValue(reply(201, { version: 2 }));
+    const user = userEvent.setup();
     render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
-    const save = screen.getByRole("button", { name: "Save as a new version" }) as HTMLButtonElement;
+    const save = screen.getByRole("button", SAVE) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
 
-    fireEvent.change(screen.getByLabelText("Label of 1.2"), { target: { value: "Full name" } });
-    fireEvent.change(screen.getByLabelText("Maximum length of 1.2"), { target: { value: "40" } });
-    fireEvent.change(screen.getByLabelText("Minimum length of 1.2"), { target: { value: "5" } });
+    await open(user, "1.2");
+    fireEvent.change(screen.getByLabelText("Label"), { target: { value: "Full name" } });
+    fireEvent.change(screen.getByLabelText("Max length"), { target: { value: "40" } });
+    fireEvent.change(screen.getByLabelText("Min length"), { target: { value: "5" } });
     fireEvent.change(screen.getByLabelText("Case type (CCD case type id)"), { target: { value: "CriminalInjuriesCompensation" } });
-    fireEvent.change(screen.getByLabelText("Keys of 1.2"), { target: { value: "name, other" } });
-    fireEvent.blur(screen.getByLabelText("Keys of 1.2"));
-    fireEvent.change(screen.getByLabelText("CCD ids of 1.2"), { target: { value: "ccdName" } });
-    fireEvent.blur(screen.getByLabelText("CCD ids of 1.2"));
+    await user.click(screen.getByRole("button", { name: "Add a key" }));
+    await user.type(screen.getByLabelText("Key 2"), "other{Enter}");
+    fireEvent.change(screen.getByLabelText("CCD ids"), { target: { value: "ccdName" } });
+    fireEvent.blur(screen.getByLabelText("CCD ids"));
     fireEvent.change(screen.getByLabelText("Form type (document_sub_type)"), { target: { value: "T2" } });
     fireEvent.click(save);
 
@@ -332,7 +339,7 @@ describe("bulk scan editor", () => {
     expect(sent.sections[0].fields[1]).toMatchObject({ label: "Full name", maxLength: 40, minLength: 5, keys: ["name", "other"], ccd: ["ccdName"] });
   });
 
-  it("should mark the rows the schema refused, and keep the person's edits", async () => {
+  it("should mark the fields the schema refused and keep the person's edits when a save is refused", async () => {
     fetchMock.mockResolvedValue(
       reply(422, {
         error: "the spec has errors",
@@ -342,15 +349,17 @@ describe("bulk scan editor", () => {
         ]
       })
     );
+    const user = userEvent.setup();
     render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
 
-    fireEvent.change(screen.getByLabelText("Label of 1.2"), { target: { value: "Full name" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save as a new version" }));
+    await open(user, "1.2");
+    fireEvent.change(screen.getByLabelText("Label"), { target: { value: "Full name" } });
+    fireEvent.click(screen.getByRole("button", SAVE));
 
     expect(await screen.findByText("keys.0: Too small")).toBeTruthy();
     expect(screen.getByText("sections: bad key")).toBeTruthy();
-    expect(screen.getByText("the spec has errors, marked in the rows below")).toBeTruthy();
-    expect((screen.getByLabelText("Label of 1.2") as HTMLInputElement).value).toBe("Full name");
+    expect(screen.getByText("the spec has errors, marked in the outline")).toBeTruthy();
+    expect((screen.getByLabelText("Label") as HTMLTextAreaElement).value).toBe("Full name");
     expect(push).not.toHaveBeenCalled();
   });
 
@@ -359,88 +368,87 @@ describe("bulk scan editor", () => {
     render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
 
     fireEvent.change(screen.getByLabelText("PO box"), { target: { value: "PO 1" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save as a new version" }));
+    fireEvent.click(screen.getByRole("button", SAVE));
 
     expect((await screen.findByText(/Check your connection/)).textContent).toContain("Check your connection");
-    within(document.body).getByText(/not saved/);
+    within(document.body).getByText("Unsaved changes");
   });
 
-  it("should offer an input type and mandatory choice per field", () => {
+  it("should offer an input type and mandatory choice per field when a field is open", async () => {
+    const user = userEvent.setup();
     render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
 
-    fireEvent.change(screen.getByLabelText("Input type of 1.2"), { target: { value: "date" } });
-    fireEvent.change(screen.getByLabelText("Mandatory of 1.2"), { target: { value: "mandatory" } });
-    fireEvent.change(screen.getByLabelText("Regex of 1.2"), { target: { value: "^x$" } });
-    fireEvent.change(screen.getByLabelText("ID of 1.2"), { target: { value: "1.3" } });
+    await open(user, "1.2");
+    fireEvent.change(screen.getByLabelText("Input type"), { target: { value: "date" } });
+    fireEvent.change(screen.getByLabelText("Mandatory"), { target: { value: "mandatory" } });
+    fireEvent.change(screen.getByLabelText("Regex"), { target: { value: "^x$" } });
+    fireEvent.change(screen.getByLabelText("ID"), { target: { value: "1.3" } });
 
-    expect((screen.getByLabelText("Input type of 1.3") as HTMLSelectElement).value).toBe("date");
-    expect((screen.getByLabelText("Regex of 1.3") as HTMLInputElement).value).toBe("^x$");
+    expect((screen.getByLabelText("Input type") as HTMLSelectElement).value).toBe("date");
+    expect((screen.getByLabelText("Regex") as HTMLInputElement).value).toBe("^x$");
+    expect(screen.getByRole("button", { name: /^1\.3 / })).toBeTruthy();
   });
 });
 
 describe("typing into the editor", () => {
-  it("should keep what is typed in the keys and CCD ids boxes, separators included, and send the words", async () => {
+  it("should keep what is typed in a key and the CCD ids box, and send the words when the box is left", async () => {
     fetchMock.mockResolvedValue(reply(201, { version: 2 }));
     const user = userEvent.setup();
     render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
-    const keys = screen.getByLabelText("Keys of 1.2") as HTMLInputElement;
+    await open(user, "1.2");
+    const key = screen.getByLabelText("Key 1") as HTMLInputElement;
 
-    await user.clear(keys);
-    await user.type(keys, "name, other");
-    expect(keys.value).toBe("name, other");
-    await user.type(screen.getByLabelText("CCD ids of 1.2"), "ccdA ccdB");
+    await user.clear(key);
+    await user.type(key, "nameTwo");
+    expect(key.value).toBe("nameTwo");
+    await user.type(screen.getByLabelText("CCD ids"), "ccdA, ccdB");
+    expect((screen.getByLabelText("CCD ids") as HTMLInputElement).value).toBe("ccdA, ccdB");
+    await user.tab();
 
-    expect(keys.value).toBe("name other");
-    expect((screen.getByLabelText("CCD ids of 1.2") as HTMLInputElement).value).toBe("ccdA ccdB");
-    await user.click(screen.getByRole("button", { name: "Save as a new version" }));
+    await user.click(screen.getByRole("button", SAVE));
     const field = JSON.parse(fetchMock.mock.calls[0]?.[1].body).spec.sections[0].fields[1];
-    expect([field.keys, field.ccd]).toEqual([
-      ["name", "other"],
-      ["ccdA", "ccdB"]
-    ]);
+    expect([field.keys, field.ccd]).toEqual([["nameTwo"], ["ccdA", "ccdB"]]);
   });
 
-  it("should take digits only in the maximum length box, so it is never not a number", async () => {
+  it("should take digits only in the max length box, so it is never not a number, when letters are typed", async () => {
     fetchMock.mockResolvedValue(reply(201, { version: 2 }));
     const user = userEvent.setup();
     render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
-    const max = screen.getByLabelText("Maximum length of 1.2") as HTMLInputElement;
+    await open(user, "1.2");
+    const max = screen.getByLabelText("Max length") as HTMLInputElement;
 
     await user.type(max, "4x2");
     expect(max.value).toBe("42");
-    await user.click(screen.getByRole("button", { name: "Save as a new version" }));
+    await user.click(screen.getByRole("button", SAVE));
 
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body).spec.sections[0].fields[1].maxLength).toBe(42);
   });
 
-  it("should show a hint in each row input and name the row's controls for a screen reader and a tooltip when the inputs are empty", () => {
+  it("should name each field's and section's controls for a screen reader and a tooltip, and hint each input, when the inputs are empty", async () => {
+    const user = userEvent.setup();
     render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
+    await open(user, "1.2");
 
-    for (const [label, hint] of [
-      ["Minimum length of 1.2", "min length"],
-      ["Maximum length of 1.2", "max length"],
-      ["Regex of 1.2", "regex (e.g. ^[XG]\\d+$)"]
-    ] as const) {
-      expect((screen.getByLabelText(label) as HTMLInputElement).placeholder).toBe(hint);
-    }
-    const down = screen.getByRole("button", { name: "Move 1.2 down" });
-    expect(down.getAttribute("title")).toBe("Move 1.2 down");
+    expect(screen.getByRole("button", { name: "Move 1.2 up" }).getAttribute("title")).toBe("Move 1.2 up");
     expect(screen.getByRole("button", { name: "Remove 1.2" }).getAttribute("title")).toBe("Remove 1.2");
     expect(screen.getByRole("button", { name: "Move section 1 up" }).getAttribute("title")).toBe("Move section 1 up");
+    expect((screen.getByLabelText("Regex") as HTMLInputElement).placeholder).toBe("e.g. ^[XG]\\d+$");
   });
 
   it("should send the version the edit started from, and refuse to save an older version over the later ones", async () => {
     fetchMock.mockResolvedValue(reply(201, { version: 4 }));
     const user = userEvent.setup();
     render(<BulkScanEditor view={{ ...VIEW, version: 3, versions: [{ ...VERSIONS[0]!, version: 3 }] }} signOff={vi.fn()} />);
-    await user.type(screen.getByLabelText("Label of 1.2"), "!");
-    await user.click(screen.getByRole("button", { name: "Save as a new version" }));
+    await open(user, "1.2");
+    await user.type(screen.getByLabelText("Label"), "!");
+    await user.click(screen.getByRole("button", SAVE));
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body).baseVersion).toBe(3);
 
     cleanup();
     render(<BulkScanEditor view={{ ...VIEW, version: 1, versions: VERSIONS }} signOff={vi.fn()} />);
-    await user.type(screen.getByLabelText("Label of 1.2"), "!");
-    expect((screen.getByRole("button", { name: "Save as a new version" }) as HTMLButtonElement).disabled).toBe(true);
+    await open(user, "1.2");
+    await user.type(screen.getByLabelText("Label"), "!");
+    expect((screen.getByRole("button", SAVE) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(/open version 2 to change it/i)).toBeTruthy();
   });
 
@@ -449,8 +457,9 @@ describe("typing into the editor", () => {
     const user = userEvent.setup();
     render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
 
-    await user.type(screen.getByLabelText("Label of 1.2"), "!");
-    await user.click(screen.getByRole("button", { name: "Save as a new version" }));
+    await open(user, "1.2");
+    await user.type(screen.getByLabelText("Label"), "!");
+    await user.click(screen.getByRole("button", SAVE));
 
     expect((await screen.findByText(/newer version/)).textContent).toContain("reload");
   });

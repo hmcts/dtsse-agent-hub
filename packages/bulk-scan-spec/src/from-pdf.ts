@@ -89,13 +89,21 @@ export async function fromPdf(input: FromPdfInput): Promise<FromPdfResult> {
     return { bundle: bundleSchema.parse({ forms: [{ form }] }), checklist: [], needsReview: { reason, promptText: promptFor(input.pdf, content) } };
   }
   const drafts = draftFields(content);
-  const slots = drafts.flatMap((d) => d.slotLabels.map((label) => ({ label, context: `${d.sectionTitle} ${d.question}` })));
+  const slots = drafts.flatMap((d) =>
+    d.slotLabels.map((label) => ({
+      label,
+      context: `${d.sectionTitle} ${d.question}`,
+      section: d.sectionTitle,
+      ...(d.dateParts ? { parts: d.dateParts } : {})
+    }))
+  );
   const tags = drafts.flatMap((d) => d.slotLabels.map(() => `Q${(d.field.id ?? `p${d.page}`).replace(/\./g, "_")}`));
   const keys = proposeKeys(slots, input.houseKeys ?? [], tags);
   let next = 0;
   const withKeys = drafts.map((d) => {
-    const mine = keys.slice(next, next + d.slotLabels.length);
+    const slotKeys = keys.slice(next, next + d.slotLabels.length);
     next += d.slotLabels.length;
+    const mine = slotKeys.flatMap((k) => k.parts ?? [k]);
     return { d, mine };
   });
   const decisions = decideMandatory(
@@ -108,8 +116,9 @@ export async function fromPdf(input: FromPdfInput): Promise<FromPdfResult> {
   withKeys.forEach(({ d, mine }, i) => {
     const review: NonNullable<Field["review"]> = [];
     const where = `${d.field.id ?? ""} ${d.field.label}`.trim();
-    for (const k of mine) {
-      review.push({ about: "key", reason: `${k.key}: ${k.reason}`, confidence: k.confidence });
+    // A date's keys share one reason, which names all three, so it is one marker.
+    for (const k of d.dateParts ? mine.slice(0, 1) : mine) {
+      review.push({ about: "key", reason: d.dateParts ? k.reason : `${k.key}: ${k.reason}`, confidence: k.confidence });
     }
     for (const r of d.reasons) {
       review.push(r);

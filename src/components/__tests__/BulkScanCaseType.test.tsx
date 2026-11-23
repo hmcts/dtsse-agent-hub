@@ -331,7 +331,8 @@ describe("the editor's case type", () => {
 
     expect(await screen.findByText("0 new case fields to add, 1 to choose")).toBeTruthy();
     expect(screen.getByText("Unsure")).toBeTruthy();
-    expect(screen.getByText(/choose which case field this is/)).toBeTruthy();
+    expect(screen.getByRole("img", { name: "CCD field still to choose" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /1 to review/ })).toBeTruthy();
   });
 
   it("should keep what was typed while the fields were being fetched when they arrive", async () => {
@@ -341,14 +342,14 @@ describe("the editor's case type", () => {
 
     await openPicker();
     await userEvent.selectOptions(select(), "sptribs/CriminalInjuriesCompensation");
-    const label = screen.getByLabelText("Label of 1.1") as HTMLInputElement;
+    const label = screen.getByLabelText("Label") as HTMLTextAreaElement;
     await userEvent.type(label, " (edited)");
     for (const id of Object.keys(pending)) {
       pending[id] = { status: "done", kind: "ccd.case-type-fields", result: { fields: ROWS, total: 2, omitted: 0 } };
     }
 
     expect(await screen.findByText("Unsure", {}, { timeout: 5000 })).toBeTruthy();
-    expect((screen.getByLabelText("Label of 1.1") as HTMLInputElement).value).toBe("Email address (edited)");
+    expect((screen.getByLabelText("Label") as HTMLTextAreaElement).value).toBe("Email address (edited)");
   });
 
   it("should keep the typed case type field off when the fields are being fetched", async () => {

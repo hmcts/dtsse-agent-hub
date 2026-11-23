@@ -6,6 +6,7 @@ import type { SpecSummary } from "@/bulk-scan/spec-store";
 import { SECONDARY } from "@/components/assistant/WelshParts";
 import type { ActionResult } from "@/web/action";
 import { actionThrew } from "@/web/action-fault";
+import { ukDate } from "@/web/format";
 
 export type DeleteSpecAction = (form: FormData) => Promise<ActionResult<{ confirmation: string }>>;
 
@@ -45,9 +46,7 @@ export function BulkScanList({ specs, remove }: Readonly<{ specs: readonly SpecS
             >
               {spec.name}
             </Link>
-            <span className="text-asst-muted">
-              {`Version ${spec.version}, saved ${new Date(spec.savedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`}
-            </span>
+            <span className="text-asst-muted">{`Version ${spec.version}, saved ${ukDate(new Date(spec.savedAt))}`}</span>
             <span className={spec.signedOff ? "text-asst-ok" : "text-asst-muted"}>{spec.signedOff ? "Signed off" : "Not signed off"}</span>
             {confirming === spec.id ? (
               <button type="button" className={SECONDARY} onClick={() => void deleteSpec(spec.id)}>

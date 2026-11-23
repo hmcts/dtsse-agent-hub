@@ -2,7 +2,8 @@ import { type FormSpec, fieldSchema, formSpecSchema } from "@hmcts-cft/bulk-scan
 import { newCcdFields } from "@hmcts-cft/bulk-scan-spec/ccd-match";
 import { describe, expect, it } from "vitest";
 import { ccdCounts, chooseCandidate, chooseNew, editNewField, withCaseType, withoutCaseType } from "./case-type.ts";
-import { patchField, reviewChecklist } from "./edit.ts";
+import { patchField } from "./edit.ts";
+import { needsReview, reviewTotal } from "./outline.ts";
 
 const field = (label: string, extra: Record<string, unknown> = {}) => fieldSchema.parse({ label, keys: [label.replace(/\W/g, "")], ...extra });
 const spec = (...fields: ReturnType<typeof field>[]): FormSpec =>
@@ -257,7 +258,8 @@ describe("ccdCounts and the checklist", () => {
   it("should list an unsure row as something to resolve when it is undecided", () => {
     const matched = withCaseType(spec(field("Email address")), CHOICE, FIELDS);
 
-    expect(reviewChecklist(matched)).toMatchObject([{ about: "ccd", unresolved: true, confidence: "low" }]);
-    expect(reviewChecklist(chooseNew(matched, 0, 0))).toEqual([]);
+    expect(reviewTotal(matched)).toBe(1);
+    expect(needsReview(rows(matched)[0] as never)).toBe(true);
+    expect(reviewTotal(chooseNew(matched, 0, 0))).toBe(0);
   });
 });
