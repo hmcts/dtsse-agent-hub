@@ -39,6 +39,7 @@ export function BulkScanUpload({ podConversationId = null }: Readonly<{ podConve
       body.set("caseType", picked.caseType);
       body.set("product", picked.product);
       body.set("config", picked.config ?? "");
+      body.set("repo", picked.repo ?? "");
       body.set("fields", JSON.stringify(picked.rows));
     }
     setBusy(true);

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { REPO_PATH } from "@hmcts-cft/bulk-scan-spec/schema";
 import { describe, expect, it } from "vitest";
 import { HttpError } from "../agent-api/http.ts";
 import { CCD_CASE_TYPE_FIELDS, CCD_CASE_TYPES, MAX_CASE_TYPE_FIELDS, MAX_FIELDS_BYTES } from "./ccd-jobs.ts";
@@ -72,5 +74,15 @@ describe("the CCD pod-job kinds", () => {
     const result = { case_types: [{ product: "sptribs", service: "sptribs", case_type: "X", config: "something-new" }] };
 
     expect(checkPodJobResult(CCD_CASE_TYPES, result)).toEqual({ case_types: [{ product: "sptribs", service: "sptribs", case_type: "X", config: null }] });
+  });
+});
+
+describe("the repo path the pod and the hub accept", () => {
+  it("should be the same pattern in the published client as in the spec package, which the client cannot import", () => {
+    const client = readFileSync(new URL("../../packages/agent-hub/src/assistant/ccd-case-types.ts", import.meta.url), "utf8");
+    const pattern = /const REPO_RE = \/(.+)\/;/.exec(client)?.[1];
+
+    expect(pattern).toBeDefined();
+    expect(new RegExp(pattern ?? "").source).toBe(REPO_PATH.source);
   });
 });

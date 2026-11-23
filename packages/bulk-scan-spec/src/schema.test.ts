@@ -31,6 +31,13 @@ describe("spec schema", () => {
     expect(allFields(spec).map((f) => f.id)).toEqual(["1.1", "1.2", "2.1"]);
   });
 
+  it("should keep a repo path in the form header, and drop one that is not a workspace path", () => {
+    const repo = (ccdRepo: string) => formSpecSchema.parse({ form: { name: "T", ccdRepo } }).form.ccdRepo;
+
+    expect(repo("apps/sptribs/sptribs-case-api")).toBe("apps/sptribs/sptribs-case-api");
+    expect([repo("../etc/passwd"), repo("/abs/path"), repo("single"), repo("a b/c")]).toEqual([undefined, undefined, undefined, undefined]);
+  });
+
   it("should allow a bundle when it has an overview and several forms", () => {
     const bundle = bundleSchema.parse({
       overview: { serviceName: "Divorce", contacts: [{ name: "A" }] },

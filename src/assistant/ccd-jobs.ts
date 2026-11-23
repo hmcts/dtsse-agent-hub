@@ -1,4 +1,4 @@
-import { CCD_CONFIGS } from "@hmcts-cft/bulk-scan-spec/schema";
+import { CCD_CONFIGS, REPO_PATH } from "@hmcts-cft/bulk-scan-spec/schema";
 import { z } from "zod";
 import { boundedArray } from "../agent-api/bounded-array.ts";
 import { definePodJobKind } from "./pod-jobs.ts";
@@ -41,7 +41,8 @@ export const CCD_CASE_TYPES = definePodJobKind({
         product: z.string().regex(PRODUCT),
         service: z.string().max(100),
         case_type: z.string().regex(CASE_TYPE_ID),
-        config: z.enum(CCD_CONFIGS).nullable().catch(null)
+        config: z.enum(CCD_CONFIGS).nullable().catch(null),
+        repo: z.string().regex(REPO_PATH).optional().catch(undefined)
       }),
       MAX_LISTED_CASE_TYPES,
       { message: `at most ${MAX_LISTED_CASE_TYPES} case types` }

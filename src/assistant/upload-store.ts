@@ -271,6 +271,33 @@ export async function putUploadPart(prisma: PrismaClient, upload: UploadRow, ind
 }
 
 /**
+ * A file the hub made itself, stored whole as a finished upload on the message `messageId`: its row, in the `stored`
+ * state, and its parts. The caller has settled the caps, since there is no browser to have been told them.
+ */
+export async function storeUploadBytes(
+  db: Database,
+  file: { conversationId: string; ownerOid: string; messageId: bigint; fileName: string; mediaType: string; bytes: Uint8Array }
+): Promise<string> {
+  const upload = await db.assistantUpload.create({
+    data: {
+      conversationId: file.conversationId,
+      ownerOid: file.ownerOid,
+      messageId: file.messageId,
+      fileName: fileNameOf(file.fileName),
+      storedName: storedNameOf(file.fileName),
+      mediaType: file.mediaType,
+      bytes: BigInt(file.bytes.byteLength),
+      state: "stored"
+    },
+    select: { id: true }
+  });
+  for (let index = 0; index < partCount(file.bytes.byteLength); index += 1) {
+    await db.assistantUploadPart.create({ data: { uploadId: upload.id, index, data: file.bytes.slice(index * PART_BYTES, (index + 1) * PART_BYTES) } });
+  }
+  return upload.id;
+}
+
+/**
  * Throws away an upload and its parts, whether its bytes finished arriving or not: `canWriteUpload` admits a
  * `pending` or a `stored` upload that is not yet on a message, and removing a finished chip from the composer is the
  * `stored` case. Nothing announces it: only the tab that made it knows it existed.

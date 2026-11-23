@@ -1,8 +1,9 @@
 import type { NextRequest } from "next/server";
 import { errorResponse } from "@/agent-api/http";
 import { attachmentDisposition } from "@/assistant/downloads";
+import { DEFAULT_JAVA_PACKAGE } from "@/bulk-scan/handoff";
 import { loadSpec } from "@/bulk-scan/load";
-import { codeDownload, DEFAULT_JAVA_PACKAGE, type Download, isTarget, sipDownload, transformDownload, versionOf } from "@/bulk-scan/spec";
+import { codeDownload, type Download, isTarget, sipDownload, transformDownload, versionOf } from "@/bulk-scan/spec";
 import { prisma } from "@/store/prisma";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 import { uiRefusals, uiViewer } from "../../../../request";

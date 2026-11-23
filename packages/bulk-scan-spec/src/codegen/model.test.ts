@@ -214,3 +214,15 @@ describe("which keys the engine reads", () => {
     expect([readsKeys(row({})), readsKeys(row({ mandatory: "not-read" })), readsKeys(row({ role: "label" }))]).toEqual([true, false, false]);
   });
 });
+
+describe("the package a target writes its code in", () => {
+  it("should strip the .bulkscan suffix for probate only", async () => {
+    const { codePackage } = await import("./model.ts");
+
+    expect([
+      codePackage("probate", "uk.gov.hmcts.probate.bulkscan"),
+      codePackage("nfdiv", "uk.gov.hmcts.x.bulkscan"),
+      codePackage("probate", "uk.gov.hmcts.probate")
+    ]).toEqual(["uk.gov.hmcts.probate", "uk.gov.hmcts.x.bulkscan", "uk.gov.hmcts.probate"]);
+  });
+});

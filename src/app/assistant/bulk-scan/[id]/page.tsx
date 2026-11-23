@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { handToAssistant } from "@/app/_actions/assistant";
 import { signOffSpec } from "@/app/_actions/bulk-scan";
 import { versionOf } from "@/bulk-scan/spec";
 import { BulkScanEditor } from "@/components/assistant/BulkScanEditor";
@@ -36,7 +37,13 @@ export default async function BulkScanSpecPage({
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto flex max-w-[1440px] flex-col gap-6 px-5 pb-10 pt-7">
         <h1 className="text-[22px] font-semibold tracking-tight">{view.name}</h1>
-        <BulkScanEditor key={`${view.id}:${view.version}`} view={view} signOff={signOffSpec} podConversationId={podConversationId} />
+        <BulkScanEditor
+          key={`${view.id}:${view.version}`}
+          view={view}
+          signOff={signOffSpec}
+          handToAssistant={handToAssistant}
+          podConversationId={podConversationId}
+        />
         <p className="text-[13px]">
           <Link href="/assistant/bulk-scan" className="text-asst-accent underline hover:text-asst-accent-hover">
             Back to Bulk Scan forms

@@ -111,13 +111,23 @@ export function mandatoryGroups(spec: FormSpec): MandatoryGroup[] {
 
 export type Data = Record<string, string>;
 
-/** The form type as a file-name stem, lower case; a form type that is not letters, digits, underscores and hyphens is refused. */
-export function formStem(spec: FormSpec): string {
-  const stem = spec.form.formType.trim().toLowerCase();
+/** A form type as a file-name stem, lower case; one that is not letters, digits, underscores and hyphens is refused. */
+export function formStemOf(formType: string): string {
+  const stem = formType.trim().toLowerCase();
   if (!/^[a-z0-9][a-z0-9_-]*$/.test(stem)) {
-    throw new Error(`the form type "${spec.form.formType}" cannot be used in a file name: use letters, digits, underscores and hyphens`);
+    throw new Error(`the form type "${formType}" cannot be used in a file name: use letters, digits, underscores and hyphens`);
   }
   return stem;
+}
+
+/** The form type of a spec as a file-name stem. */
+export function formStem(spec: FormSpec): string {
+  return formStemOf(spec.form.formType);
+}
+
+/** The Java package a target writes its code in: the probate code sits in the service's own package, without the `.bulkscan` the others carry. */
+export function codePackage(target: string, basePackage: string): string {
+  return target === "probate" ? basePackage.replace(/\.bulkscan$/, "") : basePackage;
 }
 
 /** The option keys of a field's group that are keys of the model, in the group's order. */
