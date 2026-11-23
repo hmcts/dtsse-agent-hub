@@ -92,6 +92,22 @@ export const reviewSchema = z.object({
 });
 export type Review = z.infer<typeof reviewSchema>;
 
+export const CCD_STATUSES = ["existing", "new", "unsure"] as const;
+
+/**
+ * How a field's CCD id stands against the form's case type: `existing` is a field the case type already has, `new` one
+ * to add (its proposed id and CCD FieldType are `newField`, and the id is also the field's `ccd`), and `unsure` a
+ * field with no id yet and `candidates` the person picks from, or `newField` to add instead.
+ */
+export const ccdMatchSchema = z.object({
+  status: z.enum(CCD_STATUSES),
+  candidates: z.array(z.object({ id: z.string(), type: z.string(), label: z.string().optional() })).optional(),
+  newField: z.object({ id: z.string(), type: z.string() }).optional(),
+  /** Why the matcher decided as it did, for the person to check. */
+  reason: z.string().optional()
+});
+export type CcdMatch = z.infer<typeof ccdMatchSchema>;
+
 export const fieldSchema = z
   .object({
     /** The sheet's ID column: "1.1", or a label such as "QR code" on non-question rows. Blank on continuation rows. */
@@ -111,6 +127,8 @@ export const fieldSchema = z
     keys: z.array(z.string()).default([]),
     /** CCD case field ids the keys feed. */
     ccd: z.array(z.string()).default([]),
+    /** Whether the ids in `ccd` exist in the form's case type; absent when no case type was matched against. */
+    ccdMatch: ccdMatchSchema.optional(),
     /** Anything in the CCD column that is not a field id, e.g. "No corresponding field on CCD". */
     ccdNote: z.string().optional(),
     validationRule: z.string().optional(),
@@ -173,6 +191,9 @@ export const formHeaderSchema = z.object({
   /** CCD case type and create event the transformation targets. */
   ccdCaseTypeId: z.string().optional(),
   ccdEventId: z.string().optional(),
+  /** The workspace product that defines the case type, and how it configures CCD; the picker sets both. */
+  ccdProduct: z.string().optional(),
+  ccdConfig: z.enum(["config-generator", "json", "hybrid"]).optional(),
   /** OCR keys holding party surnames, which the orchestrator matches against existing cases. */
   surnameKeys: z.array(z.string()).optional()
 });

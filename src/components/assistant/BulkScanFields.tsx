@@ -2,6 +2,7 @@
 
 import type { FormSpec } from "@hmcts-cft/bulk-scan-spec";
 import { Fragment, useState } from "react";
+import { chooseCandidate, chooseNew, editNewField } from "@/bulk-scan/case-type";
 import {
   addField,
   addSection,
@@ -21,6 +22,7 @@ import {
   sheetIds,
   wordsOf
 } from "@/bulk-scan/edit";
+import { BulkScanCcdStatus } from "@/components/assistant/BulkScanCcdStatus";
 import { BulkScanFieldDetails, type FormChoices } from "@/components/assistant/BulkScanFieldDetails";
 import { FIELD, SECONDARY } from "@/components/assistant/WelshParts";
 
@@ -227,6 +229,13 @@ export function BulkScanFields({
                     </td>
                     <td className="py-1.5 pr-2">
                       <WordsInput label={`CCD ids of ${name}`} placeholder="CCD ids" words={field.ccd} onChange={(ccd) => onChange(s, f, { ccd })} />
+                      <BulkScanCcdStatus
+                        field={field}
+                        name={name}
+                        onChooseCandidate={(id) => onSpec(chooseCandidate(spec, s, f, id), false)}
+                        onChooseNew={() => onSpec(chooseNew(spec, s, f), false)}
+                        onEditNew={(patch) => onSpec(editNewField(spec, s, f, patch), false)}
+                      />
                     </td>
                     <td className="py-1.5">
                       <div className="flex justify-end gap-1">

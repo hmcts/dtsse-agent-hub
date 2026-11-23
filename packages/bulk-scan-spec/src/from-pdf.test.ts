@@ -7,11 +7,14 @@ import type { FormSpec } from "./schema.ts";
 import { allFields, bundleSchema } from "./schema.ts";
 
 const HOUSE = ["soleOrApplicant1FirstName", "applicationForDivorce", "applicationForDissolution", "soleOrApplicant1Solicitor"];
-const CCD = ["applicant1FirstName", "divorceOrDissolution"];
+const CCD = [
+  { id: "applicant1FirstName", label: "First name", type: "Text" },
+  { id: "divorceOrDissolution", label: "Divorce or dissolution?", type: "FixedRadioList" }
+];
 
 describe("fromPdf on a form with fields", () => {
   it("should draft a spec that validates, with keys reused from the house style and CCD ids proposed", async () => {
-    const { bundle } = await fromPdf({ pdf: await makePdf("sample", SAMPLE_FORM), houseKeys: HOUSE, ccdIds: CCD });
+    const { bundle } = await fromPdf({ pdf: await makePdf("sample", SAMPLE_FORM), houseKeys: HOUSE, ccdFields: CCD });
     expect(bundleSchema.parse(bundle)).toEqual(bundle);
     const fields = bundle.forms.flatMap(allFields);
     expect(fields.flatMap((f) => f.keys)).toEqual(expect.arrayContaining(["soleOrApplicant1FirstName", "applicationForDivorce", "soleOrApplicant1Solicitor"]));
@@ -28,7 +31,7 @@ describe("fromPdf on a form with fields", () => {
   });
 
   it("should flag the key, group and CCD id of every field and list them lowest confidence first", async () => {
-    const { bundle, checklist } = await fromPdf({ pdf: await makePdf("sample", SAMPLE_FORM), houseKeys: HOUSE, ccdIds: CCD });
+    const { bundle, checklist } = await fromPdf({ pdf: await makePdf("sample", SAMPLE_FORM), houseKeys: HOUSE, ccdFields: CCD });
     const fields = bundle.forms.flatMap(allFields);
     for (const f of fields) {
       expect(f.review?.filter((r) => r.about === "key")).toHaveLength(f.keys.length);
@@ -37,7 +40,11 @@ describe("fromPdf on a form with fields", () => {
     expect(fields.find((f) => f.id === "1.1")?.review).toContainEqual({ about: "group", reason: "2 checkboxes under one question", confidence: "medium" });
     expect(checklist[0]).toMatch(/^\[low\]/);
     expect(checklist.at(-1)).toMatch(/^\[(medium|high)\]/);
-    expect(fields.find((f) => f.label === "Court name")?.review).toContainEqual({ about: "ccd", reason: "no CCD field close enough", confidence: "low" });
+    expect(fields.find((f) => f.label === "Court name")?.review).toContainEqual({
+      about: "ccd",
+      reason: "courtName: a new case field to add; no field of the case type is close",
+      confidence: "low"
+    });
   });
 
   it("should not claim CCD guesses when no definition was given", async () => {

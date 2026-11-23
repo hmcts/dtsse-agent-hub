@@ -1,5 +1,8 @@
 import {
+  type CcdField,
+  type CcdRow,
   caseDataFor,
+  ccdFieldsOf,
   type Data,
   expectedFor,
   type FormSpec,
@@ -25,6 +28,7 @@ import {
 } from "@hmcts-cft/bulk-scan-spec";
 import { z } from "zod";
 import { HttpError } from "../agent-api/http.ts";
+import { CCD_FIELD_ROWS } from "../assistant/ccd-jobs.ts";
 import { isPdf } from "../assistant/docmosis.ts";
 import { isXlsx } from "../assistant/welsh.ts";
 import { zipFiles } from "./zip.ts";
@@ -47,6 +51,17 @@ export const MAX_CASE_TYPE_ID = 100;
 export interface CcdUpload {
   bytes?: Uint8Array;
   caseType?: string;
+  /** The case type the person picked, whose fields their pod fetched: the product that defines it and how it configures CCD. */
+  picked?: { product: string; config?: "config-generator" | "json" | "hybrid"; fields: CcdField[] };
+}
+
+/** The case fields a pod job found, as the browser sends them back with an upload or a change of case type. */
+export function parseCcdFields(json: unknown): CcdField[] {
+  const parsed = CCD_FIELD_ROWS.safeParse(json);
+  if (!parsed.success) {
+    throw new HttpError(400, "the case type's fields are not in the shape the CCD job answers");
+  }
+  return ccdFieldsOf(parsed.data as CcdRow[]);
 }
 
 export interface Imported {
@@ -60,13 +75,17 @@ export interface Imported {
  */
 export async function importUpload(fileName: string, bytes: Uint8Array, ccd?: CcdUpload): Promise<Imported> {
   if (isPdf(bytes)) {
+    if (ccd?.picked && ccd.bytes) {
+      throw new HttpError(400, "give the case type's fields or a definition file, not both");
+    }
     const definition = ccd?.bytes
       ? await readCcdDefinition(ccd.bytes, ccd.caseType).catch((error: unknown) => {
           throw new HttpError(422, error instanceof Error ? error.message : "that CCD definition could not be read");
         })
       : undefined;
     const caseType = definition?.caseType ?? ccd?.caseType;
-    const result = await fromPdf({ pdf: fileName, bytes, ...(definition ? { ccdIds: definition.fields } : {}), ...(caseType ? { caseType } : {}) }).catch(
+    const fields = ccd?.picked?.fields ?? definition?.fields;
+    const result = await fromPdf({ pdf: fileName, bytes, ...(fields ? { ccdFields: fields } : {}), ...(caseType ? { caseType } : {}) }).catch(
       (error: unknown) => {
         console.error(`a form PDF could not be read: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`);
         return undefined;
@@ -78,7 +97,14 @@ export async function importUpload(fileName: string, bytes: Uint8Array, ccd?: Cc
     if (result.needsReview) {
       throw new HttpError(422, `${result.needsReview.reason}, so no field could be read from it. Ask your assistant to read its pages and draft the spec`);
     }
-    return { kind: "pdf", forms: result.bundle.forms };
+    const { picked } = ccd ?? {};
+    const forms = picked
+      ? result.bundle.forms.map((spec) => ({
+          ...spec,
+          form: { ...spec.form, ccdProduct: picked.product, ...(picked.config ? { ccdConfig: picked.config } : {}) }
+        }))
+      : result.bundle.forms;
+    return { kind: "pdf", forms };
   }
   if (ccd) {
     throw new HttpError(400, "a CCD definition goes with a form PDF, to propose its CCD fields");

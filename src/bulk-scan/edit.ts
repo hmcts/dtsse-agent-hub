@@ -27,6 +27,23 @@ export function patchHeader(spec: FormSpec, patch: HeaderPatch): FormSpec {
 /** The field values the editor changes in a row. */
 export type FieldPatch = Partial<Pick<Field, "id" | "label" | "keys" | "ccd" | "inputType" | "mandatory" | "regex" | "maxLength" | "minLength">>;
 
+/** A field whose CCD ids were typed: an id typed over an unsure row decides it, and a new field's id follows what is typed. */
+function withTypedCcd(field: Field): Field {
+  const match = field.ccdMatch;
+  if (!match) {
+    return field;
+  }
+  const [id] = field.ccd;
+  if (id === undefined) {
+    const { ccdMatch: _match, ...rest } = field;
+    return rest;
+  }
+  if (match.status === "new" && match.newField) {
+    return { ...field, ccdMatch: { ...match, newField: { ...match.newField, id } } };
+  }
+  return match.status === "unsure" ? { ...field, ccdMatch: { status: "existing" } } : field;
+}
+
 /** The spec with one field replaced by what `change` makes of it. */
 export function mapField(spec: FormSpec, sectionIndex: number, fieldIndex: number, change: (field: Field) => Field): FormSpec {
   return {
@@ -118,6 +135,9 @@ export function patchField(spec: FormSpec, sectionIndex: number, fieldIndex: num
     }
     if (patch.mandatory !== undefined && patch.mandatory !== "conditional") {
       delete next.required;
+    }
+    if (patch.ccd !== undefined) {
+      next = withTypedCcd(next);
     }
     return next;
   });
@@ -481,6 +501,8 @@ export interface ReviewLine {
   about: string;
   reason: string;
   confidence: "low" | "medium" | "high";
+  /** A row whose CCD field is still to be chosen: it has nothing to mark done, and goes once it is resolved. */
+  unresolved?: boolean;
 }
 
 const RANK = { low: 0, medium: 1, high: 2 } as const;
@@ -501,7 +523,26 @@ export function reviewChecklist(spec: FormSpec): ReviewLine[] {
       }))
     )
   );
-  return lines.sort((a, b) => RANK[a.confidence] - RANK[b.confidence]);
+  const unsure = spec.sections.flatMap((section, s) =>
+    section.fields.flatMap((field, f) =>
+      field.ccdMatch?.status === "unsure"
+        ? [
+            {
+              at: `${s}.${f}`,
+              section: s,
+              field: f,
+              index: -1,
+              where: [field.id, field.label.split("\n")[0]].filter(Boolean).join(" ") || field.keys[0] || "field",
+              about: "ccd",
+              reason: "choose which case field this is, or add a new one",
+              confidence: "low" as const,
+              unresolved: true
+            }
+          ]
+        : []
+    )
+  );
+  return [...unsure, ...lines].sort((a, b) => RANK[a.confidence] - RANK[b.confidence]);
 }
 
 /** A field's rules as the transformation sheet words them; the English the sheet kept when the field has no rules. */

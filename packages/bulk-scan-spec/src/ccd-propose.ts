@@ -1,31 +1,44 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import type { CcdField } from "./ccd-match.ts";
 import { readWorkbookBytes, rowTexts } from "./cells.ts";
 import { byCode } from "./compare.ts";
-import type { Confidence } from "./similarity.ts";
-import { assign, confidenceOf, tokens } from "./similarity.ts";
 import { unzipFiles } from "./unzip.ts";
-
-export interface ProposedCcd {
-  id: string;
-  reason: string;
-  confidence: Confidence;
-}
 
 /** The case fields of one CCD case type's definition. */
 export interface CcdDefinition {
   /** The CaseTypeID the rows carry; absent when they are blank, as in a build made without the case type set. */
   caseType?: string;
-  fields: string[];
+  fields: CcdField[];
 }
 
 export interface CcdRow {
   ID?: unknown;
+  Label?: unknown;
   FieldType?: unknown;
+  FieldTypeParameter?: unknown;
+  HintText?: unknown;
   CaseTypeID?: unknown;
 }
 
-const MIN_MATCH = 0.5;
+const str = (value: unknown): string => (typeof value === "string" ? value : "");
+
+/** The rows as matching reads them, leaving out label fields and rows without an id. */
+export function ccdFieldsOf(rows: CcdRow[]): CcdField[] {
+  return rows.flatMap((r) =>
+    typeof r.ID === "string" && r.ID !== "" && r.FieldType !== "Label"
+      ? [
+          {
+            id: r.ID,
+            label: str(r.Label),
+            type: str(r.FieldType),
+            ...(str(r.FieldTypeParameter) ? { typeParameter: str(r.FieldTypeParameter) } : {}),
+            ...(str(r.HintText) ? { hint: str(r.HintText) } : {})
+          }
+        ]
+      : []
+  );
+}
 
 function rowsIn(text: string): CcdRow[] {
   const rows: unknown = JSON.parse(text);
@@ -43,7 +56,7 @@ export function ccdDefinitionOf(rows: CcdRow[], caseType?: string): CcdDefinitio
   const mine = chosen !== undefined && ids.includes(chosen) ? fields.filter((r) => r.CaseTypeID === chosen) : fields;
   return {
     ...(chosen ? { caseType: chosen } : {}),
-    fields: mine.flatMap((r) => (r.FieldType !== "Label" ? [r.ID as string] : []))
+    fields: ccdFieldsOf(mine)
   };
 }
 
@@ -112,18 +125,4 @@ export async function loadCcdDefinition(path: string, caseType?: string): Promis
     );
   }
   throw new Error(`no CaseField.json or CaseField folder in ${path}`);
-}
-
-/** The CCD field whose id best matches each context, or nothing when none is close enough. A CCD field may serve several contexts, as an address does. */
-export function proposeCcd(contexts: string[], fields: string[]): (ProposedCcd | undefined)[] {
-  const found = assign(
-    contexts.map((c) => ({ context: tokens(c) })),
-    fields.map((id) => ({ id, words: tokens(id) })),
-    MIN_MATCH,
-    false
-  );
-  return contexts.map((_, i) => {
-    const m = found.get(i);
-    return m ? { id: m.candidate, reason: `closest CCD field id by wording (similarity ${m.score.toFixed(2)})`, confidence: confidenceOf(m.score) } : undefined;
-  });
 }

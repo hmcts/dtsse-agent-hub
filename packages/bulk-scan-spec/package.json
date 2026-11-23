@@ -8,6 +8,7 @@
     "./schema": "./src/schema.ts",
     "./logic": "./src/logic.ts",
     "./emits": "./src/emits.ts",
+    "./ccd-match": "./src/ccd-match.ts",
     "./model": "./src/codegen/model.ts"
   },
   "description": "One reviewed field spec per Bulk Scan form, with importers and generators for the Exela SIP and the HMCTS transformation sheet, and a drift checker against service OCR code.",

@@ -132,7 +132,7 @@ async function runFromPdf(opts: Map<string, string>): Promise<void> {
   const result = await fromPdf({
     pdf: need(opts, "pdf"),
     ...(keys ? { houseKeys: keys } : {}),
-    ...(definition ? { ccdIds: definition.fields } : {}),
+    ...(definition ? { ccdFields: definition.fields } : {}),
     ...(caseType ? { caseType } : {})
   });
   const { needsReview } = result;

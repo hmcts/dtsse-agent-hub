@@ -1,3 +1,4 @@
+import type { Env } from "../env.ts";
 import { DOCMOSIS_LOAD_KIND, LOAD_BUDGET_MS } from "./docmosis-load-kind.ts";
 import { loadNotify } from "./notify-tools.ts";
 import { PodJobError, type PodJobHandler } from "./pod-jobs.ts";
@@ -35,6 +36,33 @@ const videoAttach: PodJobHandler = {
     });
     return await handler.run(args, context);
   }
+};
+
+/** The runner the CCD jobs share, its module loaded only when a job of them arrives, as `docmosis.load`'s is. */
+const ccdDeps = async () => {
+  const { run } = await import("../virtual/process.ts");
+  return {
+    run: (cmd: string, argv: string[], opts: { env: Env; timeoutMs: number; signal?: AbortSignal }) =>
+      run(cmd, argv, { env: opts.env as NodeJS.ProcessEnv, timeoutMs: opts.timeoutMs, signal: opts.signal })
+  };
+};
+
+/** The case types the owner's workspace declares. */
+export const ccdCaseTypes: PodJobHandler = {
+  kind: "ccd.case-types",
+  // Under the hub's 60 seconds.
+  budgetMs: 50_000,
+  concurrency: 2,
+  run: async (args, context) => (await import("./ccd-case-types.ts")).listCaseTypes(args, context, await ccdDeps())
+};
+
+/** One case type's fields; a config-generator service's definition may be generated first. */
+export const ccdCaseTypeFields: PodJobHandler = {
+  kind: "ccd.case-type-fields",
+  // Under the hub's 180 seconds, past the 160 the script is given.
+  budgetMs: 170_000,
+  concurrency: 2,
+  run: async (args, context) => (await import("./ccd-case-types.ts")).caseTypeFields(args, context, await ccdDeps())
 };
 
 const SAFE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/;
@@ -100,4 +128,4 @@ export const notifyPull: PodJobHandler = {
  * Imported by `features.ts` and so by everything that reports a claim: a handler's module should import its heavy
  * dependencies inside `run`, not at the top.
  */
-export const POD_JOB_HANDLERS: readonly PodJobHandler[] = [docmosisLoad, notifyList, notifyPull, videoAttach];
+export const POD_JOB_HANDLERS: readonly PodJobHandler[] = [docmosisLoad, notifyList, notifyPull, videoAttach, ccdCaseTypes, ccdCaseTypeFields];

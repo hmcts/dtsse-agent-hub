@@ -1,7 +1,16 @@
 import type { NextRequest } from "next/server";
 import { errorResponse, json } from "@/agent-api/http";
 import { readBytes } from "@/assistant/upload-body";
-import { type CcdUpload, importUpload, MAX_BULK_SCAN_FILE_BYTES, MAX_CASE_TYPE_ID, MAX_CCD_DEFINITION_BYTES, specName, uploadFileName } from "@/bulk-scan/spec";
+import {
+  type CcdUpload,
+  importUpload,
+  MAX_BULK_SCAN_FILE_BYTES,
+  MAX_CASE_TYPE_ID,
+  MAX_CCD_DEFINITION_BYTES,
+  parseCcdFields,
+  specName,
+  uploadFileName
+} from "@/bulk-scan/spec";
 import { createSpecs } from "@/bulk-scan/spec-store";
 import { prisma } from "@/store/prisma";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
@@ -43,7 +52,12 @@ export async function POST(request: NextRequest): Promise<Response> {
       return errorResponse(400, "the case type id is too long");
     }
     const bytes = definition instanceof File && definition.size > 0 ? new Uint8Array(await definition.arrayBuffer()) : undefined;
-    const ccd: CcdUpload | undefined = bytes || caseType ? { ...(bytes ? { bytes } : {}), ...(caseType ? { caseType } : {}) } : undefined;
+    const picked = pickedCaseType(form?.get("product"), form?.get("config"), form?.get("fields"));
+    if (picked instanceof Response) {
+      return picked;
+    }
+    const ccd: CcdUpload | undefined =
+      bytes || caseType || picked ? { ...(bytes ? { bytes } : {}), ...(caseType ? { caseType } : {}), ...(picked ? { picked } : {}) } : undefined;
     const imported = await importUpload(name, new Uint8Array(await file.arrayBuffer()), ccd);
     const fallback = name.replace(/\.(pdf|xlsx)$/i, "");
     const ids = await createSpecs(
@@ -53,4 +67,27 @@ export async function POST(request: NextRequest): Promise<Response> {
     );
     return json({ ids, kind: imported.kind }, 201);
   });
+}
+
+const CONFIGS = ["config-generator", "json", "hybrid"] as const;
+
+/** The case type the person picked, with the fields their pod fetched for it; none when no fields came, and a refusal when they are not what the job answers. */
+function pickedCaseType(product: unknown, config: unknown, fields: unknown): NonNullable<CcdUpload["picked"]> | Response | undefined {
+  if (typeof fields !== "string" || fields === "") {
+    return undefined;
+  }
+  if (fields.length > MAX_CCD_DEFINITION_BYTES) {
+    return errorResponse(400, "the case type's fields are over 1 MiB");
+  }
+  if (typeof product !== "string" || !/^[a-z][a-z0-9-]{0,39}$/.test(product)) {
+    return errorResponse(400, "name the product that defines the case type");
+  }
+  let rows: unknown;
+  try {
+    rows = JSON.parse(fields);
+  } catch {
+    return errorResponse(400, "the case type's fields are not JSON");
+  }
+  const found = CONFIGS.find((c) => c === config);
+  return { product, ...(found ? { config: found } : {}), fields: parseCcdFields(rows) };
 }

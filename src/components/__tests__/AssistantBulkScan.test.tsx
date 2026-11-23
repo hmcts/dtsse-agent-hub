@@ -35,20 +35,17 @@ describe("bulk scan upload", () => {
   const choose = (label: RegExp, file: File) => fireEvent.change(screen.getByLabelText(label), { target: { files: [file] } });
   const start = () => fireEvent.click(screen.getByRole("button", { name: "Start the form" }));
 
-  it("should send the form with the definition and case type typed and open the first spec when it is read", async () => {
+  it("should send the form and open the first spec when it is read", async () => {
     fetchMock.mockResolvedValue(reply(201, { ids: ["abc", "def"] }));
     render(<BulkScanUpload />);
 
     choose(/^Form:/, new File(["x"], "My form.pdf"));
-    choose(/CCD definition/, new File(["[]"], "CaseField.json"));
-    fireEvent.change(screen.getByLabelText(/Case type id/), { target: { value: "CriminalInjuriesCompensation" } });
     start();
 
     await waitFor(() => expect(push).toHaveBeenCalledWith("/assistant/bulk-scan/abc"));
     const body = fetchMock.mock.calls[0]?.[1].body as FormData;
     expect((body.get("form") as File).name).toBe("My form.pdf");
-    expect((body.get("definition") as File).name).toBe("CaseField.json");
-    expect(body.get("caseType")).toBe("CriminalInjuriesCompensation");
+    expect(body.has("definition")).toBe(false);
   });
 
   it("should ask for a form before sending anything", () => {

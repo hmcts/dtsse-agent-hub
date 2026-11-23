@@ -119,8 +119,17 @@ describe("podJobFeatures and claimedFeatures", () => {
   });
 
   it("should claim exactly the kinds this build has a handler for when it reports its claim", () => {
-    expect(POD_JOB_HANDLERS.map((handler) => handler.kind)).toEqual(["docmosis.load", "notify.list", "notify.pull", "jira.attach-video"]);
+    expect(POD_JOB_HANDLERS.map((handler) => handler.kind)).toEqual([
+      "docmosis.load",
+      "notify.list",
+      "notify.pull",
+      "jira.attach-video",
+      "ccd.case-types",
+      "ccd.case-type-fields"
+    ]);
     expect(claimedFeatures().filter((name) => name.startsWith("pod-job:"))).toEqual([
+      "pod-job:ccd.case-type-fields",
+      "pod-job:ccd.case-types",
       "pod-job:docmosis.load",
       "pod-job:jira.attach-video",
       "pod-job:notify.list",

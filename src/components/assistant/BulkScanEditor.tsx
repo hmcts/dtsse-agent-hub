@@ -7,6 +7,7 @@ import { clearReview, issuesByField, patchHeader, reviewChecklist } from "@/bulk
 import type { BulkScanEditorView } from "@/bulk-scan/editor-view";
 import { BulkScanDownloads } from "@/components/assistant/BulkScanDownloads";
 import { BulkScanFields } from "@/components/assistant/BulkScanFields";
+import { BulkScanHeaderCaseType } from "@/components/assistant/BulkScanHeaderCaseType";
 import { BulkScanSimulator } from "@/components/assistant/BulkScanSimulator";
 import { BulkScanVersions, type SignOffAction } from "@/components/assistant/BulkScanVersions";
 import { FIELD, PRIMARY, SECONDARY } from "@/components/assistant/WelshParts";
@@ -16,7 +17,11 @@ import { FIELD, PRIMARY, SECONDARY } from "@/components/assistant/WelshParts";
  * downloads and the sign-off, which all work on the version saved. The page keys this on the spec and version, so a save
  * or a change of version starts it afresh from what was stored.
  */
-export function BulkScanEditor({ view, signOff }: Readonly<{ view: BulkScanEditorView; signOff: SignOffAction }>) {
+export function BulkScanEditor({
+  view,
+  signOff,
+  podConversationId = null
+}: Readonly<{ view: BulkScanEditorView; signOff: SignOffAction; podConversationId?: string | null }>) {
   const router = useRouter();
   const [spec, setSpec] = useState<FormSpec>(view.spec);
   const [dirty, setDirty] = useState(false);
@@ -76,6 +81,7 @@ export function BulkScanEditor({ view, signOff }: Readonly<{ view: BulkScanEdito
             className="w-56"
           />
           <HeaderField label="PO box" value={spec.form.poBox ?? ""} onChange={(poBox) => change(patchHeader(spec, { poBox }))} className="w-40" />
+          <BulkScanHeaderCaseType spec={spec} conversationId={podConversationId} onSpec={change} />
           <HeaderField
             label="Case type (CCD case type id)"
             value={spec.form.ccdCaseTypeId ?? ""}
@@ -97,9 +103,11 @@ export function BulkScanEditor({ view, signOff }: Readonly<{ view: BulkScanEdito
             {checklist.map((line) => (
               <li key={`${line.at}-${line.about}-${line.reason}`}>
                 {`[${line.confidence}] ${line.where}: ${line.about}, ${line.reason} `}
-                <button type="button" className={SECONDARY} onClick={() => change(clearReview(spec, line.section, line.field, line.index))}>
-                  {`Done: ${line.where} ${line.about}`}
-                </button>
+                {line.unresolved ? null : (
+                  <button type="button" className={SECONDARY} onClick={() => change(clearReview(spec, line.section, line.field, line.index))}>
+                    {`Done: ${line.where} ${line.about}`}
+                  </button>
+                )}
               </li>
             ))}
           </ul>

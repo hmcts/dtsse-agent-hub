@@ -16,6 +16,7 @@ import {
   envelopeKeys,
   importUpload,
   isTarget,
+  parseCcdFields,
   scenarioEntries,
   simulate,
   sipDownload,
@@ -133,21 +134,44 @@ describe("uploads", () => {
     pdf.result = { bundle: { forms: [SPEC] }, checklist: [] };
     const rows = [{ CaseTypeID: "CriminalInjuriesCompensation", ID: "cicCaseFullName", FieldType: "Text" }];
     await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"), { bytes: new TextEncoder().encode(JSON.stringify(rows)) });
-    expect(pdf.input).toMatchObject({ ccdIds: ["cicCaseFullName"], caseType: "CriminalInjuriesCompensation" });
+    expect(pdf.input).toMatchObject({ ccdFields: [{ id: "cicCaseFullName", label: "", type: "Text" }], caseType: "CriminalInjuriesCompensation" });
   });
 
   it("should take the case type the person typed when the definition's own are blank", async () => {
     pdf.result = { bundle: { forms: [SPEC] }, checklist: [] };
     const rows = [{ CaseTypeID: "", ID: "cicCaseFullName", FieldType: "Text" }];
     await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"), { bytes: new TextEncoder().encode(JSON.stringify(rows)), caseType: "CIC" });
-    expect(pdf.input).toMatchObject({ ccdIds: ["cicCaseFullName"], caseType: "CIC" });
+    expect(pdf.input).toMatchObject({ ccdFields: [{ id: "cicCaseFullName", label: "", type: "Text" }], caseType: "CIC" });
   });
 
   it("should name the typed case type even with no definition", async () => {
     pdf.result = { bundle: { forms: [SPEC] }, checklist: [] };
     await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"), { caseType: "CIC" });
     expect(pdf.input).toMatchObject({ caseType: "CIC" });
-    expect(pdf.input).not.toHaveProperty("ccdIds");
+    expect(pdf.input).not.toHaveProperty("ccdFields");
+  });
+
+  it("should match against the fields the person's pod fetched, and record the product and how it configures CCD", async () => {
+    pdf.result = { bundle: { forms: [SPEC] }, checklist: [] };
+    const fields = parseCcdFields([{ ID: "cicCaseFullName", Label: "Full name", FieldType: "Text" }]);
+
+    const { forms } = await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"), {
+      caseType: "CriminalInjuriesCompensation",
+      picked: { product: "sptribs", config: "config-generator", fields }
+    });
+
+    expect(pdf.input).toMatchObject({ ccdFields: [{ id: "cicCaseFullName", label: "Full name", type: "Text" }], caseType: "CriminalInjuriesCompensation" });
+    expect(forms[0]?.form).toMatchObject({ ccdProduct: "sptribs", ccdConfig: "config-generator" });
+  });
+
+  it("should refuse fields that come with a definition file as well", async () => {
+    const picked = { product: "sptribs", fields: [] };
+    expect((await refusal(importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"), { bytes: new TextEncoder().encode("[]"), picked }))).status).toBe(400);
+  });
+
+  it("should refuse fields that are not what the CCD job answers", () => {
+    expect(() => parseCcdFields([{ ID: "a" }])).toThrow("not in the shape");
+    expect(() => parseCcdFields("x")).toThrow("not in the shape");
   });
 
   it("should refuse a CCD definition that cannot be read, or that comes with a spreadsheet", async () => {
