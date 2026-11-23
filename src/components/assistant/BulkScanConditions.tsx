@@ -1,7 +1,7 @@
 "use client";
 
 import { type Condition, looksTyped, OPERATORS, type Operator } from "@/bulk-scan/edit";
-import { FIELD, SECONDARY } from "@/components/assistant/WelshParts";
+import { AddButton, IconButton, INPUT } from "@/components/assistant/BulkScanParts";
 
 export interface KeyChoice {
   value: string;
@@ -15,15 +15,17 @@ export function nextCondition(conditions: readonly Condition[], choices: readonl
 }
 
 /**
- * Conditions that must all hold, one per row: a key (or sheet id), an operator and, for = and !=, a value. A key is
- * chosen from the form's own, so a condition cannot name one the form does not read.
+ * Conditions that must all hold, one per line: the lead word (When, Mandatory if, OR) on the first and AND after it, then
+ * a key (or sheet id), an operator and, for = and !=, a value. A key is chosen from the form's own, so a condition
+ * cannot name one the form does not read.
  */
 export function BulkScanConditions({
   label,
+  lead,
   conditions,
   choices,
   onChange
-}: Readonly<{ label: string; conditions: readonly Condition[]; choices: readonly KeyChoice[]; onChange: (conditions: Condition[]) => void }>) {
+}: Readonly<{ label: string; lead: string; conditions: readonly Condition[]; choices: readonly KeyChoice[]; onChange: (conditions: Condition[]) => void }>) {
   const replace = (at: number, patch: Partial<Condition>) => onChange(conditions.map((c, i) => (i === at ? { ...c, ...patch } : c)));
   const added = nextCondition(conditions, choices);
   return (
@@ -34,51 +36,61 @@ export function BulkScanConditions({
           ...(choices.some((c) => c.value === condition.key) ? [] : [{ value: condition.key, label: condition.key }])
         ];
         const n = i + 1;
+        const compares = condition.op === "=" || condition.op === "!=";
         return (
-          <div key={condition.key} className="flex flex-wrap items-center gap-1.5">
-            <select aria-label={`${label}, condition ${n} key`} value={condition.key} className={FIELD} onChange={(e) => replace(i, { key: e.target.value })}>
-              {options.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-            <select
-              aria-label={`${label}, condition ${n} operator`}
-              value={condition.op}
-              className={FIELD}
-              onChange={(e) => replace(i, { op: e.target.value as Operator })}
-            >
-              {OPERATORS.map(([op, words]) => (
-                <option key={op} value={op}>
-                  {words}
-                </option>
-              ))}
-            </select>
-            {condition.op === "=" || condition.op === "!=" ? (
-              <input
-                aria-label={`${label}, condition ${n} value`}
-                value={condition.value}
-                className={`${FIELD} w-40`}
-                onChange={(e) => replace(i, { value: e.target.value, typed: false })}
-              />
-            ) : null}
-            {(condition.op === "=" || condition.op === "!=") && looksTyped(condition.value) ? (
-              <label className="flex items-center gap-1.5 text-xs">
-                <input type="checkbox" checked={condition.typed === true} onChange={(e) => replace(i, { typed: e.target.checked })} />
-                {`${label}, condition ${n}: ${condition.value} is the value, not the word`}
+          <div key={condition.key} className="flex flex-col gap-1">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="w-24 shrink-0 text-xs font-semibold uppercase tracking-wide text-asst-muted">{i === 0 ? lead : "and"}</span>
+              <select
+                aria-label={`${label}, condition ${n} key`}
+                value={condition.key}
+                className={`${INPUT} w-auto max-w-[16rem]`}
+                onChange={(e) => replace(i, { key: e.target.value })}
+              >
+                {options.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label={`${label}, condition ${n} operator`}
+                value={condition.op}
+                className={`${INPUT} w-auto`}
+                onChange={(e) => replace(i, { op: e.target.value as Operator })}
+              >
+                {OPERATORS.map(([op, words]) => (
+                  <option key={op} value={op}>
+                    {words}
+                  </option>
+                ))}
+              </select>
+              {compares ? (
+                <input
+                  aria-label={`${label}, condition ${n} value`}
+                  value={condition.value}
+                  className={`${INPUT} w-40`}
+                  onChange={(e) => replace(i, { value: e.target.value, typed: false })}
+                />
+              ) : null}
+              <IconButton label={`Remove ${label}, condition ${n}`} icon="remove" onClick={() => onChange(conditions.filter((_, at) => at !== i))} />
+            </div>
+            {compares && looksTyped(condition.value) ? (
+              <label className="ml-24 flex items-center gap-1.5 pl-1.5 text-xs text-asst-body">
+                <input
+                  type="checkbox"
+                  aria-label={`${label}, condition ${n}: ${condition.value} is the value, not the word`}
+                  checked={condition.typed === true}
+                  onChange={(e) => replace(i, { typed: e.target.checked })}
+                />
+                {`${condition.value} is the value, not the word`}
               </label>
             ) : null}
-            <button type="button" className={SECONDARY} onClick={() => onChange(conditions.filter((_, at) => at !== i))}>
-              {`Remove ${label}, condition ${n}`}
-            </button>
           </div>
         );
       })}
-      <div>
-        <button type="button" className={SECONDARY} disabled={!added} onClick={() => added && onChange([...conditions, added])}>
-          {`Add a condition to ${label}`}
-        </button>
+      <div className="pl-[6.375rem]">
+        <AddButton label={`Add a condition to ${label}`} text="Add a condition" disabled={!added} onClick={() => added && onChange([...conditions, added])} />
       </div>
     </div>
   );

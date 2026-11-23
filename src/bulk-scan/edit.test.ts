@@ -32,7 +32,6 @@ import {
   removeField,
   removeRule,
   removeSection,
-  reviewChecklist,
   whenOf,
   withAllowed,
   withAssignments,
@@ -40,6 +39,7 @@ import {
   withGroup,
   withGroups,
   withoutAction,
+  withoutKey,
   withRequired,
   wordsOf,
   writeAsRules
@@ -129,18 +129,6 @@ describe("issues", () => {
     ]);
     expect(fields.get("0.1")).toEqual(["keys.0: Too small", "bad group"]);
     expect(form).toEqual(["sections: the key is not a word", "Invalid input"]);
-  });
-});
-
-describe("review checklist", () => {
-  it("should list every marked guess, lowest confidence first, naming its field", () => {
-    expect(reviewChecklist(spec)).toEqual([{ at: "1.0", section: 1, field: 0, index: 0, where: "2.1", about: "key", reason: "guess", confidence: "low" }]);
-    const first = spec.sections[0]?.fields[0];
-    const mixed = {
-      ...spec,
-      sections: [{ ...(spec.sections[0] as object), fields: [{ ...first, review: [{ about: "ccd", reason: "r", confidence: "high" }] }] }, spec.sections[1]]
-    } as unknown as FormSpec;
-    expect(reviewChecklist(mixed).map((l) => l.confidence)).toEqual(["low", "high"]);
   });
 });
 
@@ -482,5 +470,44 @@ describe("new section ids", () => {
       ]
     } as unknown as FormSpec;
     expect(addSection(s).sections.map((x) => x.id)).toEqual(["2", "1", "3", "4"]);
+  });
+});
+
+describe("withoutKey", () => {
+  const field = (over: object) =>
+    ({
+      role: "field",
+      label: "",
+      inputType: "checkbox",
+      mandatory: "conditional",
+      keys: ["a", "b", "c"],
+      ccd: ["x"],
+      todo: [],
+      group: { kind: "xor", size: 3, options: [{ key: "a" }, { key: "b" }, { key: "c" }] },
+      emits: [
+        { key: "a", value: "true" },
+        { key: "b", value: "true" }
+      ],
+      required: { label: "if b", when: { b: { ticked: true }, a: { ticked: true } } },
+      rules: [
+        { when: { b: "true", a: "true" }, set: { x: { from: "b" } } },
+        { whenAny: [{ b: "true" }, { a: "true" }], set: { x: "yes" } }
+      ],
+      ...over
+    }) as unknown as Parameters<typeof withoutKey>[0];
+
+  it("should drop the key's emits, group option and conditions and copies that name it when the key is removed", () => {
+    const next = withoutKey(field({}), 1);
+    expect(next.keys).toEqual(["a", "c"]);
+    expect(next.emits).toEqual([{ key: "a", value: "true" }]);
+    expect(next.group).toEqual({ kind: "xor", size: 2, options: [{ key: "a" }, { key: "c" }] });
+    expect(next.required).toEqual({ label: "if b", when: { a: { ticked: true } } });
+    expect(next.rules).toEqual([{ when: { a: "true" } }, { whenAny: [{ a: "true" }], set: { x: "yes" } }]);
+  });
+
+  it("should leave the field as it was apart from the key when another key spells the same", () => {
+    const next = withoutKey(field({ keys: ["a", "a"] }), 1);
+    expect(next.emits).toHaveLength(2);
+    expect(next.rules).toHaveLength(2);
   });
 });
