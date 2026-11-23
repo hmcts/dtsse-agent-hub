@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
+import { PDFDocument, StandardFonts } from "pdf-lib";
 import {
   askQuestion,
   buildChannel,
@@ -169,6 +170,33 @@ test.describe("accessibility @nightly", () => {
 
     await expect(page.getByRole("heading", { name: "Bulk Scan forms" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Start a form" })).toBeVisible();
+    await expectNoViolations(page);
+  });
+
+  /**
+   * The editor of a spec drafted from a small form PDF: the outline, the open field's cards with a rule branch in them,
+   * the tabs and the save bar. The spec is started through the page's own upload, since a spec has no address until one
+   * exists.
+   */
+  test("should raise no WCAG A or AA violations on the Assistant's Bulk Scan editor @nightly @a11y", async ({ page, request }) => {
+    await connectForChat(request, PERSONA);
+    const response = await page.goto("/assistant/bulk-scan");
+    test.skip(response?.status() === 404, "the Assistant is off on this deployment");
+    expect(response?.status()).toBe(200);
+
+    const pdf = await PDFDocument.create();
+    const font = await pdf.embedFont(StandardFonts.Helvetica);
+    const sheet = pdf.addPage([612, 792]);
+    sheet.drawText("1.1 Applicant's first name", { x: 40, y: 700, size: 11, font });
+    pdf.getForm().createTextField("firstName").addToPage(sheet, { x: 40, y: 660, width: 200, height: 20 });
+    await page
+      .getByLabel(/^Form: PDF or spreadsheet/)
+      .setInputFiles({ name: `${unique("a11y")}.pdf`, mimeType: "application/pdf", buffer: Buffer.from(await pdf.save()) });
+    await page.getByRole("button", { name: "Start the form" }).click();
+
+    await expect(page.getByRole("tab", { name: "Edit" })).toBeVisible();
+    await page.getByRole("button", { name: "Add a branch" }).click();
+    await page.getByRole("button", { name: "Add a condition to branch 1" }).click();
     await expectNoViolations(page);
   });
 

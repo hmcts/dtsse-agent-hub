@@ -21,7 +21,7 @@ export default async function BulkScanSpecPage({
   }
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto flex max-w-[1280px] flex-col gap-6 px-5 pb-10 pt-7">
+      <div className="mx-auto flex max-w-[1440px] flex-col gap-6 px-5 pb-10 pt-7">
         <h1 className="text-[22px] font-semibold tracking-tight">{view.name}</h1>
         <BulkScanEditor key={`${view.id}:${view.version}`} view={view} signOff={signOffSpec} />
         <p className="text-[13px]">

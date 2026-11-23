@@ -27,6 +27,13 @@ describe("fromPdf on a form with fields", () => {
     expect(fields.find((f) => f.label === "First name(s)")?.ccd).toEqual(["applicant1FirstName"]);
   });
 
+  it("should name a date's three keys by one base with Day, Month and Year when the date's label is long", async () => {
+    const { bundle } = await fromPdf({ pdf: await makePdf("sample", SAMPLE_FORM) });
+    const date = bundle.forms.flatMap(allFields).find((f) => f.inputType === "date");
+    expect(date?.keys).toEqual(["dateMarriageDay", "dateMarriageMonth", "dateMarriageYear"]);
+    expect(date?.review?.filter((r) => r.about === "key")).toHaveLength(3);
+  });
+
   it("should flag the key, group and CCD id of every field and list them lowest confidence first", async () => {
     const { bundle, checklist } = await fromPdf({ pdf: await makePdf("sample", SAMPLE_FORM), houseKeys: HOUSE, ccdIds: CCD });
     const fields = bundle.forms.flatMap(allFields);

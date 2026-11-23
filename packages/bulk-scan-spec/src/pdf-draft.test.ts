@@ -31,6 +31,8 @@ describe("draftFields", () => {
     const date = (await draftOf(...SAMPLE_FORM)).find((d) => d.field.inputType === "date");
     expect(date?.field.label).toBe("Date of marriage");
     expect(date?.field.keys).toHaveLength(3);
+    expect(date?.slotLabels).toEqual(["Date of marriage"]);
+    expect(date?.dateParts).toEqual(["Day", "Month", "Year"]);
     expect(date?.reasons[0]?.about).toBe("type");
   });
 

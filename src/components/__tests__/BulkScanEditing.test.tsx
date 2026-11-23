@@ -60,20 +60,25 @@ const VIEW = {
   simulatorProblem: null
 } as unknown as BulkScanEditorView;
 
+type User = ReturnType<typeof userEvent.setup>;
+
 async function setup() {
   const user = userEvent.setup();
   render(<BulkScanEditor view={VIEW} signOff={vi.fn()} />);
   return user;
 }
 
-async function saved(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("button", { name: "Save as a new version" }));
+/** Opens a field in the outline by its id. */
+const open = (user: User, id: string) => user.click(screen.getByRole("button", { name: new RegExp(`^${id.replace(".", "\\.")} `) }));
+
+async function saved(user: User) {
+  await user.click(screen.getByRole("button", { name: "Save as version 2" }));
   return JSON.parse(fetchMock.mock.calls[0]?.[1].body).spec as {
     sections: { id: string; title: string; fields: Record<string, unknown>[] }[];
   };
 }
 
-async function savedField(user: ReturnType<typeof userEvent.setup>, index: number) {
+async function savedField(user: User, index: number) {
   const field = (await saved(user)).sections[0]?.fields[index];
   if (!field) {
     throw new Error("no such field");
@@ -81,10 +86,10 @@ async function savedField(user: ReturnType<typeof userEvent.setup>, index: numbe
   return field;
 }
 
-const select = (user: ReturnType<typeof userEvent.setup>, name: string, value: string) => user.selectOptions(screen.getByLabelText(name), value);
+const select = (user: User, name: string, value: string) => user.selectOptions(screen.getByLabelText(name), value);
 
 describe("adding, removing and reordering", () => {
-  it("should show the engine's refusal on the row when a field was added with an empty key", async () => {
+  it("should show the engine's refusal on the field when a field was added with an empty key", async () => {
     const user = await setup();
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ error: "the spec has errors", issues: [{ path: "sections.1.fields.1.keys.0", message: 'the key "" is bad' }] }), {
@@ -93,20 +98,21 @@ describe("adding, removing and reordering", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Add a field to section 2" }));
-    await user.click(screen.getByRole("button", { name: "Save as a new version" }));
+    await user.click(screen.getByRole("button", { name: "Save as version 2" }));
 
     const body = JSON.parse(fetchMock.mock.calls[0]?.[1].body).spec;
     expect(body.sections[1].fields[1]).toMatchObject({ keys: [""], inputType: "text", mandatory: "mandatory" });
     expect(await screen.findByText('keys.0: the key "" is bad')).toBeTruthy();
   });
 
-  it("should drop the marks of the last save when rows move, since they would point at other rows", async () => {
+  it("should drop the marks of the last save when fields move, since they would point at other fields", async () => {
     const user = await setup();
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ error: "bad", issues: [{ path: "sections.0.fields.1.regex", message: "not a regex" }] }), { status: 422 })
     );
-    await user.type(screen.getByLabelText("Label of 1.2"), "!");
-    await user.click(screen.getByRole("button", { name: "Save as a new version" }));
+    await open(user, "1.2");
+    await user.type(screen.getByLabelText("Label"), "!");
+    await user.click(screen.getByRole("button", { name: "Save as version 2" }));
     expect(await screen.findByText("regex: not a regex")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Move 1.2 up" }));
@@ -117,11 +123,13 @@ describe("adding, removing and reordering", () => {
   it("should remove and reorder fields and sections when their buttons are pressed", async () => {
     const user = await setup();
 
+    await open(user, "1.2");
     await user.click(screen.getByRole("button", { name: "Move 1.2 up" }));
+    await open(user, "1.3");
     await user.click(screen.getByRole("button", { name: "Remove 1.3" }));
     await user.click(screen.getByRole("button", { name: "Move section 2 up" }));
     await user.click(screen.getByRole("button", { name: "Add a section" }));
-    await user.type(screen.getByLabelText("Title of section 3"), "Third");
+    await user.type(screen.getByLabelText("Section title"), "Third");
 
     const body = await saved(user);
     expect(body.sections.map((s) => s.id)).toEqual(["2", "1", "3"]);
@@ -129,38 +137,122 @@ describe("adding, removing and reordering", () => {
     expect(body.sections[2]?.title).toBe("Third");
   });
 
+  it("should keep the moved field open when its move button is pressed", async () => {
+    const user = await setup();
+    await open(user, "1.2");
+    await user.click(screen.getByRole("button", { name: "Move 1.2 down" }));
+    expect(screen.getByRole("heading", { level: 2, name: /^1\.2 / })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^1\.2 / }).getAttribute("aria-current")).toBe("true");
+  });
+
   it("should remove a section when its button is pressed", async () => {
     const user = await setup();
     await user.click(screen.getByRole("button", { name: "Remove section 1" }));
     expect((await saved(user)).sections.map((s) => s.id)).toEqual(["2"]);
   });
+
+  it("should take an id no section has when a section is added", async () => {
+    const user = await setup();
+    await user.click(screen.getByRole("button", { name: "Add a section" }));
+    expect((screen.getByLabelText("Section ID") as HTMLInputElement).value).toBe("3");
+  });
+});
+
+describe("the question card", () => {
+  it("should send the id, label, input type and mandatory as typed when they are changed", async () => {
+    const user = await setup();
+    await open(user, "1.2");
+    await user.type(screen.getByLabelText("Label"), " of person");
+    await user.clear(screen.getByLabelText("ID"));
+    await user.type(screen.getByLabelText("ID"), "1.9");
+    await select(user, "Input type", "date");
+    await select(user, "Mandatory", "mandatory");
+
+    expect(await savedField(user, 1)).toMatchObject({ id: "1.9", label: "Name of person", inputType: "date", mandatory: "mandatory" });
+  });
+
+  it("should name each input by a visible label when the card is shown", async () => {
+    await setup();
+    for (const name of ["ID", "Label", "Input type", "Mandatory", "Regex", "Min length", "Max length", "CCD ids"]) {
+      expect(screen.getByLabelText(name)).toBeTruthy();
+    }
+  });
+});
+
+describe("the keys card", () => {
+  it("should send the regex and both lengths when they are typed side by side", async () => {
+    const user = await setup();
+    await open(user, "1.2");
+    await user.type(screen.getByLabelText("Regex"), "^[[A-Z]+$");
+    await user.type(screen.getByLabelText("Min length"), "2");
+    await user.type(screen.getByLabelText("Max length"), "x9");
+
+    expect(await savedField(user, 1)).toMatchObject({ regex: "^[A-Z]+$", minLength: 2, maxLength: 9 });
+  });
+
+  it("should add and remove keys when their buttons are pressed", async () => {
+    const user = await setup();
+    await open(user, "1.2");
+    await user.click(screen.getByRole("button", { name: "Add a key" }));
+    await user.type(screen.getByLabelText("Key 2"), "surname{Enter}");
+    await user.click(screen.getByRole("button", { name: "Remove key 1" }));
+
+    expect(((await savedField(user, 1)) as { keys: string[] }).keys).toEqual(["surname"]);
+  });
+});
+
+describe("the where-it-goes card", () => {
+  it("should send the CCD ids as words when the box is left", async () => {
+    const user = await setup();
+    const box = screen.getByLabelText("CCD ids");
+    await user.clear(box);
+    await user.type(box, "aCcd, bCcd");
+    await user.tab();
+
+    expect(((await savedField(user, 0)) as { ccd: string[] }).ccd).toEqual(["aCcd", "bCcd"]);
+  });
 });
 
 describe("allowed values", () => {
-  it("should send the exact strings typed when values are entered one per line", async () => {
+  it("should send the exact strings typed when values are added one at a time", async () => {
     const user = await setup();
-    const box = screen.getByLabelText("Allowed values of marriage in 1.1") as HTMLTextAreaElement;
+    const marriage = () => within(screen.getByRole("group", { name: "Allowed values of marriage" }));
+    while (marriage().queryByRole("button", { name: "Remove marriage value 1" })) {
+      await user.click(marriage().getByRole("button", { name: "Remove marriage value 1" }));
+    }
+    await user.click(screen.getByRole("button", { name: "Add a value for marriage" }));
+    await user.keyboard("Yes");
+    await user.click(screen.getByRole("button", { name: "Add a value for marriage" }));
+    await user.keyboard(" No ");
 
-    const blank = screen.getByLabelText("Blank is allowed for marriage in 1.1") as HTMLInputElement;
-
-    await user.clear(box);
-    await user.type(box, "Yes{Enter}No{Enter}");
+    const blank = screen.getByLabelText("Blank is allowed for marriage") as HTMLInputElement;
     expect(blank.checked).toBe(true);
     await user.click(blank);
     await user.click(blank);
     await user.click(blank);
 
-    expect(box.value).toBe("Yes\nNo\n");
+    expect((screen.getByLabelText("marriage value 2") as HTMLInputElement).value).toBe(" No ");
     const field = (await savedField(user, 0)) as { emits: { key: string; value: string }[] };
-    expect(field.emits.filter((e) => e.key === "marriage").map((e) => e.value)).toEqual(["Yes", "No"]);
+    expect(field.emits.filter((e) => e.key === "marriage").map((e) => e.value)).toEqual(["Yes", " No "]);
     expect(field.emits.filter((e) => e.key === "civil").map((e) => e.value)).toEqual(["true", "false"]);
+  });
+
+  it("should list no value of a box that was added and left empty when the field is saved", async () => {
+    const user = await setup();
+    await open(user, "1.2");
+    await user.click(screen.getByRole("button", { name: "Add a value for name" }));
+    await user.click(screen.getByRole("button", { name: "Add a value for name" }));
+    await user.keyboard("Ann");
+
+    const emits = ((await savedField(user, 1)) as { emits: { key: string; value: string }[] }).emits;
+    expect(emits.filter((e) => e.key === "name").map((e) => e.value)).toEqual(["Ann", ""]);
   });
 });
 
 describe("XoR groups", () => {
   it("should make a field's keys a group when the box is ticked, and ungroup them when it is cleared", async () => {
     const user = await setup();
-    const box = screen.getByLabelText(/keys of 1.1 are a mutually exclusive group/) as HTMLInputElement;
+    const box = screen.getByRole("checkbox", { name: /mutually exclusive/ }) as HTMLInputElement;
 
     await user.click(box);
     expect(box.checked).toBe(true);
@@ -174,29 +266,31 @@ describe("XoR groups", () => {
   });
 
   it("should offer no group when a field has one key", async () => {
-    await setup();
-    expect(screen.queryByLabelText(/keys of 1.2 are a mutually exclusive group/)).toBeNull();
+    const user = await setup();
+    await open(user, "1.2");
+    expect(screen.queryByRole("checkbox", { name: /mutually exclusive/ })).toBeNull();
   });
 });
 
 describe("conditional mandatory", () => {
   it("should set each kind of mandatory condition when the key and test are chosen", async () => {
     const user = await setup();
-    await select(user, "Mandatory of 1.2", "conditional");
+    await open(user, "1.2");
+    await select(user, "Mandatory", "conditional");
 
-    await user.click(screen.getByRole("button", { name: "Add a condition to mandatory condition of 1.2" }));
-    await select(user, "mandatory condition of 1.2, condition 1 key", "civil");
-    await select(user, "mandatory condition of 1.2, condition 1 operator", "ticked");
+    await user.click(screen.getByRole("button", { name: "Add a condition to mandatory condition" }));
+    await select(user, "mandatory condition, condition 1 key", "civil");
+    await select(user, "mandatory condition, condition 1 operator", "ticked");
     let required = ((await savedField(user, 1)) as { required: unknown }).required;
     expect(required).toEqual({ label: "civil is ticked", when: { civil: { ticked: true } } });
 
-    await select(user, "mandatory condition of 1.2, condition 1 operator", "=");
-    await user.type(screen.getByLabelText("mandatory condition of 1.2, condition 1 value"), "Yes");
+    await select(user, "mandatory condition, condition 1 operator", "=");
+    await user.type(screen.getByLabelText("mandatory condition, condition 1 value"), "Yes");
     fetchMock.mockClear();
     required = ((await savedField(user, 1)) as { required: unknown }).required;
     expect(required).toEqual({ label: "civil = Yes", when: { civil: "Yes" } });
 
-    await select(user, "mandatory condition of 1.2, condition 1 operator", "filled");
+    await select(user, "mandatory condition, condition 1 operator", "filled");
     fetchMock.mockClear();
     required = ((await savedField(user, 1)) as { required: unknown }).required;
     expect(required).toEqual({ label: "civil is not blank", when: { civil: { not: null } } });
@@ -204,20 +298,32 @@ describe("conditional mandatory", () => {
 
   it("should only offer keys the form reads when a condition is built", async () => {
     const user = await setup();
-    await select(user, "Mandatory of 1.2", "conditional");
-    await user.click(screen.getByRole("button", { name: "Add a condition to mandatory condition of 1.2" }));
+    await open(user, "1.2");
+    await select(user, "Mandatory", "conditional");
+    await user.click(screen.getByRole("button", { name: "Add a condition to mandatory condition" }));
 
-    const options = within(screen.getByLabelText("mandatory condition of 1.2, condition 1 key")).getAllByRole("option");
+    const options = within(screen.getByLabelText("mandatory condition, condition 1 key")).getAllByRole("option");
     expect(options.map((o) => o.textContent)).toEqual(expect.arrayContaining(["marriage", "civil", "name", "extra", "1.1 Kind"]));
     expect(options.map((o) => o.textContent)).not.toContain("nope");
   });
+
+  it("should show the condition editor only when Mandatory if is chosen", async () => {
+    const user = await setup();
+    await open(user, "1.2");
+    expect(screen.queryByRole("button", { name: "Add a condition to mandatory condition" })).toBeNull();
+    await select(user, "Mandatory", "conditional");
+    expect(screen.getByRole("button", { name: "Add a condition to mandatory condition" })).toBeTruthy();
+    await select(user, "Mandatory", "optional");
+    expect(screen.queryByRole("button", { name: "Add a condition to mandatory condition" })).toBeNull();
+  });
 });
 
-describe("rules", () => {
-  const branch = "branch 1 of 1.2";
+describe("the rules sentence builder", () => {
+  const branch = "branch 1";
 
-  async function startRule(user: ReturnType<typeof userEvent.setup>) {
-    await user.click(screen.getByRole("button", { name: "Add a branch to 1.2" }));
+  async function startRule(user: User) {
+    await open(user, "1.2");
+    await user.click(screen.getByRole("button", { name: "Add a branch" }));
     await user.click(screen.getByRole("button", { name: `Add a condition to ${branch}` }));
   }
 
@@ -234,15 +340,17 @@ describe("rules", () => {
     await user.type(screen.getByLabelText(`Note of ${branch}`), "(WITH WARNING)");
 
     expect(
-      within(screen.getByRole("group", { name: "Logic of 1.2" })).getByText(/If marriage is ticked, nameCcd = Wife \(warning\) \(WITH WARNING\)/)
+      within(screen.getByRole("group", { name: "Transformation sheet logic" })).getByText(/If marriage is ticked, nameCcd = Wife \(warning\) \(WITH WARNING\)/)
     ).toBeTruthy();
+    expect(screen.getByText("The transformation sheet will say:")).toBeTruthy();
     const rule = ((await savedField(user, 1)) as { rules: unknown[] }).rules[0];
     expect(rule).toEqual({ when: { marriage: { ticked: true } }, set: { nameCcd: "Wife" }, outcome: "warning", note: "(WITH WARNING)" });
   });
 
   it("should copy a key into a CCD field when the assignment is a copy", async () => {
     const user = await setup();
-    await user.click(screen.getByRole("button", { name: "Add a branch to 1.2" }));
+    await open(user, "1.2");
+    await user.click(screen.getByRole("button", { name: "Add a branch" }));
     await user.click(screen.getByRole("button", { name: `Add an assignment to ${branch}` }));
 
     await select(user, `${branch}, assignment 1 CCD field`, "nameCcd");
@@ -253,6 +361,16 @@ describe("rules", () => {
     expect(((await savedField(user, 1)) as { rules: unknown[] }).rules[0]).toEqual({ set: { nameCcd: { from: "name" } } });
   });
 
+  it("should remove an assignment when its button is pressed", async () => {
+    const user = await setup();
+    await open(user, "1.2");
+    await user.click(screen.getByRole("button", { name: "Add a branch" }));
+    await user.click(screen.getByRole("button", { name: `Add an assignment to ${branch}` }));
+    await user.click(screen.getByRole("button", { name: `Remove ${branch}, assignment 1` }));
+
+    expect(((await savedField(user, 1)) as { rules: object[] }).rules).toEqual([{}]);
+  });
+
   it("should give an OR alternative its own conditions when one is added", async () => {
     const user = await setup();
     await startRule(user);
@@ -260,23 +378,24 @@ describe("rules", () => {
     await select(user, `${branch}, alternative 2, condition 1 key`, "civil");
     await select(user, `${branch}, alternative 2, condition 1 operator`, "blank");
 
-    expect(screen.getByText("OR")).toBeTruthy();
+    expect(screen.getByText("Or when")).toBeTruthy();
     const rule = ((await savedField(user, 1)) as { rules: { whenAny: unknown[] }[] }).rules[0];
     expect(rule?.whenAny).toHaveLength(2);
     expect(rule?.whenAny[1]).toEqual({ civil: null });
   });
 
-  it("should make a later branch the ELSE or the start of a new chain when its box is ticked", async () => {
+  it("should make a later branch the ELSE or the start of a new chain when its toggle is ticked", async () => {
     const user = await setup();
-    await user.click(screen.getByRole("button", { name: "Add a branch to 1.2" }));
-    await user.click(screen.getByRole("button", { name: "Add a branch to 1.2" }));
-    expect(screen.queryByLabelText("Starts a new chain: branch 1 of 1.2")).toBeNull();
+    await open(user, "1.2");
+    await user.click(screen.getByRole("button", { name: "Add a branch" }));
+    await user.click(screen.getByRole("button", { name: "Add a branch" }));
+    expect(screen.queryByLabelText("Starts a new chain: branch 1")).toBeNull();
 
-    await user.click(screen.getByLabelText("ELSE: branch 2 of 1.2"));
-    await select(user, "Outcome of branch 2 of 1.2", "exception");
-    expect(screen.queryByRole("button", { name: "Add a condition to branch 2 of 1.2" })).toBeNull();
-    await user.click(screen.getByLabelText("ELSE: branch 2 of 1.2"));
-    await user.click(screen.getByLabelText("Starts a new chain: branch 2 of 1.2"));
+    await user.click(screen.getByLabelText("ELSE: branch 2"));
+    await select(user, "Outcome of branch 2", "exception");
+    expect(screen.queryByRole("button", { name: "Add a condition to branch 2" })).toBeNull();
+    await user.click(screen.getByLabelText("ELSE: branch 2"));
+    await user.click(screen.getByLabelText("Starts a new chain: branch 2"));
 
     const rules = ((await savedField(user, 1)) as { rules: object[] }).rules;
     expect(rules).toEqual([{}, { outcome: "exception", independent: true }]);
@@ -284,13 +403,14 @@ describe("rules", () => {
 
   it("should reorder and remove branches when their buttons are pressed", async () => {
     const user = await setup();
-    await user.click(screen.getByRole("button", { name: "Add a branch to 1.2" }));
-    await user.click(screen.getByRole("button", { name: "Add a branch to 1.2" }));
-    await user.type(screen.getByLabelText("Note of branch 2 of 1.2"), "second");
+    await open(user, "1.2");
+    await user.click(screen.getByRole("button", { name: "Add a branch" }));
+    await user.click(screen.getByRole("button", { name: "Add a branch" }));
+    await user.type(screen.getByLabelText("Note of branch 2"), "second");
 
-    await user.click(screen.getByRole("button", { name: "Move branch 2 of 1.2 up" }));
-    expect((screen.getByLabelText("Note of branch 1 of 1.2") as HTMLInputElement).value).toBe("second");
-    await user.click(screen.getByRole("button", { name: "Remove branch 2 of 1.2" }));
+    await user.click(screen.getByRole("button", { name: "Move branch 2 up" }));
+    expect((screen.getByLabelText("Note of branch 1") as HTMLInputElement).value).toBe("second");
+    await user.click(screen.getByRole("button", { name: "Remove branch 2" }));
 
     expect(((await savedField(user, 1)) as { rules: object[] }).rules).toEqual([{ note: "second" }]);
   });
@@ -304,14 +424,15 @@ describe("rules", () => {
 
   it("should keep a field's unparsed English until it is removed when it is written as rules", async () => {
     const user = await setup();
+    await open(user, "1.3");
     expect(screen.getByText("If marriage is ticked then copy it")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Add a branch to 1.3" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add a branch" })).toBeNull();
 
-    await user.click(screen.getByRole("button", { name: "Write 1.3 as rules" }));
+    await user.click(screen.getByRole("button", { name: "Write as rules" }));
     expect(screen.getByText("If marriage is ticked then copy it")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Add a branch to 1.3" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Write 1.3 as rules" })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Remove the English of 1.3" }));
+    expect(screen.getByRole("button", { name: "Add a branch" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Write as rules" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Remove English" }));
 
     expect(screen.queryByText("If marriage is ticked then copy it")).toBeNull();
     const field = (await savedField(user, 2)) as Record<string, unknown>;
@@ -320,39 +441,37 @@ describe("rules", () => {
   });
 });
 
-describe("clearing TODOs and review markers", () => {
+describe("the review card", () => {
   it("should remove a TODO when it is marked done", async () => {
     const user = await setup();
-    await user.click(screen.getByRole("button", { name: "Done: TODO 1 of 1.3" }));
+    await open(user, "1.3");
+    await user.click(screen.getByRole("button", { name: "Done: TODO 1" }));
     expect(screen.queryByText(/logic not parsed into rules/)).toBeNull();
     expect(((await savedField(user, 2)) as { todo: string[] }).todo).toEqual([]);
   });
 
-  it("should remove the checklist when its last review marker is marked done", async () => {
+  it("should show the reason and confidence of a review marker and remove it when it is marked done", async () => {
     const user = await setup();
-    expect(screen.getByRole("heading", { name: /Review checklist \(1 guesses/ })).toBeTruthy();
+    await open(user, "1.3");
+    expect(screen.getByText(/Check the key/)).toBeTruthy();
+    expect(screen.getByText(/low confidence/)).toBeTruthy();
+    expect(screen.getByText(/guessed/)).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "Done: 1.3 Reason key" }));
+    await user.click(screen.getByRole("button", { name: "Done: check 1" }));
 
-    expect(screen.queryByRole("heading", { name: /Review checklist/ })).toBeNull();
+    expect(screen.queryByText(/Check the key/)).toBeNull();
     expect(await savedField(user, 2)).not.toHaveProperty("review");
   });
 
-  it("should keep a field's details open when its last marker is cleared", async () => {
+  it("should leave the field open and drop its card when its last marker is cleared", async () => {
     const user = await setup();
-    const details = () => screen.getByText("Rules and notes for 1.3").closest("details");
-    expect(details()?.open).toBe(true);
+    await open(user, "1.3");
+    await user.click(screen.getByRole("button", { name: "Done: TODO 1" }));
+    await user.click(screen.getByRole("button", { name: "Done: check 1" }));
 
-    await user.click(screen.getByRole("button", { name: "Done: TODO 1 of 1.3" }));
-    await user.click(screen.getByRole("button", { name: "Done: check 1 of 1.3" }));
-
-    expect(details()?.open).toBe(true);
-  });
-
-  it("should remove a review marker when it is marked done on the field's row", async () => {
-    const user = await setup();
-    await user.click(screen.getByRole("button", { name: "Done: check 1 of 1.3" }));
-    expect(screen.queryByText(/Check the key/)).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Review" })).toBeNull();
+    expect(screen.getByRole("heading", { level: 2, name: /^1\.3 / })).toBeTruthy();
+    expect(screen.getByText("Nothing to review")).toBeTruthy();
   });
 });
 
@@ -414,18 +533,18 @@ async function setup2() {
   return user;
 }
 
-async function saved2(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("button", { name: "Save as a new version" }));
+async function saved2(user: User) {
+  await user.click(screen.getByRole("button", { name: "Save as version 2" }));
   return JSON.parse(fetchMock.mock.calls[0]?.[1].body).spec.sections[1].fields as Record<string, any>[];
 }
 
 describe("retyping a key", () => {
   it("should carry its allowed values, group label and rules to the new spelling when the key is retyped and the box left", async () => {
     const user = await setup2();
-    const keys = screen.getByLabelText("Keys of 5.1");
+    const key = screen.getByLabelText("Key 1");
 
-    await user.clear(keys);
-    await user.type(keys, "leftHand right");
+    await user.clear(key);
+    await user.type(key, "leftHand");
     await user.tab();
 
     const [pair, other] = await saved2(user);
@@ -439,15 +558,15 @@ describe("retyping a key", () => {
 
   it("should keep the group and its labels when a key is cleared and retyped before the box is left", async () => {
     const user = await setup2();
-    const keys = screen.getByLabelText("Keys of 5.1");
+    const key = screen.getByLabelText("Key 1");
 
-    await user.clear(keys);
-    await user.type(keys, "x");
-    expect((screen.getByLabelText(/keys of 5.1 are a mutually exclusive group/) as HTMLInputElement).checked).toBe(true);
-    await user.clear(keys);
-    await user.type(keys, "left right");
+    await user.clear(key);
+    await user.type(key, "x");
+    expect((screen.getByRole("checkbox", { name: /mutually exclusive/ }) as HTMLInputElement).checked).toBe(true);
+    await user.clear(key);
+    await user.type(key, "left");
     await user.tab();
-    await user.type(screen.getByLabelText("Label of 5.1"), "!");
+    await user.type(screen.getByLabelText("Label"), "!");
 
     const [pair] = await saved2(user);
     expect(pair?.group).toEqual({
@@ -460,28 +579,33 @@ describe("retyping a key", () => {
     });
   });
 
-  it("should send the keys when Enter is pressed in the box", async () => {
+  it("should send the key when Enter is pressed in the box", async () => {
     const user = await setup2();
-    await user.type(screen.getByLabelText("Keys of 5.1"), " third{Enter}");
-    expect((screen.getByRole("button", { name: "Save as a new version" }) as HTMLButtonElement).disabled).toBe(false);
+    const save = screen.getByRole("button", { name: "Save as version 2" }) as HTMLButtonElement;
+    await user.type(screen.getByLabelText("Key 1"), "X");
+    expect(save.disabled).toBe(true);
+    await user.keyboard("{Enter}");
+    expect(save.disabled).toBe(false);
   });
 });
 
 describe("blank for a free-text key", () => {
   it("should leave the blank box ticked and disabled when the key lists no values", async () => {
-    await setup2();
-    const blank = screen.getByLabelText("Blank is allowed for other in 5.2") as HTMLInputElement;
+    const user = await setup2();
+    expect((screen.getByLabelText("Blank is allowed for left") as HTMLInputElement).disabled).toBe(false);
+    await open(user, "5.2");
+    const blank = screen.getByLabelText("Blank is allowed for other") as HTMLInputElement;
     expect([blank.checked, blank.disabled]).toEqual([true, true]);
-    expect((screen.getByLabelText("Blank is allowed for left in 5.1") as HTMLInputElement).disabled).toBe(false);
   });
 });
 
 describe("the mandatory wording", () => {
   it("should keep the sheet's wording when the condition is changed and when it is removed", async () => {
     const user = await setup2();
+    await open(user, "5.2");
 
-    await select(user, "mandatory condition of 5.2, condition 1 operator", "filled");
-    await user.click(screen.getByRole("button", { name: "Remove mandatory condition of 5.2, condition 1" }));
+    await select(user, "mandatory condition, condition 1 operator", "filled");
+    await user.click(screen.getByRole("button", { name: "Remove mandatory condition, condition 1" }));
 
     const [, other] = await saved2(user);
     expect(other?.required).toEqual({ label: "Optional if the form is joint" });
@@ -491,9 +615,10 @@ describe("the mandatory wording", () => {
 describe("a branch's unparsed English", () => {
   it("should remove the action when its button is pressed, keeping the branch's conditions", async () => {
     const user = await setup2();
+    await open(user, "5.2");
     expect(screen.getByText(/English the importer could not read: also tell the caseworker/)).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "Remove the English of branch 1 of 5.2" }));
+    await user.click(screen.getByRole("button", { name: "Remove the English of branch 1" }));
 
     expect(screen.queryByText(/English the importer could not read/)).toBeNull();
     const [, other] = await saved2(user);
@@ -504,7 +629,8 @@ describe("a branch's unparsed English", () => {
 describe("values that look like true, false or null", () => {
   it("should keep a stored text and a stored boolean as they are when only the outcome is changed", async () => {
     const user = await setup2();
-    await select(user, "Outcome of branch 2 of 5.2", "warning");
+    await open(user, "5.2");
+    await select(user, "Outcome of branch 2", "warning");
 
     const [, other] = await saved2(user);
     expect(other?.rules[0].when).toEqual({ left: "true" });
@@ -515,11 +641,12 @@ describe("values that look like true, false or null", () => {
 
   it("should store the typed value only when the box beside it is ticked, after the value is typed", async () => {
     const user = await setup2();
-    const value = screen.getByLabelText("branch 2 of 5.2, condition 1 value");
+    await open(user, "5.2");
+    const value = screen.getByLabelText("branch 2, condition 1 value");
 
     await user.clear(value);
     await user.type(value, "false");
-    const asValue = screen.getByLabelText(/branch 2 of 5.2, condition 1: false is the value, not the word/) as HTMLInputElement;
+    const asValue = screen.getByLabelText("branch 2, condition 1: false is the value, not the word") as HTMLInputElement;
     expect(asValue.checked).toBe(false);
     await user.click(asValue);
 
@@ -532,7 +659,8 @@ describe("a new section", () => {
   it("should take an id no section has when it is added", async () => {
     const user = await setup2();
     await user.click(screen.getByRole("button", { name: "Add a section" }));
-    expect((screen.getByLabelText("ID of section 3") as HTMLInputElement).value).toBe("4");
-    expect((screen.getByLabelText("ID of section 2") as HTMLInputElement).value).toBe("3");
+    expect((screen.getByLabelText("Section ID") as HTMLInputElement).value).toBe("4");
+    await user.click(screen.getByRole("button", { name: /^3 B/ }));
+    expect((screen.getByLabelText("Section ID") as HTMLInputElement).value).toBe("3");
   });
 });

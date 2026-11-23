@@ -1,11 +1,19 @@
 "use client";
 
 import type { Field } from "@hmcts-cft/bulk-scan-spec";
-import { useState } from "react";
-import { allowedFor, casePathWords, clearLogicText, conditionsOf, logicWords, withAllowed, withGroup, withRequired, writeAsRules } from "@/bulk-scan/edit";
+import { casePathWords, clearLogicText, conditionsOf, type FieldPatch, logicWords, withRequired, wordsOf, writeAsRules } from "@/bulk-scan/edit";
 import { BulkScanConditions, type KeyChoice } from "@/components/assistant/BulkScanConditions";
+import { BulkScanSends } from "@/components/assistant/BulkScanKeys";
+import { Card, CommitInput, FOCUS, Icon, INPUT, Labelled, SMALL_BUTTON } from "@/components/assistant/BulkScanParts";
 import { BulkScanRules } from "@/components/assistant/BulkScanRules";
-import { FIELD, SECONDARY } from "@/components/assistant/WelshParts";
+
+const INPUT_TYPES = ["text", "checkbox", "date", "qr", "none"] as const;
+const MANDATORY = [
+  ["mandatory", "Mandatory"],
+  ["optional", "Optional"],
+  ["conditional", "Mandatory if…"],
+  ["not-read", "Not read"]
+] as const;
 
 /** What a field's editor needs of the form around it. */
 export interface FormChoices {
@@ -17,178 +25,195 @@ export interface FormChoices {
 }
 
 /**
- * Everything about a field that is not a cell of its row: its XoR group, its condition for being mandatory, the exact
- * strings each key may carry, its rules with their English as the transformation sheet will word it, and the TODOs and
- * review markers a person clears once handled.
+ * The cards of one field: the question, what Exela sends, where it goes in CCD, its rules, and what is still to review.
+ * `onPatch` changes the row values, `onField` changes anything else of the field.
  */
 export function BulkScanFieldDetails({
   field,
-  name,
   choices,
+  problems,
+  onPatch,
   onField,
   onClearTodo,
   onClearReview
 }: Readonly<{
   field: Field;
-  name: string;
   choices: FormChoices;
+  problems: readonly string[];
+  onPatch: (patch: FieldPatch) => void;
   onField: (change: (field: Field) => Field) => void;
   onClearTodo: (index: number) => void;
   onClearReview: (index: number) => void;
 }>) {
-  const flagged = field.todo.length > 0 || (field.review ?? []).length > 0;
-  // The English a field only has as text is shown once, in its own block, and is not what the sheet will say of rules.
-  const words = field.rules.length > 0 || field.logicPreamble ? logicWords(field) : "";
-  const casePath = casePathWords(field);
-  const keys = field.keys.filter((k) => k !== "");
-  // Opens flagged fields once; clearing their last marker must not close what the person is editing.
-  const [open, setOpen] = useState(flagged);
+  const review = field.review ?? [];
   return (
-    <details open={open} onToggle={(e) => setOpen(e.currentTarget.open)} className="text-xs text-asst-body">
-      <summary className="cursor-pointer text-asst-muted">{`Rules and notes for ${name}`}</summary>
-      <div className="mt-2 flex flex-col gap-3">
-        {field.keys.length > 1 ? (
-          <label className="flex items-center gap-1.5">
-            <input type="checkbox" checked={field.group !== undefined} onChange={(e) => onField((f) => withGroup(f, e.target.checked))} />
-            {`The keys of ${name} are a mutually exclusive group (XoR)`}
-          </label>
-        ) : null}
+    <div className="flex flex-col gap-4">
+      {problems.length > 0 ? (
+        <div role="alert" className="flex items-start gap-2 rounded-xl border border-asst-error px-4 py-3 text-[13px] text-asst-error">
+          <Icon name="error" className="mt-0.5 h-4 w-4" />
+          <div className="flex flex-col gap-1">
+            <span className="font-semibold">The engine refused this field</span>
+            <ul className="list-disc pl-4">
+              {problems.map((p) => (
+                <li key={p}>{p}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      ) : null}
 
+      <Card title="Question">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[6rem_minmax(0,1fr)]">
+          <Labelled label="ID">
+            <input value={field.id ?? ""} className={INPUT} onChange={(e) => onPatch({ id: e.target.value })} />
+          </Labelled>
+          <Labelled label="Label">
+            <textarea value={field.label} rows={2} className={`${INPUT} resize-y`} onChange={(e) => onPatch({ label: e.target.value })} />
+          </Labelled>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Labelled label="Input type">
+            <select value={field.inputType} className={INPUT} onChange={(e) => onPatch({ inputType: e.target.value as FieldPatch["inputType"] })}>
+              {INPUT_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </Labelled>
+          <Labelled label="Mandatory">
+            <select value={field.mandatory} className={INPUT} onChange={(e) => onPatch({ mandatory: e.target.value as FieldPatch["mandatory"] })}>
+              {MANDATORY.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </Labelled>
+        </div>
         {field.mandatory === "conditional" ? (
-          <div className="flex flex-col gap-1.5">
-            <span className="font-medium">{`${name} is mandatory if`}</span>
+          <div className="flex flex-col gap-1.5 rounded-lg border border-asst-line bg-asst-bg p-3">
             {field.required && !field.required.when ? (
-              <p className="text-asst-muted">{`The sheet says "${field.required.label}", which is not tied to a key yet.`}</p>
+              <p className="text-xs text-asst-muted">{`The sheet says "${field.required.label}", which is not tied to a key yet.`}</p>
             ) : null}
             <BulkScanConditions
-              label={`mandatory condition of ${name}`}
+              label="mandatory condition"
+              lead="Mandatory if"
               conditions={conditionsOf(field.required?.when)}
               choices={choices.conditions}
               onChange={(next) => onField((f) => withRequired(f, next))}
             />
           </div>
         ) : null}
+      </Card>
 
-        {keys.length > 0 ? (
-          <div className="flex flex-col gap-2">
-            <span className="font-medium">Allowed values</span>
-            {keys.map((key) => (
-              <AllowedValues key={key} field={field} name={name} keyName={key} onField={onField} />
-            ))}
+      <BulkScanSends field={field} onKeys={(keys) => onPatch({ keys })} onFormat={(patch) => onPatch(patch)} onField={onField} />
+
+      <Card title="Where it goes in CCD">
+        <Labelled label="CCD ids, separated by spaces">
+          <CcdIds value={field.ccd} onChange={(ccd) => onPatch({ ccd })} />
+        </Labelled>
+        <p className="text-xs text-asst-muted">Status: not recorded yet</p>
+      </Card>
+
+      <Card title="Rules">
+        {field.logicText ? (
+          <div className="flex flex-col gap-1.5 rounded-lg bg-asst-warn/20 px-3 py-2 text-xs text-asst-text">
+            <span className="font-semibold">The sheet's logic, not yet written as rules</span>
+            <pre className="whitespace-pre-wrap font-sans text-[13px]">{field.logicText}</pre>
+            <div className="flex flex-wrap gap-1.5">
+              {field.rules.length === 0 ? (
+                <button type="button" className={SMALL_BUTTON} onClick={() => onField(writeAsRules)}>
+                  Write as rules
+                </button>
+              ) : null}
+              <button type="button" className={SMALL_BUTTON} onClick={() => onField(clearLogicText)}>
+                Remove English
+              </button>
+            </div>
           </div>
         ) : null}
+        {field.logicText && field.rules.length === 0 ? null : (
+          <BulkScanRules
+            field={field}
+            conditionChoices={choices.conditions}
+            keyChoices={choices.keys}
+            ccdChoices={choices.ccd}
+            onChange={(next) => onField(() => next)}
+          />
+        )}
+        <SheetWords field={field} />
+      </Card>
 
-        <div className="flex flex-col gap-2">
-          <span className="font-medium">Rules</span>
-          {field.logicText ? (
-            <div className="flex flex-col gap-1.5 rounded-lg bg-asst-warn/20 px-2.5 py-1.5">
-              <span className="font-semibold">The sheet's logic, not yet written as rules</span>
-              <pre className="whitespace-pre-wrap font-sans">{field.logicText}</pre>
-              <div className="flex flex-wrap gap-1.5">
-                {field.rules.length === 0 ? (
-                  <button type="button" className={SECONDARY} onClick={() => onField(writeAsRules)}>
-                    {`Write ${name} as rules`}
-                  </button>
-                ) : null}
-                <button type="button" className={SECONDARY} onClick={() => onField(clearLogicText)}>
-                  {`Remove the English of ${name}`}
-                </button>
-              </div>
-            </div>
-          ) : null}
-          {field.logicText && field.rules.length === 0 ? null : (
-            <BulkScanRules
-              field={field}
-              name={name}
-              conditionChoices={choices.conditions}
-              keyChoices={choices.keys}
-              ccdChoices={choices.ccd}
-              onChange={(next) => onField(() => next)}
-            />
-          )}
-          {words === "" && casePath === "" ? null : (
-            <div className="flex flex-col gap-1">
-              <span className="text-asst-muted">The transformation sheet will say</span>
-              {words === "" ? null : (
-                <div role="group" aria-label={`Logic of ${name}`}>
-                  <pre className="whitespace-pre-wrap rounded-lg bg-asst-panel px-2.5 py-2 font-sans">{words}</pre>
-                </div>
-              )}
-              {casePath === "" ? null : (
-                <div role="group" aria-label={`Case path of ${name}`}>
-                  <pre className="whitespace-pre-wrap rounded-lg bg-asst-panel px-2.5 py-2 font-sans text-asst-muted">{casePath}</pre>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {field.todo.map((todo, i) => (
-          <p key={todo} className="flex flex-wrap items-center gap-2 rounded-lg bg-asst-warn/20 px-2.5 py-1.5">
-            <span>
-              <span className="font-semibold">TODO: </span>
-              {todo.replace(/^TODO:\s*/, "")}
-            </span>
-            <button type="button" className={SECONDARY} onClick={() => onClearTodo(i)}>
-              {`Done: TODO ${i + 1} of ${name}`}
-            </button>
-          </p>
-        ))}
-        {(field.review ?? []).map((r, i) => (
-          <p key={`${r.about}-${r.reason}`} className="flex flex-wrap items-center gap-2 rounded-lg bg-asst-warn/20 px-2.5 py-1.5">
-            <span>
-              <span className="font-semibold">{`Check the ${r.about} (${r.confidence} confidence): `}</span>
-              {r.reason}
-            </span>
-            <button type="button" className={SECONDARY} onClick={() => onClearReview(i)}>
-              {`Done: check ${i + 1} of ${name}`}
-            </button>
-          </p>
-        ))}
-      </div>
-    </details>
+      {review.length > 0 || field.todo.length > 0 ? (
+        <Card title="Review">
+          <ul className="flex flex-col gap-2">
+            {field.todo.map((todo, i) => (
+              <li key={todo} className="flex items-start gap-2 rounded-lg bg-asst-warn/20 px-3 py-2 text-[13px] text-asst-text">
+                <span className="flex-1">
+                  <span className="font-semibold">TODO: </span>
+                  {todo.replace(/^TODO:\s*/, "")}
+                </span>
+                <DoneButton label={`Done: TODO ${i + 1}`} onClick={() => onClearTodo(i)} />
+              </li>
+            ))}
+            {review.map((r, i) => (
+              <li key={`${r.about}-${r.reason}`} className="flex items-start gap-2 rounded-lg bg-asst-warn/20 px-3 py-2 text-[13px] text-asst-text">
+                <span className="flex-1">
+                  <span className="font-semibold">{`Check the ${r.about} `}</span>
+                  <span className="text-asst-muted">{`(${r.confidence} confidence) `}</span>
+                  {r.reason}
+                </span>
+                <DoneButton label={`Done: check ${i + 1}`} onClick={() => onClearReview(i)} />
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
+    </div>
   );
 }
 
-/**
- * One key's allowed values, one per line. The text is kept as typed and only its lines go up, because showing the lines
- * joined back would swallow the new line the moment it was typed.
- */
-function AllowedValues({
-  field,
-  name,
-  keyName,
-  onField
-}: Readonly<{ field: Field; name: string; keyName: string; onField: (change: (field: Field) => Field) => void }>) {
-  const { values, blankAllowed } = allowedFor(field, keyName);
-  const [text, setText] = useState(values.join("\n"));
-  const lines = (t: string) => t.split("\n").filter((l) => l !== "");
-  const shown = lines(text).join("\n") === values.join("\n") ? text : values.join("\n");
+function DoneButton({ label, onClick }: Readonly<{ label: string; onClick: () => void }>) {
   return (
-    <div className="flex flex-wrap items-start gap-3">
-      <label className="flex flex-col gap-1">
-        {`Allowed values of ${keyName}, one per line; none means free text`}
-        <textarea
-          aria-label={`Allowed values of ${keyName} in ${name}`}
-          value={shown}
-          rows={Math.max(2, values.length + 1)}
-          className={`${FIELD} w-64`}
-          onChange={(e) => {
-            setText(e.target.value);
-            onField((f) => withAllowed(f, keyName, lines(e.target.value), allowedFor(f, keyName).blankAllowed));
-          }}
-        />
-      </label>
-      <label className="flex items-center gap-1.5 pt-5">
-        <input
-          type="checkbox"
-          checked={blankAllowed}
-          disabled={values.length === 0}
-          title={values.length === 0 ? "A free-text key can always be blank" : undefined}
-          onChange={(e) => onField((f) => withAllowed(f, keyName, allowedFor(f, keyName).values, e.target.checked))}
-        />
-        {`Blank is allowed for ${keyName} in ${name}`}
-      </label>
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      className={`grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-asst-line bg-asst-bg text-asst-ok hover:bg-asst-hover ${FOCUS}`}
+    >
+      <Icon name="check" />
+    </button>
+  );
+}
+
+/** The English the transformation sheet will carry for the field's rules, and the case path they produce. */
+function SheetWords({ field }: Readonly<{ field: Field }>) {
+  // The English a field only has as text is shown once, in its own callout, and is not what the sheet will say of rules.
+  const words = field.rules.length > 0 || field.logicPreamble ? logicWords(field) : "";
+  const casePath = casePathWords(field);
+  if (words === "" && casePath === "") {
+    return null;
+  }
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs font-medium text-asst-muted">The transformation sheet will say:</span>
+      {words === "" ? null : (
+        <div role="group" aria-label="Transformation sheet logic">
+          <pre className="whitespace-pre-wrap rounded-lg bg-asst-bg px-3 py-2 font-sans text-[13px] text-asst-text">{words}</pre>
+        </div>
+      )}
+      {casePath === "" ? null : (
+        <div role="group" aria-label="Transformation sheet case path">
+          <pre className="whitespace-pre-wrap rounded-lg bg-asst-bg px-3 py-2 font-sans text-[13px] text-asst-muted">{casePath}</pre>
+        </div>
+      )}
     </div>
   );
+}
+
+/** CCD ids typed as words: the text goes up when the person leaves the box or presses Enter. */
+function CcdIds({ value, onChange }: Readonly<{ value: readonly string[]; onChange: (ids: string[]) => void }>) {
+  return <CommitInput label="CCD ids" value={value.join(" ")} onCommit={(text) => onChange(wordsOf(text))} />;
 }

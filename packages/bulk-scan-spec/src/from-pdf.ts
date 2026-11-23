@@ -71,8 +71,10 @@ export async function fromPdf(input: FromPdfInput): Promise<FromPdfResult> {
   const keys = proposeKeys(slots, input.houseKeys ?? [], tags);
   let next = 0;
   const withKeys = drafts.map((d) => {
-    const mine = keys.slice(next, next + d.slotLabels.length);
+    const slotKeys = keys.slice(next, next + d.slotLabels.length);
     next += d.slotLabels.length;
+    const base = slotKeys[0];
+    const mine = d.dateParts && base ? d.dateParts.map((part) => ({ ...base, key: `${base.key}${part}` })) : slotKeys;
     return { d, mine };
   });
   const ccd = proposeCcd(
