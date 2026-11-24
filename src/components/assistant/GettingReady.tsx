@@ -477,11 +477,11 @@ function ModelAccessRow({ row, starting }: { row: ModelAccess; starting: boolean
           {row.initial}
         </span>
         <div className="flex min-w-0 flex-1 flex-col leading-tight">
-          {/* Always required: it is how the assistant reaches Claude at all, whichever sign-in it rides on. */}
-          <span className="flex items-center gap-2 text-[15px] font-medium">
-            {row.name}
-            <RequiredTag />
-          </span>
+          {/*
+           * No Required mark: there is nothing to do on this row, and the sign-in it rides on carries the mark and the
+           * button. A Required beside no button sends the person looking for one.
+           */}
+          <span className="text-[15px] font-medium">{row.name}</span>
           <span className="text-[13px] text-asst-muted">{row.desc}</span>
         </div>
         <span className={`shrink-0 text-[13px] ${tone}`}>{words ?? row.detail}</span>

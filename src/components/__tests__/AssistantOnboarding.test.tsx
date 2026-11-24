@@ -464,8 +464,8 @@ describe("GettingReady connectors", () => {
 
     const claude = connector("Claude");
     expect(within(claude).getByText("Through the HMCTS AI Gateway, using your Azure sign-in")).toBeTruthy();
-    // The chat cannot start without it on either route, so it says so as the sign-in it rides on does.
-    expect(within(claude).getByText("Required")).toBeTruthy();
+    // Nothing to do on this row, so no Required: the Azure row it rides on carries the mark and the button.
+    expect(within(claude).queryByText("Required")).toBeNull();
     expect(within(connector("Azure")).getByText("Required")).toBeTruthy();
     expect(within(claude).queryByRole("button")).toBeNull();
     expect(within(claude).queryByRole("form")).toBeNull();
