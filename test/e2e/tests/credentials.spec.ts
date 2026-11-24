@@ -41,7 +41,7 @@ test.describe("credentials @smoke", () => {
       test.skip(response?.status() === 404, ASSISTANT_OFF);
       const dialog = page.getByRole("dialog", { name: "Settings" });
       // Previews and the -staging release have sign-in off, so credentials are unavailable there.
-      test.skip(await dialog.getByText(/Your credentials cannot be shown/).isVisible(), "this deployment cannot store a development identity's credentials");
+      test.skip(await dialog.getByText(/Connections are not set up here/).isVisible(), "this deployment cannot store a development identity's credentials");
 
       const token = `sk-ant-oat-${persona.replaceAll("-", "")}${"a".repeat(24)}`;
       await dialog.getByRole("button", { name: "Replace your Claude token" }).click();

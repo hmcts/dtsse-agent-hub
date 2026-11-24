@@ -2425,8 +2425,7 @@ describe("atlassian lookups", () => {
     const abort = new AbortController();
     const stream = frames(await pod(sessionsRoute.GET, token, `/api/virtual/${id}/sessions`, { virtualAgentId: id }, "GET", undefined, abort.signal));
 
-    // A sign-in asked for with a GitHub search is dropped: gh is signed in on every pod.
-    const asked = ask({ kind: "github_project", query: "roadmap", owner: "hmcts", sign_in: true });
+    const asked = ask({ kind: "github_project", query: "roadmap", owner: "hmcts" });
     const [frame] = await stream.named("lookup", 1);
     const lookup = JSON.parse(frame!.data!);
     expect(lookup).toEqual({ lookup_id: expect.any(String), kind: "github_project", query: "roadmap", space: null, owner: "hmcts", sign_in: false });
@@ -2437,6 +2436,32 @@ describe("atlassian lookups", () => {
     await stream.cancel();
 
     expect(answered).toEqual({ status: "done", results: [project] });
+  });
+
+  // gh signs in as the pod boots, so a GitHub sign-in is the boot's: the saved token goes and the assistant restarts
+  // to relay a code, and no lookup is sent to the pod that is about to go.
+  it("should delete the saved GitHub token and restart the assistant when a GitHub search asks for a sign-in", async () => {
+    const { id } = await answeringAssistant(["lookups", "github-lookups"]);
+    const backend = credentialBackend(prisma);
+    if (!backend.available) {
+      throw new Error(backend.reason);
+    }
+    await putCredential(prisma, backend.store, { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "github", value: `ghp_${"A1b2".repeat(9)}`, via: "web" });
+    const before = await prisma.virtualAgent.findUniqueOrThrow({ where: { id }, select: { generation: true } });
+
+    const answered = await jsonOf(await ask({ kind: "github_project", query: "roadmap", sign_in: true }));
+
+    expect(answered).toEqual({ status: "signing_in" });
+    expect(await prisma.credential.count({ where: { ownerOid: ALICE.oid, kind: "github" } })).toBe(0);
+    expect(await prisma.virtualAgent.findUniqueOrThrow({ where: { id }, select: { status: true } })).toEqual({ status: "provisioning" });
+    expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id }, select: { generation: true } })).generation).toBeGreaterThanOrEqual(before.generation);
+    expect(await prisma.assistantLookup.count()).toBe(0);
+  });
+
+  it("should refuse a GitHub sign-in for someone with no assistant", async () => {
+    await insertUser(ALICE);
+
+    expect((await ask({ kind: "github_repo", query: "ccd", sign_in: true })).status).toBe(404);
   });
 
   it("should answer a repository search with links the hub builds, and refuse repositories that are not", async () => {

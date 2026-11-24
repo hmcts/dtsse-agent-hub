@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useId, useRef, useState } from "react
 import {
   awaitsGithub,
   type Connection,
+  type ConnectionState,
   type ConnectionsPrompt,
   type Connector,
   checklistState,
@@ -14,9 +15,11 @@ import {
   connectRestarts,
   GITHUB_FIRST,
   hasLapsed,
+  lapsedWords,
   type ModelAccess,
   modelAccess,
   modelAccessAfter,
+  NO_CONNECTIONS,
   offeredConnections,
   pasteIsFallback,
   screenDetail,
@@ -146,22 +149,23 @@ function useWarmupMessage(phase: WarmupPhase, rotating: boolean, since: number):
   return { message, slow };
 }
 
-/** What the confirmation asks and what the button that answers it is called, by what the action will actually do. */
+/**
+ * What the confirmation asks and what the button that answers it is called, by what the action will actually do.
+ * `reconnectSignIn` starts a stopped assistant as well as restarting a running one, so either way the code comes now.
+ */
 function againWords(name: string, stored: boolean, running: boolean): { question: string; confirm: string } {
   if (!stored) {
     return {
-      // Nothing to delete: the value went with the sign-in, or there never was one. All this does is restart.
+      // Nothing to delete: the value went with the sign-in, or there never was one. All this does is start the pod.
       question: running
-        ? `Restart your assistant so it asks you to sign in to ${name} again? Your chats are kept.`
-        : `Have your assistant sign in to ${name} again? It is stopped, so it asks you when it next starts.`,
-      confirm: `Sign in to ${name} again`
+        ? `Restart your assistant to get a new ${name} sign-in code? Anything it is working on stops, but your chats are kept.`
+        : `Start your assistant to get a new ${name} sign-in code?`,
+      confirm: "Get a new code"
     };
   }
   return {
-    question: running
-      ? `Delete your saved ${name} sign-in, which all your virtual agents use, and restart your assistant so it asks you to sign in again? Your chats are kept.`
-      : `Delete your saved ${name} sign-in, which all your virtual agents use? Your assistant is stopped, so it asks you to sign in when it next starts.`,
-    confirm: running ? `Sign in to ${name} again` : `Delete ${name} sign-in`
+    question: `Sign in to ${name} again? This deletes your saved ${name} sign-in, which all your agents use, and ${running ? "restarts" : "starts"} your assistant to get a new code. Your chats are kept.`,
+    confirm: "Delete and sign in again"
   };
 }
 
@@ -183,6 +187,7 @@ function SignInAgain({
   kind,
   name,
   stored,
+  state,
   running,
   reconnect
 }: {
@@ -190,6 +195,7 @@ function SignInAgain({
   kind: CredentialKind;
   name: string;
   stored: boolean;
+  state: ConnectionState;
   running: boolean;
   reconnect: FormAction;
 }) {
@@ -205,9 +211,7 @@ function SignInAgain({
 
   return (
     <div className="flex flex-col gap-2 text-[13px] text-asst-body">
-      <p className="text-pretty">
-        {stored ? `Your assistant could not use your saved ${name} sign-in.` : `Your assistant is not signed in to ${name} and is not asking you to.`}
-      </p>
+      <p className="text-pretty">{lapsedWords(name, stored, state)}</p>
       {asking ? (
         <ActionForm action={reconnect} label={`Sign in to ${name} again`} className="flex flex-col gap-2">
           <input type="hidden" name="id" value={assistantId} />
@@ -232,7 +236,7 @@ function SignInAgain({
           onClick={() => setAsking(true)}
           className={`self-start rounded-[10px] px-3.5 py-1.5 text-[13px] font-semibold ${stored ? "border border-asst-error text-asst-error hover:bg-asst-active" : "border border-asst-accent-line text-asst-accent-soft hover:bg-asst-active"}`}
         >
-          Sign in again
+          {stored ? "Sign in again" : "Get a new code"}
         </button>
       )}
     </div>
@@ -367,7 +371,15 @@ function ConnectionRow({
     below = null;
   } else if (again) {
     below = (
-      <SignInAgain assistantId={assistantId} kind={kind} name={connector.name} stored={status?.stored === true} running={running} reconnect={reconnect} />
+      <SignInAgain
+        assistantId={assistantId}
+        kind={kind}
+        name={connector.name}
+        stored={status?.stored === true}
+        state={state}
+        running={running}
+        reconnect={reconnect}
+      />
     );
   } else if (state !== "connected" && connecting && pasted !== null) {
     below = pasteForm(pasted);
@@ -385,7 +397,7 @@ function ConnectionRow({
       <div className="flex min-w-0 flex-1 flex-col leading-tight">
         <span className="flex items-center gap-2 text-[15px] font-medium">
           {connector.name}
-          {required ? <span className="rounded-full border border-asst-line px-1.5 text-[11px] font-normal text-asst-muted">Required</span> : null}
+          {required ? <RequiredTag /> : null}
         </span>
         <span className="text-[13px] text-asst-muted">{connector.desc}</span>
       </div>
@@ -448,6 +460,11 @@ function ConnectionRow({
  * Always separated from the row above, since `modelAccessAfter` never puts it at the head of the list, where the
  * `first` rows get their separator left off.
  */
+/** The mark on a connection the chat cannot start without; an optional one says so in its description instead. */
+function RequiredTag() {
+  return <span className="rounded-full border border-asst-line px-1.5 text-[11px] font-normal text-asst-muted">Required</span>;
+}
+
 function ModelAccessRow({ row, starting }: { row: ModelAccess; starting: boolean }) {
   // A relayed sign-in with nothing to paste, which is what the credential behind it is.
   const words = screenDetail(row.state, { relays: true, paste: null }, starting);
@@ -460,7 +477,11 @@ function ModelAccessRow({ row, starting }: { row: ModelAccess; starting: boolean
           {row.initial}
         </span>
         <div className="flex min-w-0 flex-1 flex-col leading-tight">
-          <span className="text-[15px] font-medium">{row.name}</span>
+          {/* Always required: it is how the assistant reaches Claude at all, whichever sign-in it rides on. */}
+          <span className="flex items-center gap-2 text-[15px] font-medium">
+            {row.name}
+            <RequiredTag />
+          </span>
           <span className="text-[13px] text-asst-muted">{row.desc}</span>
         </div>
         <span className={`shrink-0 text-[13px] ${tone}`}>{words ?? row.detail}</span>
@@ -470,12 +491,12 @@ function ModelAccessRow({ row, starting }: { row: ModelAccess; starting: boolean
 }
 
 /**
- * What the screen says it is for. The `unknown` line neither claims the person has connected anything nor asks them
- * to: the hub has not read their credentials, and someone who has signed in everywhere must not be told otherwise.
+ * What the screen says it is for. The `unknown` line asks for nothing: the deployment keeps no credentials, so there
+ * is nothing anyone could connect on it.
  */
 function subtitleFor(ask: ConnectionsAsk, returning: boolean): string {
   if (ask === "unknown") {
-    return "Your sign-ins cannot be checked just now, so your assistant may ask you for one as it goes.";
+    return NO_CONNECTIONS.title;
   }
   return returning
     ? "Your assistant is waiting for you to sign in again before it can carry on."
@@ -526,8 +547,15 @@ function ReadyShell({
   theme = "system",
   subtitle,
   showWaitingDetail = false,
+  explained = false,
   children
-}: ScreenProps & { subtitle?: string; showWaitingDetail?: boolean; children: React.ReactNode }) {
+}: ScreenProps & {
+  subtitle?: string;
+  showWaitingDetail?: boolean;
+  /** Whether the screen inside says in full that nothing can be connected here, so the shell adds only the detail. */
+  explained?: boolean;
+  children: React.ReactNode;
+}) {
   const { readiness } = assistant;
   return (
     <div
@@ -571,7 +599,13 @@ function ReadyShell({
             ) : null}
           </div>
         </div>
-        {unavailable === null ? null : <p className="text-sm text-asst-error">{unavailable}</p>}
+        {/* The backend's reason is for whoever runs this copy; the person's own words are the screen's. */}
+        {unavailable === null ? null : (
+          <div className="flex flex-col gap-1">
+            {explained ? null : <p className="text-pretty text-sm text-asst-body">{NO_CONNECTIONS.short}</p>}
+            <p className="text-pretty text-xs text-asst-faint">{NO_CONNECTIONS.detail(unavailable)}</p>
+          </div>
+        )}
         {children}
       </div>
     </div>
@@ -636,15 +670,13 @@ export function GettingReady({
     <ReadyShell
       assistant={assistant}
       unavailable={unavailable}
+      explained={ask === "unknown"}
       theme={theme}
       subtitle={subtitleFor(ask, returning)}
       showWaitingDetail={statuses.some((status) => status.kind === "github" && status.stored)}
     >
       {ask === "unknown" ? (
-        <p className="text-pretty text-asst-body">
-          Whatever you have already connected is still connected — the hub just cannot read your sign-ins at the moment, so it is not listing them. There is
-          nothing for you to set up again.
-        </p>
+        <p className="text-pretty text-asst-body">{NO_CONNECTIONS.body}</p>
       ) : (
         <ul aria-label="Connections" className="flex flex-col overflow-hidden rounded-[14px] border border-asst-line">
           {offered.map(({ kind, connector }, index) => (

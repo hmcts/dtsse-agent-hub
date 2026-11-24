@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   ghLookupFailure,
+  ghLookupRefusal,
   githubOwners,
   githubWords,
   ownerGroups,
@@ -145,19 +146,19 @@ describe("parseProjects", () => {
 });
 
 describe("ghLookupFailure", () => {
-  it("should say to reconnect GitHub when the token has no project scope", () => {
+  it("should say to sign in to GitHub again when the token has no project scope", () => {
     const result = {
       code: 1,
       stdout: JSON.stringify({ errors: [{ type: "INSUFFICIENT_SCOPES", message: "needs read:project" }] }),
       stderr: "gh: needs scopes"
     };
 
-    expect(ghLookupFailure(result, "Projects")).toMatch(/needs the project scope\. Reconnect GitHub in Connections/);
+    expect(ghLookupFailure(result, "Projects")).toMatch(/before your assistant needed access to GitHub Projects\. Sign in to GitHub again/);
   });
 
   it("should say when gh is missing or signed out", () => {
     expect(ghLookupFailure({ code: 127, stdout: "", stderr: "" }, "repositories")).toMatch(/gh is not installed/);
-    expect(ghLookupFailure({ code: 4, stdout: "", stderr: "" }, "repositories")).toMatch(/not signed in to GitHub/);
+    expect(ghLookupFailure({ code: 4, stdout: "", stderr: "" }, "repositories")).toMatch(/GitHub sign-in has stopped working.*Sign in to GitHub again/);
   });
 
   it("should give gh's own words, kept short, for any other failure", () => {
@@ -283,7 +284,7 @@ describe("runGithubLookup", () => {
   it("should say why when the person's accounts cannot be read", async () => {
     const answer = await runGithubLookup({ run: runner({}).run, env: {}, owners: async () => null }, { kind: "github_repo", query: "ccd", owner: null });
 
-    expect(answer).toMatchObject({ error: "failed", detail: expect.stringContaining("not signed in to GitHub") });
+    expect(answer).toMatchObject({ error: "failed", detail: expect.stringContaining("could not read your GitHub account") });
   });
 
   it("should say why when the repository search fails", async () => {
@@ -301,14 +302,6 @@ describe("runGithubLookup", () => {
 
     expect(answer).toEqual({ results: [{ owner: "hmcts", number: 12, title: "CFT Workspace roadmap" }] });
     expect(calls[0]).toContain("owner=hmcts");
-  });
-
-  it("should say to reconnect GitHub when the Project search is refused for want of a scope", async () => {
-    const { run } = runner({ "api graphql": { code: 1, stdout: JSON.stringify({ errors: [{ type: "INSUFFICIENT_SCOPES" }] }), stderr: "" } });
-
-    const answer = await runGithubLookup({ run, env: {}, owners: async () => [] }, { kind: "github_project", query: "roadmap", owner: "hmcts" });
-
-    expect(answer).toMatchObject({ error: "failed", detail: expect.stringContaining("project scope") });
   });
 
   it("should ask for the repository first when a Project search has no owner", async () => {
@@ -364,5 +357,47 @@ describe("a Project named by its link or number", () => {
 
   it("should pass the owner and number as variables", () => {
     expect(projectByNumberArgs("hmcts", 43).slice(4)).toEqual(["-F", "owner=hmcts", "-F", "number=43"]);
+  });
+});
+
+describe("ghLookupRefusal", () => {
+  const NO_SCOPE: RunResult = {
+    code: 1,
+    stdout: JSON.stringify({ errors: [{ type: "INSUFFICIENT_SCOPES", message: "needs read:project" }] }),
+    stderr: ""
+  };
+
+  it("should answer signed_out, so the hub offers a new GitHub sign-in, when the token has no project scope", () => {
+    expect(ghLookupRefusal(NO_SCOPE, "Projects")).toEqual({ error: "signed_out", detail: ghLookupFailure(NO_SCOPE, "Projects") });
+  });
+
+  it("should answer signed_out when gh is signed out", () => {
+    expect(ghLookupRefusal({ code: 4, stdout: "", stderr: "" }, "repositories")).toMatchObject({ error: "signed_out" });
+  });
+
+  it("should answer failed when a new sign-in would not help", () => {
+    expect(ghLookupRefusal({ code: 1, stdout: "", stderr: "HTTP 503" }, "repositories")).toMatchObject({ error: "failed" });
+    // A missing scope matters only to the Project search.
+    expect(ghLookupRefusal(NO_SCOPE, "repositories")).toMatchObject({ error: "failed" });
+  });
+});
+
+describe("runGithubLookup refusals a sign-in fixes", () => {
+  it("should answer signed_out with the reason when GitHub refuses a Project search for want of the project scope", async () => {
+    const { run } = runner({
+      "api graphql": { code: 1, stdout: JSON.stringify({ errors: [{ type: "INSUFFICIENT_SCOPES" }] }), stderr: "" }
+    });
+
+    const answer = await runGithubLookup({ run, env: {}, owners: async () => [] }, { kind: "github_project", query: "roadmap", owner: "hmcts" });
+
+    expect(answer).toEqual({ error: "signed_out", detail: expect.stringContaining("Sign in to GitHub again") });
+  });
+
+  it("should answer signed_out when every repository search finds gh signed out", async () => {
+    const { run } = runner({ "search repos": { code: 4, stdout: "", stderr: "" } });
+
+    const answer = await runGithubLookup({ run, env: {}, owners: async () => ["hmcts"] }, { kind: "github_repo", query: "ccd", owner: null });
+
+    expect(answer).toMatchObject({ error: "signed_out" });
   });
 });

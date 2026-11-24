@@ -193,7 +193,7 @@ export type LookupResponse =
   | { status: "done"; results: LookupResult[] }
   | { status: "waking" }
   | { status: "unsupported" }
-  | { status: "signed_out" }
+  | { status: "signed_out"; detail?: string }
   | { status: "signing_in" }
   | { status: "failed"; detail: string }
   | { status: "timeout" };
@@ -216,7 +216,8 @@ export function lookupResponse(row: LookupRow): LookupResponse | undefined {
     return { status: "done", results: lookupResults(row.kind, row.results) };
   }
   if (row.error === "signed_out") {
-    return { status: "signed_out" };
+    // A GitHub one says why, since its way back is a fresh sign-in of an account that is already connected.
+    return row.detail === null ? { status: "signed_out" } : { status: "signed_out", detail: row.detail };
   }
   if (row.error === "superseded") {
     // The person has typed on, and the newer search is the one they are waiting for.

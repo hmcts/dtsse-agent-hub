@@ -474,7 +474,7 @@ describe("the Assistant's Connections, one row per service", () => {
       within(rowOf("GitHub"))
         .getAllByRole("button")
         .map((button) => button.getAttribute("aria-label"))
-    ).toEqual(["Connect GitHub", "Remove your GitHub token"]);
+    ).toEqual(["Remove your GitHub token"]);
     expect(within(rowOf("Jenkins")).getByRole("button", { name: "Add your Jenkins API token" })).toBeTruthy();
     expect(screen.queryByRole("list", { name: "Saved credentials" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Saved credentials" })).toBeNull();
@@ -539,7 +539,8 @@ describe("the Assistant's Connections, one row per service", () => {
   it("should say why the credentials cannot be shown when the hub cannot read them", async () => {
     await open({ tokens: { ...tokens(), rows: [], unavailable: "no credential store is configured" } }, "Connections");
 
-    expect(screen.getByText("Your credentials cannot be shown: no credential store is configured")).toBeTruthy();
+    expect(screen.getByText("Connections are not set up here")).toBeTruthy();
+    expect(screen.getByText("Technical detail: no credential store is configured.")).toBeTruthy();
   });
 
   it("should offer Connections for the saved credentials alone when the page gives no sign-ins", async () => {
@@ -780,7 +781,9 @@ describe("the Connections section when the hub cannot read", () => {
       "Connections"
     );
 
-    expect(screen.getByText("the sign-ins could not be read")).toBeTruthy();
-    expect(screen.getByText("Your credentials cannot be shown: no credential store is configured")).toBeTruthy();
+    // One explanation, with each backend reason as a detail beneath it.
+    expect(screen.getAllByText("Connections are not set up here")).toHaveLength(1);
+    expect(screen.getByText("Technical detail: the sign-ins could not be read.")).toBeTruthy();
+    expect(screen.getByText("Technical detail: no credential store is configured.")).toBeTruthy();
   });
 });

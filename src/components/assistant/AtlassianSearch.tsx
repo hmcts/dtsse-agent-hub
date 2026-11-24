@@ -7,6 +7,7 @@ import {
   type ConfluencePageResult,
   type GithubProjectResult,
   type GithubRepoResult,
+  isGithubKind,
   type JiraProjectResult,
   LOOKUP_NOUNS,
   type LookupKind,
@@ -22,7 +23,9 @@ import { lookUp as fetchLookup, type LookUp } from "@/components/assistant/looku
  * Finding a Jira project, a Confluence page, a GitHub repository or a GitHub Project by typing a few words of it,
  * searched as the person, in their own pod, with their own Atlassian or GitHub sign-in (see "Atlassian lookups" in
  * docs/agent-api.md). The document panel and the settings both use it, for where a document goes. GitHub is signed in
- * on every pod, so its searches never ask for a sign-in.
+ * on every pod, so a GitHub search asks for a sign-in only when GitHub refuses the one the pod has: signed out, or a
+ * token from before the Project scope was asked for. That sign-in restarts the assistant, and its code is shown above
+ * the chats as every boot sign-in is.
  *
  * A combobox over a listbox, as the sidebar's chat search is: focus stays in the box, the arrows move
  * `aria-activedescendant` through the results and Enter picks the one it is on. Unlike that search, the answer can be
@@ -65,9 +68,14 @@ function summary(kind: LookupKind, shown: Shown): string {
     case "waking":
       return `Your assistant is starting, so it can search ${where} as you. This takes a minute or two; the search will run when it is ready.`;
     case "signed_out":
+      if (isGithubKind(kind)) {
+        return shown.detail ?? "Your GitHub sign-in cannot do this search. Sign in to GitHub again to fix it.";
+      }
       return `Your assistant needs you to sign in to Atlassian before it can search ${where}.`;
     case "signing_in":
-      return "Sign in to Atlassian with the code below, then the search will run.";
+      return isGithubKind(kind)
+        ? "Your assistant is restarting to sign in to GitHub. A sign-in code appears above your chats in a minute or two. Search again once you have used it."
+        : "Sign in to Atlassian with the code below, then the search will run.";
     case "unsupported":
       return `Your assistant needs an update to search ${where}. It gets one the next time it restarts.`;
     case "timeout":
@@ -222,6 +230,8 @@ export function AtlassianSearch({
             }
           } else if (answer.status === "failed") {
             setShown({ phase: "failed", results: [], detail: answer.detail });
+          } else if (answer.status === "signed_out") {
+            setShown({ phase: "signed_out", results: [], detail: answer.detail });
           } else {
             setShown({ phase: answer.status, results: [] });
           }
@@ -279,7 +289,8 @@ export function AtlassianSearch({
   // Read as the exports read it, from when the person asked, so a code left over from an earlier sign-in, or one that
   // has run out, is never offered as the one to use.
   const stage = signInStage(access.login, now ?? 0, signInAt ?? now ?? 0);
-  const note = shown.phase === "signing_in" ? signInNote(stage, "search", "Sign in again") : null;
+  // GitHub's code is shown above the chats, as a boot sign-in is, so the Atlassian code's notes are not about it.
+  const note = shown.phase === "signing_in" && !isGithubKind(kind) ? signInNote(stage, "search", "Sign in again") : null;
   return (
     // `min-w-0` all the way down, so the box and a long result truncate within the panel rather than run past it.
     <div className="flex min-w-0 basis-full flex-col gap-2">
@@ -314,16 +325,20 @@ export function AtlassianSearch({
       <p role="status" className="text-xs text-asst-faint empty:hidden">
         {summary(kind, shown)}
       </p>
+      {/* Said before the button, because GitHub's sign-in is made as the assistant boots, so pressing it restarts it. */}
+      {shown.phase === "signed_out" && isGithubKind(kind) ? (
+        <p className="text-pretty text-xs text-asst-muted">This restarts your assistant. Anything it is working on stops, but your chats are kept.</p>
+      ) : null}
       {shown.phase === "signed_out" ? (
         <button
           type="button"
           onClick={() => void signIn()}
           className="self-start rounded-[9px] border border-asst-strong px-3 py-1.5 text-xs font-medium text-asst-text hover:bg-asst-active"
         >
-          Sign in to Atlassian
+          {isGithubKind(kind) ? "Sign in to GitHub again" : "Sign in to Atlassian"}
         </button>
       ) : null}
-      {shown.phase === "signing_in" && stage === "live" && access.login ? <SignInPrompt login={access.login} /> : null}
+      {shown.phase === "signing_in" && !isGithubKind(kind) && stage === "live" && access.login ? <SignInPrompt login={access.login} /> : null}
       {note === null ? null : (
         <p role="alert" className="text-[13px] text-asst-error">
           {note}

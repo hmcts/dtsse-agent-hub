@@ -1,15 +1,32 @@
 import type { NextRequest } from "next/server";
 import { errorResponse, json, readJson } from "@/agent-api/http";
+import { findAssistant } from "@/assistant/assistant-store";
 import { GITHUB_OWNER_RE } from "@/assistant/github";
 import { askLookup, waitForLookup } from "@/assistant/lookup-store";
 import { isGithubKind, isLookupKind, LOOKUP_WAIT_MS, type LookupResponse, lookupQuery, SPACE_KEY_RE, searchable } from "@/assistant/lookups";
+import { credentialBackend } from "@/credentials/backend";
 import { realtime } from "@/realtime/process";
 import { prisma } from "@/store/prisma";
+import { reconnectSignIn } from "@/virtual-agents/logins";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 import { uiRefusals, uiViewer } from "../../request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+/** A fresh GitHub sign-in for the person's assistant, for a search GitHub refused for want of one. */
+async function signInToGithub(viewerOid: string): Promise<Response> {
+  const assistant = await findAssistant(prisma, viewerOid);
+  if (assistant === undefined) {
+    return errorResponse(404, "you have no assistant to sign in with yet");
+  }
+  const backend = credentialBackend(prisma);
+  if (!backend.available) {
+    return json({ status: "failed", detail: backend.reason } satisfies LookupResponse);
+  }
+  await reconnectSignIn(prisma, backend.store, viewerOid, assistant.id, "github");
+  return json({ status: "signing_in" } satisfies LookupResponse);
+}
 
 /**
  * Searches the signed-in person's own Jira, Confluence or GitHub, as them, through their assistant's pod, and answers
@@ -32,6 +49,12 @@ export async function POST(request: NextRequest): Promise<Response> {
     if (!isLookupKind(body.kind)) {
       return errorResponse(400, "kind must be jira_project, confluence_page, github_repo or github_project");
     }
+    // gh is signed in as the pod boots, so a GitHub sign-in is the boot's: the saved token goes and the assistant
+    // restarts to relay a code, which grants the scopes asked for now. Answered at once, as an Atlassian one is, and
+    // before the search's own checks, since it searches nothing.
+    if (body.sign_in === true && isGithubKind(body.kind)) {
+      return await signInToGithub(viewer.oid);
+    }
     // A Project is searched for in one owner, the chosen repository's. The pod searches as the person, so it can only
     // ever see Projects they can see whatever owner is named.
     const owner = body.kind === "github_project" ? body.owner : null;
@@ -43,8 +66,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       return errorResponse(400, "that is not a Confluence space key");
     }
     const query = lookupQuery(body.query);
-    // gh is signed in on every pod, so a GitHub search has no sign-in to start.
-    const signIn = body.sign_in === true && !isGithubKind(body.kind);
+    const signIn = body.sign_in === true;
     if (!signIn && !searchable(query, body.kind)) {
       return json({ status: "done", results: [] } satisfies LookupResponse);
     }

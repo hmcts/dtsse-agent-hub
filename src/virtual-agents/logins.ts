@@ -7,7 +7,7 @@ import type { Database, PrismaClient } from "../store/prisma.ts";
 import { PASTED_CODE_TTL_MS } from "./cleanup.ts";
 import { MAX_PASTED_CODE_LENGTH, openPastedCode, sealPastedCode } from "./pasted-code.ts";
 import { announce } from "./stop.ts";
-import { findVirtualAgent, moveTo, restartVirtualAgent, type VirtualAgentRow } from "./store.ts";
+import { findVirtualAgent, moveTo, restartVirtualAgent, setDesired, type VirtualAgentRow } from "./store.ts";
 
 /**
  * The logins a pod relays to its owner: a device code to enter at a URL (GitHub, Azure, Atlassian), or a URL whose
@@ -315,8 +315,8 @@ export const SIGN_IN_TITLES: Record<SignInKind, string> = { github: "GitHub", az
 
 /**
  * The owner's request to sign in to `kind`, again or for the first time: their stored credential is deleted and the
- * virtual agent, if it is running, restarted, so its new pod finds none and relays a fresh sign-in. A stopped one
- * signs in when it next starts. The agent is checked first, so an id that is not the actor's deletes nothing.
+ * virtual agent restarted, or started if it is stopped, so its new pod finds none and relays a fresh sign-in. The
+ * agent is checked first, so an id that is not the actor's deletes nothing.
  *
  * Off the `gateway` route an Azure sign-in is relayed only on request, so this is also how the owner connects Azure
  * at all: it records the request for `signInRequested`, which the new pod reads, before restarting.
@@ -351,6 +351,11 @@ export async function reconnectSignIn(
   }
   if (kind === "azure") {
     await prisma.virtualAgent.update({ where: { id: virtualAgentId }, data: { azureSignInRequestedAt: now } });
+  }
+  // A stopped agent is started rather than left to sign in "when it next starts": the person asked for a code now,
+  // and nothing else on the screen they asked from would start it.
+  if (virtualAgent.desired === "stopped") {
+    return await setDesired(prisma, actorOid, virtualAgentId, "running", now);
   }
   return await restartVirtualAgent(prisma, actorOid, virtualAgentId, `restarting to sign in to ${SIGN_IN_TITLES[kind]} again`, now);
 }
