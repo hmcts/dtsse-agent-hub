@@ -51,7 +51,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     if (picked instanceof Response) {
       return picked;
     }
-    const imported = await importUpload(name, new Uint8Array(await file.arrayBuffer()), caseType || undefined, picked);
+    const imported = await importUpload(name, new Uint8Array(await file.arrayBuffer()), picked);
     const fallback = name.replace(/\.(pdf|xlsx)$/i, "");
     const ids = await createSpecs(
       prisma,

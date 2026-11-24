@@ -326,7 +326,6 @@ describe("bulk scan editor", () => {
     fireEvent.change(screen.getByLabelText("Label"), { target: { value: "Full name" } });
     fireEvent.change(screen.getByLabelText("Max length"), { target: { value: "40" } });
     fireEvent.change(screen.getByLabelText("Min length"), { target: { value: "5" } });
-    fireEvent.change(screen.getByLabelText("Or type a case type id"), { target: { value: "CriminalInjuriesCompensation" } });
     await user.click(screen.getByRole("button", { name: "Add a key" }));
     await user.type(screen.getByLabelText("Key 2"), "other{Enter}");
     fireEvent.change(screen.getByLabelText("CCD ids"), { target: { value: "ccdName" } });
@@ -336,8 +335,19 @@ describe("bulk scan editor", () => {
 
     await waitFor(() => expect(push).toHaveBeenCalledWith("/assistant/bulk-scan/s1"));
     const sent = JSON.parse(fetchMock.mock.calls[0]?.[1].body).spec;
-    expect(sent.form).toMatchObject({ formType: "T2", ccdCaseTypeId: "CriminalInjuriesCompensation" });
+    expect(sent.form).toMatchObject({ formType: "T2" });
     expect(sent.sections[0].fields[1]).toMatchObject({ label: "Full name", maxLength: 40, minLength: 5, keys: ["name", "other"], ccd: ["ccdName"] });
+  });
+
+  it("should give the label the height of the ID box and let it grow with its text", async () => {
+    const user = userEvent.setup();
+    render(<BulkScanEditor view={VIEW} signOff={vi.fn()} handToAssistant={vi.fn()} />);
+    await open(user, "1.2");
+
+    const label = screen.getByLabelText("Label") as HTMLTextAreaElement;
+    expect(label.rows).toBe(1);
+    expect(label.className).toContain("field-sizing-content");
+    expect(label.className).toContain("resize-none");
   });
 
   it("should mark the fields the schema refused and keep the person's edits when a save is refused", async () => {

@@ -130,18 +130,11 @@ describe("uploads", () => {
     expect((await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"))).forms).toEqual([{ ...SPEC, form: { ...SPEC.form, source: "pdf" } }]);
   });
 
-  it("should name the case type in a PDF's form header when one is typed", async () => {
-    pdf.result = { bundle: { forms: [SPEC] }, checklist: [] };
-    await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"), "CIC");
-    expect(pdf.input).toMatchObject({ caseType: "CIC" });
-    expect(pdf.input).not.toHaveProperty("ccdFields");
-  });
-
   it("should record the product and configuration and match the fields when the person's pod fetched them", async () => {
     pdf.result = { bundle: { forms: [SPEC] }, checklist: [] };
     const fields = parseCcdFields([{ ID: "cicCaseFullName", Label: "Full name", FieldType: "Text" }]);
 
-    const { forms } = await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"), "CriminalInjuriesCompensation", {
+    const { forms } = await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"), {
       caseType: "CriminalInjuriesCompensation",
       product: "sptribs",
       config: "config-generator",
@@ -161,7 +154,7 @@ describe("uploads", () => {
     const fields = parseCcdFields([{ ID: "applicantFirstName", Label: "First name", FieldType: "Text" }]);
     const picked = { caseType: "NFD", product: "nfdiv", config: "config-generator" as const, fields };
 
-    const imported = await importUpload("t.xlsx", await bytesOf(generateTransformWorkbook(SPEC)), "NFD", picked);
+    const imported = await importUpload("t.xlsx", await bytesOf(generateTransformWorkbook(SPEC)), picked);
 
     const [form] = imported.forms;
     expect(form?.form).toMatchObject({ ccdCaseTypeId: "NFD", ccdProduct: "nfdiv", ccdConfig: "config-generator" });
@@ -176,13 +169,6 @@ describe("uploads", () => {
     expect((await importUpload("f.pdf", new TextEncoder().encode("%PDF-1.7"))).forms[0]?.form.source).toBe("pdf");
     expect((await importUpload("t.xlsx", await bytesOf(generateTransformWorkbook(SPEC)))).forms[0]?.form.source).toBe("sheet");
     expect((await importUpload("sip.xlsx", await bytesOf(generateSipWorkbook({ forms: [SPEC] })))).forms[0]?.form.source).toBe("sip");
-  });
-
-  it("should set the case type on a spreadsheet's forms when one is typed", async () => {
-    const imported = await importUpload("t.xlsx", await bytesOf(generateTransformWorkbook(SPEC)), "CIC");
-    expect(imported.forms.map((f) => f.form.ccdCaseTypeId)).toEqual(["CIC"]);
-    const sip = await importUpload("sip.xlsx", await bytesOf(generateSipWorkbook({ forms: [SPEC] })), "CIC");
-    expect(sip.forms.map((f) => f.form.ccdCaseTypeId)).toEqual(["CIC"]);
   });
 
   it("should refuse a PDF with no form fields, saying why", async () => {
