@@ -211,6 +211,19 @@ describe("the Assistant's settings cog", () => {
     expect(cog().getAttribute("aria-label")).toBe("Settings. Atlassian needs your attention");
   });
 
+  it("should open on Connections, with a way to sign in again, when the cog warns that Atlassian has expired", () => {
+    open({ connections: data(["github", "azure", "claude"], [login("atlassian", "expired")]), connect: connectWith() });
+
+    const connections = within(screen.getByRole("list", { name: "Connections" }));
+    expect(connections.getByRole("button", { name: "Connect Atlassian" }).textContent).toBe("Sign in again");
+  });
+
+  it("should open on Appearance when the cog has nothing to warn about", () => {
+    open();
+
+    expect(screen.queryByRole("list", { name: "Connections" })).toBeNull();
+  });
+
   // A relayed code is a wait on the person whatever is stored behind it: only they can enter it, and the badge is
   // the one thing that says so to somebody who has sent the getting-ready screen away.
   it("should say a sign-in needs attention while a code is waiting behind a working one", () => {

@@ -536,7 +536,12 @@ export function offersConnect(row: Pick<Connection, "kind" | "state">): boolean 
   if (row.kind === "github") {
     return row.state === "connected" || row.state === "waiting" || hasLapsed(row.state);
   }
-  return (signsInOnRequest(row.kind) && (row.state === "waiting" || hasLapsed(row.state))) || (restartsToSignIn(row.kind) && hasLapsed(row.state));
+  if (!restartsToSignIn(row.kind)) {
+    return false;
+  }
+  // A lapsed sign-in is offered again for every kind the pod relays. One never started is offered only for a kind made
+  // on request: the others ask for themselves when the pod boots.
+  return hasLapsed(row.state) || (signsInOnRequest(row.kind) && row.state === "waiting");
 }
 
 /**
