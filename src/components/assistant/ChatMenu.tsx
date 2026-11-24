@@ -76,6 +76,7 @@ export function ChatMenu({
   title,
   shareHref,
   forkHref,
+  noun = "chat",
   pinned,
   onPin,
   onRename,
@@ -86,10 +87,12 @@ export function ChatMenu({
   triggerClassName = TRIGGER
 }: {
   title: string;
-  /** Where the share dialog for this chat is. */
-  shareHref: string;
-  /** Where the dialog offering this chat to be forked is. */
-  forkHref: string;
+  /** Where the share dialog for this chat is. A thing that cannot be shared has no Share item. */
+  shareHref?: string;
+  /** Where the dialog offering this chat to be forked is. Without it there is no Fork item. */
+  forkHref?: string;
+  /** What the item is called in the rename box and the delete question: a chat, or a form. */
+  noun?: "chat" | "form";
   /** Whether the chat is pinned, which makes the item Unpin. */
   pinned: boolean;
   /** Called with the state the person asked for: true to pin, false to unpin. */
@@ -212,12 +215,16 @@ export function ChatMenu({
         >
           {open === "menu" ? (
             <div ref={menu} role="menu" aria-label={label} onKeyDown={moveInMenu} className="flex flex-col gap-0.5">
-              <Link href={shareHref} role="menuitem" className={item} onClick={() => close()}>
-                Share
-              </Link>
-              <Link href={forkHref} role="menuitem" className={item} onClick={() => close()}>
-                Fork
-              </Link>
+              {shareHref === undefined ? null : (
+                <Link href={shareHref} role="menuitem" className={item} onClick={() => close()}>
+                  Share
+                </Link>
+              )}
+              {forkHref === undefined ? null : (
+                <Link href={forkHref} role="menuitem" className={item} onClick={() => close()}>
+                  Fork
+                </Link>
+              )}
               <button type="button" role="menuitem" className={item} onClick={() => void run(pinned ? "unpin" : "pin", () => onPin(!pinned))}>
                 {pinned ? "Unpin" : "Pin"}
               </button>
@@ -233,7 +240,7 @@ export function ChatMenu({
                 Rename
               </button>
               <button type="button" role="menuitem" className={`${item} text-asst-error`} onClick={() => show("delete")}>
-                Delete chat
+                Delete {noun}
               </button>
             </div>
           ) : open === "rename" ? (
@@ -247,7 +254,7 @@ export function ChatMenu({
             >
               {/* The box is inside its label, so nothing has to be unique to the one menu that is open. */}
               <label className="flex flex-col gap-2">
-                <span className="text-xs text-asst-faint">Chat name</span>
+                <span className="text-xs text-asst-faint">{noun === "form" ? "Form name" : "Chat name"}</span>
                 <input
                   ref={titleBox}
                   value={draft}
@@ -262,7 +269,11 @@ export function ChatMenu({
             </form>
           ) : (
             <div className="flex flex-col gap-2 p-1">
-              <p className="text-sm">Delete this chat and its document? This cannot be undone.</p>
+              <p className="text-sm">
+                {noun === "form"
+                  ? "Delete this form and all its versions? This cannot be undone."
+                  : "Delete this chat and its document? This cannot be undone."}
+              </p>
               {local ? <p className="text-sm">{LOCAL_DELETE_NOTE}</p> : null}
               <div className="flex justify-end gap-2">
                 <button ref={keepChat} type="button" onClick={() => close()} className="rounded-lg border border-asst-strong px-3 py-1.5 text-sm">

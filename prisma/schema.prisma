@@ -1356,6 +1356,7 @@ model BulkScanSpec {
   id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   ownerOid  String   @map("owner_oid")
   name      String
+  pinnedAt  DateTime? @map("pinned_at") @db.Timestamptz(6)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   owner    User                  @relation(fields: [ownerOid], references: [oid])

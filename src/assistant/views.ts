@@ -157,15 +157,15 @@ export interface FeedbackProjectLink {
 }
 
 /**
- * One of the viewer's Bulk Scan forms as a sidebar row. Never pinned, so it sits among the date groups, by when its
- * latest version was saved.
+ * One of the viewer's Bulk Scan forms as a sidebar row. Unpinned, it sits among the date groups by when its latest
+ * version was saved; pinned, it sits in the Pinned section.
  */
 export interface FormLink {
   kind: "form";
   id: string;
   title: string;
   lastActiveAt: string;
-  pinnedAt: null;
+  pinnedAt: string | null;
   /** Whether the row carries the form icon; see `showsMarks`. */
   marked: boolean;
   /** Whether the latest version is signed off. */
@@ -270,7 +270,15 @@ function projectLink(row: NavProjectRow, marked: boolean): FeedbackProjectLink {
 }
 
 function formLink(row: SpecRow, marked: boolean): FormLink {
-  return { kind: "form", id: row.id, title: row.name, lastActiveAt: row.savedAt.toISOString(), pinnedAt: null, marked, signedOff: row.signedOff };
+  return {
+    kind: "form",
+    id: row.id,
+    title: row.name,
+    lastActiveAt: row.savedAt.toISOString(),
+    pinnedAt: row.pinnedAt?.toISOString() ?? null,
+    marked,
+    signedOff: row.signedOff
+  };
 }
 
 /** The chats running on one of the owner's virtual agents, for its page in the hub. */

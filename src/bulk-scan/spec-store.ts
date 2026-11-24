@@ -6,6 +6,7 @@ import { SIDEBAR_LIMIT } from "../assistant/sidebar.ts";
 import { notify } from "../realtime/notify.ts";
 import { clientPrisma } from "../store/client-namespace.ts";
 import type { Database, Prisma, PrismaClient } from "../store/prisma.ts";
+import { MAX_SPEC_NAME } from "./spec.ts";
 
 /**
  * Each person's Bulk Scan form specs. Owner only: `isOwner` is asked on every call and the `owner_oid` in every query makes
@@ -32,6 +33,9 @@ export interface SpecSummary {
   version: number;
   savedAt: string;
   signedOff: boolean;
+}
+
+/** The owner's specs| null;
 }
 
 /** The owner's specs, newest first, each as its latest version: what the list page shows, with no spec JSON read. */
@@ -61,23 +65,29 @@ export interface SpecRow {
   name: string;
   savedAt: Date;
   signedOff: boolean;
+  /** When the owner pinned it, which lifts it into the sidebar's Pinned section; null while it is not. */
+  pinnedAt: Date | null;
 }
 
 /** Up to `limit` of the owner's specs that meet `where`, each at its latest version, most recently saved first. */
-async function latestSpecs(db: Database, ownerOid: string, where: Prisma.Sql, limit: number): Promise<SpecRow[]> {
+async function latestSpecs(db: Database, ownerOid: string, where: Prisma.Sql, limit: number, pinnedFirst = false): Promise<SpecRow[]> {
+  // Pinned ones lead where asked, so the limit can never cut off a form the person pinned.
+  const order = pinnedFirst
+    ? clientPrisma().sql`(s.pinned_at IS NULL), s.pinned_at DESC, v.created_at DESC, s.id`
+    : clientPrisma().sql`v.created_at DESC, s.id`;
   return await db.$queryRaw<SpecRow[]>`
-    SELECT s.id::text AS id, s.name, v.created_at AS "savedAt", v.signed_off_at IS NOT NULL AS "signedOff"
+    SELECT s.id::text AS id, s.name, v.created_at AS "savedAt", v.signed_off_at IS NOT NULL AS "signedOff", s.pinned_at AS "pinnedAt"
       FROM bulk_scan_spec s
       JOIN LATERAL (SELECT created_at, signed_off_at FROM bulk_scan_spec_version WHERE spec_id = s.id ORDER BY version DESC LIMIT 1) v ON true
      WHERE s.owner_oid = ${ownerOid} AND ${where}
-     ORDER BY v.created_at DESC, s.id
+     ORDER BY ${order}
      LIMIT ${limit}
   `;
 }
 
 /** The forms the sidebar lists: the owner's, at most `SIDEBAR_LIMIT`, with no spec JSON read. */
 export async function sidebarSpecs(db: Database, ownerOid: string, limit = SIDEBAR_LIMIT): Promise<SpecRow[]> {
-  return await latestSpecs(db, ownerOid, clientPrisma().sql`true`, limit);
+  return await latestSpecs(db, ownerOid, clientPrisma().sql`true`, limit, true);
 }
 
 /** Up to `limit` of the owner's specs whose name holds every one of `terms`, which are lower-case already. */
@@ -225,5 +235,42 @@ export async function deleteSpec(prisma: PrismaClient, target: SpecTarget, id: s
       await notify(tx, { type: "bulk_scan_spec", owner_oid: target.ownerOid });
     }
     return count > 0;
+  });
+}
+
+/** Renames one of the owner's specs in the list. Saving the form again names it after the form, as it always has. */
+export async function renameSpec(prisma: PrismaClient, target: SpecTarget, id: string, name: unknown): Promise<void> {
+  allow(target);
+  const trimmed = typeof name === "string" ? [...name.trim()].slice(0, MAX_SPEC_NAME).join("") : "";
+  if (trimmed === "") {
+    throw new HttpError(400, "a form needs a name");
+  }
+  await prisma.$transaction(async (tx) => {
+    const { count } = isUuid(id) ? await tx.bulkScanSpec.updateMany({ where: { id, ownerOid: target.ownerOid }, data: { name: trimmed } }) : { count: 0 };
+    if (count === 0) {
+      throw new HttpError(404, GONE);
+    }
+    await notify(tx, { type: "bulk_scan_spec", owner_oid: target.ownerOid });
+  });
+}
+
+/** Pins one of the owner's specs, or unpins it. Pinning one that is pinned already keeps its first pin. */
+export async function pinSpec(prisma: PrismaClient, target: SpecTarget, id: string, pinned: unknown, now: Date = new Date()): Promise<void> {
+  allow(target);
+  if (typeof pinned !== "boolean") {
+    throw new HttpError(400, "say whether the form is pinned");
+  }
+  await prisma.$transaction(async (tx) => {
+    const owned = isUuid(id) ? await tx.bulkScanSpec.count({ where: { id, ownerOid: target.ownerOid } }) : 0;
+    if (owned === 0) {
+      throw new HttpError(404, GONE);
+    }
+    const { count } = await tx.bulkScanSpec.updateMany({
+      where: { id, ownerOid: target.ownerOid, pinnedAt: pinned ? null : { not: null } },
+      data: { pinnedAt: pinned ? now : null }
+    });
+    if (count > 0) {
+      await notify(tx, { type: "bulk_scan_spec", owner_oid: target.ownerOid });
+    }
   });
 }
