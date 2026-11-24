@@ -145,6 +145,10 @@ export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 set +u
 # shellcheck disable=SC1091
 [[ -s "$NVM_DIR/nvm.sh" ]] && . "$NVM_DIR/nvm.sh"
+# Puts the JDK on PATH and sets JAVA_HOME, so pod jobs that run ./gradlew find java.
+export SDKMAN_DIR="${SDKMAN_DIR:-$HOME/.sdkman}"
+# shellcheck disable=SC1091
+[[ -s "$SDKMAN_DIR/bin/sdkman-init.sh" ]] && . "$SDKMAN_DIR/bin/sdkman-init.sh"
 set -u
 
 # The same precedence virtual-agent-boot uses: a workspace shim first, so a checkout can pin an older client

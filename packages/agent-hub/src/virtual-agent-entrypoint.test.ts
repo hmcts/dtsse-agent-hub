@@ -55,7 +55,9 @@ const CASES = [
   "prepare-workspace-dies-silently",
   "no-clone-step",
   "client-on-path",
-  "broken-workspace-shim"
+  "broken-workspace-shim",
+  "sdkman-java",
+  "sdkman-absent"
 ];
 
 type Run = {

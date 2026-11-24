@@ -27,7 +27,7 @@ CASES=(first-boot gateway-route gateway-route-older-template gateway-route-uncon
     atlassian-no-twg azure-restored azure-not-stored azure-requested azure-request-fails azure-wrong-account
     azure-sigterm conversations prepare-workspace prepare-workspace-fails prepare-workspace-dies
     prepare-workspace-dies-silently
-    no-clone-step client-on-path broken-workspace-shim)
+    no-clone-step client-on-path broken-workspace-shim sdkman-java sdkman-absent)
 
 if [ "${1:-}" = "--list" ]; then
     printf '%s\n' "${CASES[@]}"
@@ -140,7 +140,7 @@ echo "$n" >"$FAKE_DIR/claude.count"
 echo "start $n $(grep '^state=' "$VIRTUAL_AGENT_STATE/repos-state" 2>/dev/null)" >>"$FAKE_DIR/claude.log"
 echo "claude $n" >>"$FAKE_DIR/order.log"
 pwd >"$FAKE_DIR/hai.pwd.$n"
-env | grep -E '^(HAI_ROUTE|HAI_IN_CONTAINER|HAI_NO_UPDATE|HAI_ENV_READY|HAI_GATEWAY_APIM_KEY|AGENT_HUB_MODEL_ROUTE|AWS_BEARER_TOKEN_BEDROCK|CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CODE_USE_BEDROCK|CLAUDE_CODE_SKIP_BEDROCK_AUTH|CLAUDE_CODE_API_KEY_HELPER_TTL_MS|AWS_REGION|ANTHROPIC_BEDROCK_BASE_URL|ANTHROPIC_CUSTOM_HEADERS|ANTHROPIC_DEFAULT_HAIKU_MODEL|ANTHROPIC_DEFAULT_SONNET_MODEL|ANTHROPIC_DEFAULT_OPUS_MODEL|AGENT_HUB_CLAUDE_SETTINGS)=' | sort >"$FAKE_DIR/hai.env.$n"
+env | grep -E '^(HAI_ROUTE|HAI_IN_CONTAINER|HAI_NO_UPDATE|HAI_ENV_READY|HAI_GATEWAY_APIM_KEY|AGENT_HUB_MODEL_ROUTE|AWS_BEARER_TOKEN_BEDROCK|CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CODE_USE_BEDROCK|CLAUDE_CODE_SKIP_BEDROCK_AUTH|CLAUDE_CODE_API_KEY_HELPER_TTL_MS|AWS_REGION|ANTHROPIC_BEDROCK_BASE_URL|ANTHROPIC_CUSTOM_HEADERS|ANTHROPIC_DEFAULT_HAIKU_MODEL|ANTHROPIC_DEFAULT_SONNET_MODEL|ANTHROPIC_DEFAULT_OPUS_MODEL|AGENT_HUB_CLAUDE_SETTINGS|JAVA_HOME|PATH)=' | sort >"$FAKE_DIR/hai.env.$n"
 cp "$HOME/.claude/CLAUDE.md" "$FAKE_DIR/claude_md.seen.$n" 2>/dev/null
 # Tests wait for the argv file and then read the others, so it is written last.
 printf '%s\n' "$@" >"$FAKE_DIR/hai.argv.$n"
@@ -857,6 +857,27 @@ case_broken_workspace_shim() {
     stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
 }
 
+# Only interactive shells read the image's sdkman setup, so the entrypoint has to load it for the jobs and sessions it starts.
+case_sdkman_java() {
+    setup sdkman-java
+    local jdk="$T/$CASE/home/.sdkman/jdk"
+    mkdir -p "$T/$CASE/home/.sdkman/bin"
+    printf 'export JAVA_HOME="%s"\nexport PATH="%s/bin:$PATH"\n' "$jdk" "$jdk" >"$T/$CASE/home/.sdkman/bin/sdkman-init.sh"
+    start FAKE_REPO_SECONDS=0.2
+    wait_for 10 test -f "$F/hai.argv.1" && ok "should start Claude when sdkman is installed" || no "Claude did not start"
+    hai_env 1 "JAVA_HOME=$jdk" && ok "should give the session the JAVA_HOME sdkman sets" || no "hai env: $(tr '\n' ' ' <"$F/hai.env.1" 2>/dev/null)"
+    grep -qE "^PATH=(.*:)?$jdk/bin(:|$)" "$F/hai.env.1" && ok "should put the JDK bin on the session's PATH" || no "hai env: $(tr '\n' ' ' <"$F/hai.env.1" 2>/dev/null)"
+    stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
+}
+
+case_sdkman_absent() {
+    setup sdkman-absent
+    start FAKE_REPO_SECONDS=0.2
+    wait_for 10 test -f "$F/hai.argv.1" && ok "should start Claude when sdkman is not installed" || no "Claude did not start"
+    hai_env_has 1 JAVA_HOME && no "JAVA_HOME appeared without sdkman" || ok "should set no JAVA_HOME when sdkman is not installed"
+    stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
+}
+
 run_case() {
     case "$1" in
         first-boot) case_first_boot ;;
@@ -895,6 +916,8 @@ run_case() {
         no-clone-step) case_no_clone_step ;;
         client-on-path) case_client_on_path ;;
         broken-workspace-shim) case_broken_workspace_shim ;;
+        sdkman-java) case_sdkman_java ;;
+        sdkman-absent) case_sdkman_absent ;;
         *) printf 'unknown case %s (try --list)\n' "$1" >&2; exit 2 ;;
     esac
 }
