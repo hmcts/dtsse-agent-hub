@@ -6,7 +6,7 @@ import type { MentionPerson } from "@/components/feedback/MentionInput";
 import { CommentBody, STATUS_WORDS, ThreadCard } from "@/components/feedback/ThreadCard";
 import { Timestamp } from "@/components/time/Timestamp";
 import { describeElement } from "@/feedback/anchor-words";
-import { MAX_REFINE_THREADS, MAX_THEME } from "@/feedback/refinement";
+import { MAX_REFINE_THREADS, MAX_THEME, type RefineMode } from "@/feedback/refinement";
 import type { FeedbackLinkView } from "@/feedback/store";
 import { filterThreads, marginOrder, NO_FILTER, type PageGroup, pageName, pagesOf, type ThreadFilter } from "@/feedback/team-views";
 import type { FeedbackThreadStatus, FeedbackThreadView } from "@/feedback/thread-store";
@@ -14,11 +14,11 @@ import { FIELD, LINK, PRIMARY, plural, reviewPath, SECONDARY } from "./look";
 import { type Highlight, SnapshotView } from "./SnapshotView";
 
 /**
- * The project's comments, two ways. `list`, the first a person sees, is every comment that matches the filters in one
- * list, grouped by the page it is on, so the whole round can be read top to bottom. `page` is a document's margin:
- * pick a page, and its snapshot is shown with the selected thread's element outlined and a line to that thread's
- * card, the page's cards down the right in the order their elements are down the page. Choosing a comment's
- * "View on page" in the list opens it there. Threads whose element has gone are listed apart, under the page's others.
+ * The project's comments, two ways. `page`, the first a person sees, is a document's margin: pick a page, and its
+ * snapshot is shown with the selected thread's element outlined and a line to that thread's card, the page's cards
+ * down the right in the order their elements are down the page. `list` is every comment that matches the filters in
+ * one list, grouped by page or theme, where comments are chosen, themed and refined; choosing a comment's "View on
+ * page" there opens it in `page`. Threads whose element has gone are listed apart, under the page's others.
  */
 
 export type CommentsMode = "list" | "page";
@@ -28,8 +28,8 @@ export interface ThreadHandlers {
   status: (threadId: string, status: "open" | "resolved") => Promise<string | null>;
   /** Gives threads a theme, or clears it with null; without it, the list lets nobody choose comments. */
   theme?: (threadIds: string[], theme: string | null) => Promise<string | null>;
-  /** Starts refining threads with the Assistant and goes to the conversation; without it, refining is not offered. */
-  refine?: (threadIds: string[]) => Promise<string | null>;
+  /** Starts refining threads with the Assistant, into one story or comment by comment, and goes to the chat; without it, refining is not offered. */
+  refine?: (threadIds: string[], mode: RefineMode) => Promise<string | null>;
 }
 
 const GUTTER = 28;
@@ -43,7 +43,7 @@ export function CommentsView({
   people,
   handlers,
   initial = NO_FILTER,
-  initialMode = "list",
+  initialMode = "page",
   initialThread = null
 }: Readonly<{
   projectId: string;
@@ -200,8 +200,8 @@ export function CommentsView({
         <div role="group" aria-label="Show comments" className="flex w-fit rounded-lg border border-asst-line p-0.5 text-[13px]">
           {(
             [
-              ["list", "All comments"],
-              ["page", "Page by page"]
+              ["page", "Page by page"],
+              ["list", "All comments"]
             ] as const
           ).map(([value, label]) => (
             <button
@@ -286,8 +286,6 @@ interface CommentGroup {
   heading: string;
   meta: string;
   threads: FeedbackThreadView[];
-  /** The theme a theme's group is of, which can be refined as a whole; null for its comments with none, undefined for a page's. */
-  theme?: string | null;
 }
 
 const NO_THEME = "No theme";
@@ -315,7 +313,7 @@ function groupsOf(
     const mine = threads
       .filter((thread) => thread.theme === theme)
       .sort((a, b) => (a.pagePath < b.pagePath ? -1 : a.pagePath > b.pagePath ? 1 : a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
-    return { key: `theme ${theme ?? ""}`, heading: theme ?? NO_THEME, meta: plural(mine.length, "comment"), threads: mine, theme };
+    return { key: `theme ${theme ?? ""}`, heading: theme ?? NO_THEME, meta: plural(mine.length, "comment"), threads: mine };
   });
 }
 
@@ -323,7 +321,7 @@ function groupsOf(
  * Every comment the filters leave, under the page it is on or the theme the team gave it, each as a short summary:
  * who, when, its status, what it is on and what it says, the Jira issues it went into, and the way to the page it was
  * left on. With `handlers.theme`, comments can be chosen, and the chosen ones given a theme, resolved, or, with
- * `handlers.refine`, refined with the Assistant into a Jira story.
+ * `handlers.refine`, refined with the Assistant into one Jira story, or comment by comment into as many as they need.
  */
 function AllComments({
   pages,
@@ -342,7 +340,7 @@ function AllComments({
   handlers: ThreadHandlers;
 }>) {
   const ids = useId();
-  // Comments the team has already given themes are read, and refined, a theme at a time.
+  // Comments the team has already given themes are read a theme at a time.
   const [groupBy, setGroupBy] = useState<GroupBy>(() => (threads.some((thread) => thread.theme !== null) ? "theme" : "page"));
   const [chosen, setChosen] = useState<ReadonlySet<string>>(new Set());
   // What was typed into the theme box, for the choice it was typed for; a new choice shows its own theme again.
@@ -387,9 +385,13 @@ function AllComments({
   }
 
   const chosenIds = () => selected.map((thread) => thread.id);
-  const resolveChosen = async (): Promise<string | null> => {
-    for (const thread of selected.filter((t) => t.status === "open")) {
-      const failure = await handlers.status(thread.id, "resolved");
+  // The chosen are resolved while any of them is open; once none is, the same button reopens the resolved ones, so a
+  // Resolve pressed by mistake is undone where it was pressed.
+  const reopening = !selected.some((thread) => thread.status === "open") && selected.some((thread) => thread.status === "resolved");
+  const setChosenStatus = async (): Promise<string | null> => {
+    const [from, to] = reopening ? (["resolved", "open"] as const) : (["open", "resolved"] as const);
+    for (const thread of selected.filter((t) => t.status === from)) {
+      const failure = await handlers.status(thread.id, to);
       if (failure !== null) {
         return failure;
       }
@@ -433,83 +435,98 @@ function AllComments({
       {choosable && selected.length > 0 ? (
         <section
           aria-label="Chosen comments"
-          className="sticky top-0 z-10 flex flex-col gap-2 rounded-xl border border-asst-accent-line bg-asst-raised px-3 py-2.5 text-[13px] shadow-sm"
+          // A solid ground under the tint, since the bar stays on top of the list as it scrolls.
+          className="sticky top-0 z-10 rounded-xl bg-asst-raised text-[13px] shadow-md"
         >
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-semibold">{plural(selected.length, "comment")} chosen</span>
-            <button type="button" className="rounded-md px-1.5 text-asst-accent underline hover:bg-asst-field" onClick={() => setChosen(new Set())}>
-              Clear
-            </button>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <label htmlFor={`${ids}-theme`} className="text-asst-muted">
-              Theme<span className="sr-only"> for the chosen comments</span>
-            </label>
-            <input
-              id={`${ids}-theme`}
-              list={`${ids}-themes`}
-              value={theme}
-              maxLength={MAX_THEME}
-              placeholder={mixed ? "Mixed themes: type one to give them all" : "Theme, such as Court fees"}
-              onChange={(event) => setTheme(event.target.value)}
-              className={`${FIELD} w-72`}
-            />
-            <datalist id={`${ids}-themes`}>
-              {themes.map((name) => (
-                <option key={name} value={name} />
-              ))}
-            </datalist>
-            <button
-              type="button"
-              className={SECONDARY}
-              disabled={busy || theme.trim() === "" || theme.trim() === shared}
-              onClick={() =>
-                void run(
-                  () => (handlers.theme as NonNullable<ThreadHandlers["theme"]>)(chosenIds(), theme),
-                  () => setTyped(null)
-                )
-              }
-            >
-              Set theme
-            </button>
-            <button
-              type="button"
-              className={SECONDARY}
-              disabled={busy || selected.every((thread) => thread.theme === null)}
-              onClick={() => void run(() => (handlers.theme as NonNullable<ThreadHandlers["theme"]>)(chosenIds(), null))}
-            >
-              Remove theme
-            </button>
-            <button
-              type="button"
-              className={SECONDARY}
-              disabled={busy || selected.every((thread) => thread.status !== "open")}
-              onClick={() => void run(resolveChosen)}
-            >
-              Resolve
-            </button>
-            {handlers.refine === undefined ? null : (
+          <div className="flex flex-col gap-2 rounded-xl border-2 border-asst-accent bg-asst-accent/10 px-3 py-2.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold">{plural(selected.length, "comment")} chosen</span>
+              <button type="button" className="rounded-md px-1.5 text-asst-accent underline hover:bg-asst-field" onClick={() => setChosen(new Set())}>
+                Clear
+              </button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold">Organise</span>
+              <label htmlFor={`${ids}-theme`} className="text-asst-muted">
+                Theme<span className="sr-only"> for the chosen comments</span>
+              </label>
+              <input
+                id={`${ids}-theme`}
+                list={`${ids}-themes`}
+                value={theme}
+                maxLength={MAX_THEME}
+                placeholder={mixed ? "Mixed themes: type one to give them all" : "Theme, such as Court fees"}
+                onChange={(event) => setTheme(event.target.value)}
+                className={`${FIELD} w-72`}
+              />
+              <datalist id={`${ids}-themes`}>
+                {themes.map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
               <button
                 type="button"
-                className={PRIMARY}
-                disabled={busy || selected.length > MAX_REFINE_THREADS}
-                aria-describedby={`${ids}-refine-hint`}
-                onClick={() => void run(() => (handlers.refine as NonNullable<ThreadHandlers["refine"]>)(chosenIds()))}
+                className={SECONDARY}
+                disabled={busy || theme.trim() === "" || theme.trim() === shared}
+                onClick={() =>
+                  void run(
+                    () => (handlers.theme as NonNullable<ThreadHandlers["theme"]>)(chosenIds(), theme),
+                    () => setTyped(null)
+                  )
+                }
               >
-                {busy ? "Working…" : "Refine with Assistant"}
+                Set theme
               </button>
+              <button
+                type="button"
+                className={SECONDARY}
+                disabled={busy || selected.every((thread) => thread.theme === null)}
+                onClick={() => void run(() => (handlers.theme as NonNullable<ThreadHandlers["theme"]>)(chosenIds(), null))}
+              >
+                Remove theme
+              </button>
+              <button
+                type="button"
+                className={SECONDARY}
+                disabled={busy || selected.every((thread) => thread.status === "detached")}
+                onClick={() => void run(setChosenStatus)}
+              >
+                {reopening ? "Reopen" : "Resolve"}
+              </button>
+            </div>
+            {handlers.refine === undefined ? null : (
+              <div className="flex flex-col gap-1.5 border-t border-asst-line pt-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold">Turn into Jira stories</span>
+                  {(
+                    [
+                      ["one", "Refine into one story", PRIMARY],
+                      ["each", "Refine comment by comment", SECONDARY]
+                    ] as const
+                  ).map(([mode, label, look]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={look}
+                      disabled={busy || selected.length > MAX_REFINE_THREADS}
+                      aria-describedby={selected.length > MAX_REFINE_THREADS ? `${ids}-refine-hint` : undefined}
+                      onClick={() => void run(() => (handlers.refine as NonNullable<ThreadHandlers["refine"]>)(chosenIds(), mode))}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {selected.length > MAX_REFINE_THREADS ? (
+                  <p id={`${ids}-refine-hint`} className="text-xs text-asst-muted">
+                    Choose at most {MAX_REFINE_THREADS} comments to refine at once.
+                  </p>
+                ) : null}
+              </div>
             )}
-          </div>
-          {handlers.refine === undefined ? null : (
-            <p id={`${ids}-refine-hint`} className="text-xs text-asst-muted">
-              {selected.length > MAX_REFINE_THREADS
-                ? `Choose at most ${MAX_REFINE_THREADS} comments to refine at once.`
-                : "Opens a chat that drafts one Jira story for each theme, with options. Comments without a theme are grouped into suggested themes, so one chat can make several stories. Each story is a separate document you can edit and send to Jira."}
+            <p role="alert" className={`text-asst-error ${error === null ? "sr-only" : ""}`}>
+              {error ?? ""}
             </p>
-          )}
-          <p role="alert" className={`text-asst-error ${error === null ? "sr-only" : ""}`}>
-            {error ?? ""}
-          </p>
+          </div>
         </section>
       ) : null}
 
@@ -548,17 +565,6 @@ function AllComments({
                 <span className="break-words">{group.heading}</span>
                 <span className="text-xs font-normal text-asst-faint">{group.meta}</span>
               </h3>
-              {typeof group.theme === "string" && handlers.refine !== undefined ? (
-                <button
-                  type="button"
-                  className={SECONDARY}
-                  aria-label={`Refine this theme: ${group.heading}`}
-                  disabled={busy || group.threads.length > MAX_REFINE_THREADS}
-                  onClick={() => void run(() => (handlers.refine as NonNullable<ThreadHandlers["refine"]>)(group.threads.map((thread) => thread.id)))}
-                >
-                  Refine this theme
-                </button>
-              ) : null}
             </div>
             <ol className="flex flex-col gap-2">
               {group.threads.map((thread) => (

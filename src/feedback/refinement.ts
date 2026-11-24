@@ -6,11 +6,11 @@ import { pageName } from "./team-views.ts";
 import type { FeedbackThreadView } from "./thread-store.ts";
 
 /**
- * Refining a project's feedback with the Assistant: the team picks threads, perhaps gives them themes, and starts a
- * conversation whose first message hands the assistant those threads and asks it to refine each theme's requirement
- * into one Jira story with options, each in its own ticket document so the person can edit it and send it to Jira on
- * its own. The team's themes are kept as they are; the assistant only suggests themes for threads that have none. Pure, so
- * the message a click sends is unit-tested; `refineFeedback` sends it through the Assistant.
+ * Refining a project's feedback with the Assistant: the team picks threads, perhaps under themes they gave them, and
+ * starts a conversation whose first message hands the assistant those threads and asks, as the person chose, for one
+ * Jira story from them all (`one`), or for the comments to be worked through one at a time into as many stories as
+ * they need (`each`). Every story is written into a document of the conversation, which the person edits and sends to
+ * Jira from the document panel. Pure, so the message a click sends is unit-tested; `refineFeedback` sends it.
  */
 
 /** Most threads one refinement takes: past this, a story is several stories and the person should pick again. */
@@ -70,19 +70,40 @@ function threadBlock(thread: FeedbackThreadView, number: number, linkLabel: stri
   return lines.join("\n");
 }
 
-function opening(projectName: string, count: number): string {
+/** One Jira story from every comment chosen, or as many as working through them one at a time needs. */
+export type RefineMode = "one" | "each";
+
+export function isRefineMode(value: unknown): value is RefineMode {
+  return value === "one" || value === "each";
+}
+
+const STORY =
+  'a title, a user story ("As a … I want … so that …"), the background and the evidence from the comments, 2 or 3 options for meeting the need with what changes for the user, their pros and cons and roughly how much work each is, the option you recommend and why, and acceptance criteria written as Given, When, Then';
+
+function opening(projectName: string, count: number, mode: RefineMode): string {
+  const comments = count === 1 ? "is 1 comment" : `are ${count} comments`;
+  const ask =
+    mode === "one"
+      ? [
+          "Please turn these comments into one Jira story. Work out the single need they point to, citing the comments by number, then draft the story: " +
+            STORY +
+            ".",
+          "",
+          "Write the story into this conversation's document, so I can edit it and send it to Jira from the document panel."
+        ]
+      : [
+          "Please go through the comments one at a time, in order. For each, say in plain language what the user needs. Where several comments need the same change, say so and treat them as one need.",
+          "",
+          `Then draft one Jira story for each need: ${STORY}.`,
+          "",
+          'Put each story in its own ticket document (`scripts/agent-hub artefact new --kind ticket --title "<story title>"`), so I can edit each one and send it to Jira on its own. List the stories you made, with the comments each one covers.'
+        ];
   return [
-    `I'm refining feedback from testing the prototype "${projectName}" into Jira stories. Below ${count === 1 ? "is 1 comment" : `are ${count} comments`} reviewers left on its pages, under the themes the team has given them. Each theme is one Jira story.`,
+    `I'm refining feedback from testing the prototype "${projectName}". Below ${comments} reviewers left on its pages, under any themes the team gave them.`,
     "",
-    'Keep the team\'s themes exactly as they are: do not rename, merge or split them, or move comments between them. If some comments are under "No theme", group those into suggested themes of their own, and tell me which comments you put in each so I can confirm them.',
+    ...ask,
     "",
-    "Then, for each theme:",
-    "1. Say what the requirement is: the problem its comments point to, in plain language, citing the comments by number.",
-    "2. Suggest 2 or 3 options for meeting it. For each, say what changes for the user, its pros and cons, and roughly how much work it is.",
-    "3. Recommend one option, and say why.",
-    '4. Draft one Jira story for it: a title, a user story ("As a … I want … so that …"), the background and the evidence from the comments, the options considered, and acceptance criteria written as Given, When, Then.',
-    "",
-    'Put each story in its own ticket document in the document panel, titled with its theme (`scripts/agent-hub artefact new --kind ticket --title "<theme>"`, then write it with `scripts/agent-hub artefact put --id <id>`), so I can review each one and send it to Jira on its own. Ask me if anything is unclear before you write them.'
+    "Ask me if anything is unclear before you write."
   ].join("\n");
 }
 
@@ -94,6 +115,7 @@ function opening(projectName: string, count: number): string {
 export function refinementRequest(input: {
   projectName: string;
   threads: readonly FeedbackThreadView[];
+  mode: RefineMode;
   /** A link's label, for a project with more than one link; null leaves links unnamed. */
   linkLabel: ((linkId: string) => string) | null;
   now: Date;
@@ -101,7 +123,7 @@ export function refinementRequest(input: {
   const ordered = refinementOrder(input.threads).slice(0, MAX_REFINE_THREADS);
   // The opening says how many comments follow, which is only known once they are fitted in: room is kept for the
   // longest it could be.
-  const room = Math.max(opening(input.projectName, ordered.length).length, opening(input.projectName, 1).length);
+  const room = Math.max(opening(input.projectName, ordered.length, input.mode).length, opening(input.projectName, 1, input.mode).length);
   const sections: string[] = [];
   let used = room;
   let theme: string | undefined;
@@ -124,6 +146,6 @@ export function refinementRequest(input: {
   return {
     product: DEFAULT_PRODUCT,
     title: `Refine feedback: ${input.projectName}, ${ukLongDate(input.now)}`,
-    body: `${opening(input.projectName, included)}${sections.join("")}${note}`
+    body: `${opening(input.projectName, included, input.mode)}${sections.join("")}${note}`
   };
 }

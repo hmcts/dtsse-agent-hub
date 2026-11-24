@@ -341,7 +341,6 @@ describe("ProjectPage", () => {
   it("should reply to and resolve a thread on the comments tab, refreshing once each is saved", async () => {
     const act$ = actions();
     render(<ProjectPage data={pageData({ threads: [thread("t1")] })} tab="comments" actions={act$} origin="https://hub.example.com" />);
-    fireEvent.click(screen.getByRole("button", { name: "View on page and reply" }));
 
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Resolve" })));
     expect(act$.setStatus).toHaveBeenCalledWith({ projectId: "p1", threadId: "t1", status: "resolved" });
@@ -355,7 +354,6 @@ describe("ProjectPage", () => {
   it("should send a reply through the reply action", async () => {
     const act$ = actions();
     render(<ProjectPage data={pageData({ threads: [thread("t1")] })} tab="comments" actions={act$} origin="https://hub.example.com" />);
-    fireEvent.click(screen.getByRole("button", { name: "View on page and reply" }));
 
     fireEvent.change(screen.getByRole("combobox", { name: /Reply to/ }), { target: { value: "Thanks" } });
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Reply" })));
@@ -410,6 +408,7 @@ describe("ProjectList", () => {
 
 describe("ProjectPage's themes and refining", () => {
   function chooseFirst(): void {
+    fireEvent.click(screen.getByRole("button", { name: "All comments" }));
     fireEvent.click(screen.getByRole("checkbox", { name: /^Choose the comment/ }));
   }
 
@@ -435,12 +434,12 @@ describe("ProjectPage's themes and refining", () => {
     render(<ProjectPage data={pageData({ threads: [thread("t1")] })} tab="comments" actions={act$} origin="https://hub.example.com" />);
     chooseFirst();
 
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Refine with Assistant" })));
-    expect(act$.refine).toHaveBeenCalledWith({ projectId: "p1", threadIds: ["t1"] });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Refine comment by comment" })));
+    expect(act$.refine).toHaveBeenCalledWith({ projectId: "p1", threadIds: ["t1"], mode: "each" });
     expect(push).toHaveBeenCalledWith("/assistant/conv-9");
 
     act$.refine.mockResolvedValue({ ok: false, error: "Connect GitHub and Claude to start chatting" });
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Refine with Assistant" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Refine into one story" })));
     expect(screen.getByRole("alert").textContent).toBe("Connect GitHub and Claude to start chatting");
     expect(push).toHaveBeenCalledTimes(1);
   });
@@ -455,6 +454,7 @@ describe("ProjectPage's themes and refining", () => {
       />
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "All comments" }));
     expect(screen.queryByRole("checkbox", { name: /^Choose the comment/ })).toBeNull();
   });
 });

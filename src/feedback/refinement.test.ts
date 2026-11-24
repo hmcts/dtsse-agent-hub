@@ -1,10 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { thread } from "../components/__tests__/feedback-fixtures.ts";
 import { MAX_BODY } from "../messages/limits.ts";
-import { checkTheme, MAX_QUOTED_COMMENT, MAX_REFINE_THREADS, MAX_THEME, refinementOrder, refinementRequest } from "./refinement.ts";
+import { checkTheme, isRefineMode, MAX_QUOTED_COMMENT, MAX_REFINE_THREADS, MAX_THEME, refinementOrder, refinementRequest } from "./refinement.ts";
 
 const NOW = new Date("2026-11-20T10:00:00.000Z");
 const BEN = { oid: "ben", name: "Ben Reviewer" };
+
+describe("isRefineMode", () => {
+  it("should take one and each, and nothing else", () => {
+    expect(isRefineMode("one")).toBe(true);
+    expect(isRefineMode("each")).toBe(true);
+    expect(isRefineMode("all")).toBe(false);
+    expect(isRefineMode(undefined)).toBe(false);
+  });
+});
 
 describe("checkTheme", () => {
   it("should trim a theme and run its whitespace together", () => {
@@ -38,9 +47,10 @@ describe("refinementOrder", () => {
 });
 
 describe("refinementRequest", () => {
-  it("should ask for a summary, options, a recommendation and a story in the document, then list the comments by theme", () => {
+  it("should ask for the comments one at a time, a story for each need in its own ticket document, then list them by theme", () => {
     const request = refinementRequest({
       projectName: "Claims",
+      mode: "each",
       threads: [
         thread("a", {
           theme: "Fees",
@@ -60,14 +70,13 @@ describe("refinementRequest", () => {
 
     expect(request.product).toBe("general");
     expect(request.title).toBe("Refine feedback: Claims, Friday 20 November");
-    expect(request.body).toContain('prototype "Claims" into Jira stories. Below are 2 comments');
-    expect(request.body).toContain("Each theme is one Jira story.");
-    expect(request.body).toContain("Keep the team's themes exactly as they are");
-    expect(request.body).toContain("group those into suggested themes of their own");
-    expect(request.body).toContain("1. Say what the requirement is");
-    expect(request.body).toContain("Suggest 2 or 3 options");
+    expect(request.body).toContain('prototype "Claims". Below are 2 comments reviewers left on its pages, under any themes the team gave them.');
+    expect(request.body).toContain("go through the comments one at a time, in order");
+    expect(request.body).toContain("Then draft one Jira story for each need");
+    expect(request.body).toContain("2 or 3 options");
     expect(request.body).toContain("Given, When, Then");
-    expect(request.body).toContain("Put each story in its own ticket document in the document panel, titled with its theme");
+    expect(request.body).toContain("Put each story in its own ticket document");
+    expect(request.body).not.toContain("one Jira story. Work out");
     expect(request.body).toContain(
       '\n\nTheme: Fees\n[1] On Check your answers (/check), the text “The fee is £404.” — Ben Reviewer: "Fee shown / too late"\n    Reply from Ann Reviewer: "Agreed"'
     );
@@ -75,8 +84,17 @@ describe("refinementRequest", () => {
     expect(request.body).not.toContain("left out");
   });
 
+  it("should ask for one story in the conversation's document when that is what was chosen", () => {
+    const request = refinementRequest({ projectName: "Claims", mode: "one", threads: [thread("a")], linkLabel: null, now: NOW });
+
+    expect(request.body).toContain("Please turn these comments into one Jira story.");
+    expect(request.body).toContain("Write the story into this conversation's document");
+    expect(request.body).not.toContain("one at a time");
+    expect(request.body).not.toContain("ticket document");
+  });
+
   it("should name each comment's link when asked, and say so of a thread with no comment", () => {
-    const request = refinementRequest({ projectName: "Claims", threads: [thread("a", { comments: [] })], linkLabel: () => "Version 2", now: NOW });
+    const request = refinementRequest({ projectName: "Claims", mode: "one", threads: [thread("a", { comments: [] })], linkLabel: () => "Version 2", now: NOW });
 
     expect(request.body).toContain("Below is 1 comment");
     expect(request.body).toContain("[1] On /start, Version 2, the text “text of a” — no comment");
@@ -90,7 +108,7 @@ describe("refinementRequest", () => {
       })
     );
 
-    const request = refinementRequest({ projectName: "Claims", threads, linkLabel: null, now: NOW });
+    const request = refinementRequest({ projectName: "Claims", mode: "each", threads, linkLabel: null, now: NOW });
 
     expect(request.body.length).toBeLessThanOrEqual(MAX_BODY);
     expect(request.body).toContain(`"${"x".repeat(MAX_QUOTED_COMMENT)}…"`);
@@ -106,7 +124,7 @@ describe("refinementRequest", () => {
       thread(`t${String(index).padStart(2, "0")}`, { comments: [{ id: `c${index}`, author: BEN, body, createdAt: "2026-11-10T10:00:00.000Z", mentions: [] }] })
     );
 
-    const request = refinementRequest({ projectName: "Claims", threads, linkLabel: null, now: NOW });
+    const request = refinementRequest({ projectName: "Claims", mode: "each", threads, linkLabel: null, now: NOW });
 
     expect(request.body).toMatch(/\(1 more comment was left out|more comments were left out/);
   });

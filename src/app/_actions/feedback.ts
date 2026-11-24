@@ -6,7 +6,7 @@ import { deleteConversation, startConversation } from "@/app/_actions/assistant"
 import { markMentionsSeen } from "@/feedback/mention-store";
 import { markProjectSeen, pinProject } from "@/feedback/nav-store";
 import { type ProbeOutcome, probeTarget } from "@/feedback/probe";
-import { checkTheme, MAX_THEME, refinementRequest } from "@/feedback/refinement";
+import { checkTheme, isRefineMode, MAX_THEME, refinementRequest } from "@/feedback/refinement";
 import { recordRefinement, refinableThreads, setThreadsTheme } from "@/feedback/refinement-store";
 import {
   createFeedbackProjectBody,
@@ -266,15 +266,20 @@ export async function setFeedbackTheme(input: { projectId: unknown; threadIds: u
 }
 
 /**
- * Starts a conversation that refines the team's chosen threads into a Jira story with options, and records that it
+ * Starts a conversation that refines the team's chosen threads into one Jira story (`mode` "one") or, comment by
+ * comment, into as many as they need ("each"), and records that it
  * does, so the threads show the issue once it is exported. The conversation is started as any is, so it is refused
  * the same way while the Workspace is off or the person has accounts still to connect.
  */
-export async function refineFeedback(input: { projectId: unknown; threadIds: unknown }): Promise<ActionResult<{ id: string }>> {
+export async function refineFeedback(input: { projectId: unknown; threadIds: unknown; mode: unknown }): Promise<ActionResult<{ id: string }>> {
   return await runAction<{ id: string }>("refine feedback", async () => {
     if (!feedbackEnabled()) {
       return OFF;
     }
+    if (!isRefineMode(input.mode)) {
+      return { ok: false, error: "mode: must be one or each" };
+    }
+    const mode = input.mode;
     const viewer = await requireViewer();
     const projectId = text(input.projectId);
     const ids = await refinableThreads(prisma, viewer.oid, projectId, strings(input.threadIds));
@@ -282,6 +287,7 @@ export async function refineFeedback(input: { projectId: unknown; threadIds: unk
     const labels = new Map(project.links.map((link) => [link.id, link.label]));
     const request = refinementRequest({
       projectName: project.name,
+      mode,
       threads: all.filter((thread) => ids.includes(thread.id)),
       linkLabel: labels.size > 1 ? (linkId) => labels.get(linkId) ?? "a removed link" : null,
       now: new Date()

@@ -250,7 +250,7 @@ describe("refineFeedback", () => {
   });
 
   it("should start a conversation with the refinable threads, record it, and answer its id", async () => {
-    expect(await actions.refineFeedback({ projectId: "p1", threadIds: ["t1", "t2", 9] })).toEqual({ ok: true, id: "conv-1" });
+    expect(await actions.refineFeedback({ projectId: "p1", threadIds: ["t1", "t2", 9], mode: "each" })).toEqual({ ok: true, id: "conv-1" });
 
     expect(refinements.refinableThreads).toHaveBeenCalledWith({}, "alice-oid", "p1", ["t1", "t2"]);
     const request = startConversation.mock.calls[0]?.[0] as { product: string; title: string; body: string };
@@ -272,7 +272,7 @@ describe("refineFeedback", () => {
     });
     threads.listThreads.mockResolvedValue([T("t1", "l2"), T("t2", "gone")]);
 
-    await actions.refineFeedback({ projectId: "p1", threadIds: ["t1", "t2"] });
+    await actions.refineFeedback({ projectId: "p1", threadIds: ["t1", "t2"], mode: "each" });
 
     const [[request]] = startConversation.mock.calls as [[{ body: string }]];
     const body = request.body;
@@ -283,22 +283,37 @@ describe("refineFeedback", () => {
   it("should pass on why the conversation could not start, and record nothing", async () => {
     startConversation.mockResolvedValue({ ok: false, error: "Connect GitHub and Claude to start chatting" });
 
-    expect(await actions.refineFeedback({ projectId: "p1", threadIds: ["t1"] })).toEqual({ ok: false, error: "Connect GitHub and Claude to start chatting" });
+    expect(await actions.refineFeedback({ projectId: "p1", threadIds: ["t1"], mode: "each" })).toEqual({
+      ok: false,
+      error: "Connect GitHub and Claude to start chatting"
+    });
     expect(refinements.recordRefinement).not.toHaveBeenCalled();
+  });
+
+  it("should refuse a mode that is neither one nor each, before starting anything", async () => {
+    expect(await actions.refineFeedback({ projectId: "p1", threadIds: ["t1"], mode: "all" })).toEqual({ ok: false, error: "mode: must be one or each" });
+    expect(startConversation).not.toHaveBeenCalled();
+  });
+
+  it("should ask for one story when that is the mode", async () => {
+    await actions.refineFeedback({ projectId: "p1", threadIds: ["t1"], mode: "one" });
+
+    const [[request]] = startConversation.mock.calls as [[{ body: string }]];
+    expect(request.body).toContain("Please turn these comments into one Jira story.");
   });
 
   it("should delete the chat it started when the refinement cannot be recorded, and say why", async () => {
     refinements.recordRefinement.mockRejectedValue(new HttpError(409, "that project is archived"));
     deleteConversation.mockReset().mockResolvedValue({ ok: true });
 
-    expect(await actions.refineFeedback({ projectId: "p1", threadIds: ["t1"] })).toEqual({ ok: false, error: "that project is archived" });
+    expect(await actions.refineFeedback({ projectId: "p1", threadIds: ["t1"], mode: "each" })).toEqual({ ok: false, error: "that project is archived" });
     expect(deleteConversation).toHaveBeenCalledWith({ conversationId: "conv-1" });
   });
 
   it("should refuse while prototype feedback is off", async () => {
     enabled = false;
 
-    expect((await actions.refineFeedback({ projectId: "p1", threadIds: ["t1"] })).ok).toBe(false);
+    expect((await actions.refineFeedback({ projectId: "p1", threadIds: ["t1"], mode: "each" })).ok).toBe(false);
     expect(startConversation).not.toHaveBeenCalled();
   });
 });

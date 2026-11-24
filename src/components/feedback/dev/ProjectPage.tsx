@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import type { ProbeOutcome } from "@/feedback/probe";
+import type { RefineMode } from "@/feedback/refinement";
 import type { FeedbackLinkView, FeedbackPerson, FeedbackProjectView } from "@/feedback/store";
 import { durationText, pageName, recentActivity, reviewersOf, reviewerTimeline, threadCounts } from "@/feedback/team-views";
 import type { FeedbackCommentView, FeedbackThreadView } from "@/feedback/thread-store";
@@ -34,7 +35,7 @@ export interface ProjectActions {
   setStatus: (input: Id & { threadId: unknown; status: unknown }) => Promise<ActionResult<{ thread: FeedbackThreadView }>>;
   probe: (input: { url: unknown }) => Promise<ActionResult<{ probe: ProbeOutcome }>>;
   setTheme: (input: Id & { threadIds: unknown; theme: unknown }) => Promise<ActionResult<{ changed: number }>>;
-  refine: (input: Id & { threadIds: unknown }) => Promise<ActionResult<{ id: string }>>;
+  refine: (input: Id & { threadIds: unknown; mode: unknown }) => Promise<ActionResult<{ id: string }>>;
 }
 
 /**
@@ -63,8 +64,8 @@ export function useThreadHandlers(
       : {}),
     ...(changeable && refine !== undefined
       ? {
-          refine: async (threadIds: string[]) => {
-            const result = await call(() => refine({ projectId, threadIds }));
+          refine: async (threadIds: string[], mode: RefineMode) => {
+            const result = await call(() => refine({ projectId, threadIds, mode }));
             if (result.ok) {
               router.push(`/assistant/${result.id}`);
             }
