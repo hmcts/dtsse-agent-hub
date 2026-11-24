@@ -1063,6 +1063,21 @@ describe("sign-ins made on request", () => {
     expect(offersConnect({ kind, state: "waiting" })).toBe(false);
   });
 
+  it.each(["expired", "failed"] as const)("should offer to connect Atlassian from settings when its sign-in is %s", (state) => {
+    expect(offersConnect({ kind: "atlassian", state })).toBe(true);
+  });
+
+  it.each(["connected", "waiting", "signing-in", "refreshing", "finishing"] as const)(
+    "should offer no connect from settings for Atlassian when its sign-in is %s",
+    (state) => {
+      expect(offersConnect({ kind: "atlassian", state })).toBe(false);
+    }
+  );
+
+  it("should offer no connect from settings for Jenkins when its sign-in has lapsed, since it is pasted", () => {
+    expect(offersConnect({ kind: "jenkins", state: "expired" })).toBe(false);
+  });
+
   // A connected GitHub token that lacks the `project` scope is signed in to again from the Project search, where that
   // is missed, so settings offers nothing beside "Connected".
   it.each([

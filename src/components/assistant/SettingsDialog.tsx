@@ -183,6 +183,9 @@ function Plugins({ plugins }: { plugins: AssistantPlugins }) {
 /** A heading the navigation puts above the sections it gathers, or `null` for one that stands on its own. */
 type SettingsGroup = "General" | "Agent" | null;
 
+/** The id of the Connections section, which the cog opens on when a connection is what its warning is about. */
+const CONNECTIONS_SECTION = "connections";
+
 /**
  * One section of the dialog: the label the navigation shows for it, the group it sits under, whether the page passed
  * anything for it to show, its panel, and the settings in it that the dialog's Save stores.
@@ -208,7 +211,7 @@ interface SettingsSection {
 const SECTIONS: readonly SettingsSection[] = [
   { id: "appearance", label: "Appearance", group: "General", shown: () => true, panel: (view) => <Appearance theme={view.theme} />, drafts: ["theme"] },
   {
-    id: "connections",
+    id: CONNECTIONS_SECTION,
     label: "Connections",
     group: "General",
     shown: hasConnections,
@@ -1135,7 +1138,8 @@ export function AssistantSettings({
         aria-expanded={open}
         aria-label={attention.length === 0 ? "Settings" : `Settings. ${attention.join(". ")}`}
         title="Settings"
-        onClick={() => show(null)}
+        // Straight to Connections when that is what the warning is about, so the badge leads to its cause.
+        onClick={() => show(warning === null ? null : CONNECTIONS_SECTION)}
         // 36px, the size of the composer's own buttons, with the two extra pixels each way taken out of the margin
         // again so the footer row stays the height the 32px avatar beside it sets.
         className="relative -my-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-asst-muted hover:bg-asst-hover hover:text-asst-text"
