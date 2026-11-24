@@ -80,7 +80,7 @@ function form(overrides: Partial<FormLink> = {}): FormLink {
 const ok = () => vi.fn(async () => ({ ok: true as const }));
 
 function actions(overrides: Partial<ConversationActions> = {}): ConversationActions {
-  return { rename: ok(), pin: ok(), remove: ok(), pinFeedback: ok(), archiveFeedback: ok(), ...overrides };
+  return { rename: ok(), pin: ok(), remove: ok(), pinFeedback: ok(), archiveFeedback: ok(), renameForm: ok(), pinForm: ok(), removeForm: ok(), ...overrides };
 }
 
 function shell(items: SidebarItem[], props: { actions?: ConversationActions; activeId?: string | null } = {}) {
@@ -296,10 +296,36 @@ describe("a Bulk Scan form's row", () => {
     ).toBe("page");
   });
 
-  it("should offer no options menu when it is a form's row", () => {
+  it("should offer Pin, Rename and Delete form, and no Share or Fork, in the form's options menu", async () => {
+    const user = userEvent.setup();
     render(shell([form()]));
 
-    expect(within(nav()).queryByRole("button", { name: /Options for/ })).toBeNull();
+    await user.click(within(nav()).getByRole("button", { name: "Options for T210 claim form" }));
+
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Pin", "Rename", "Delete form"]);
+  });
+
+  it("should pin, rename and delete the form by its id from the options menu, refreshing the list after the first two", async () => {
+    const user = userEvent.setup();
+    const set = actions();
+    render(shell([form({ pinnedAt: "2026-10-21T10:00:00.000Z" })], { actions: set }));
+    const open = () => user.click(within(nav()).getByRole("button", { name: "Options for T210 claim form" }));
+
+    await open();
+    await user.click(screen.getByRole("menuitem", { name: "Unpin" }));
+    await open();
+    await user.click(screen.getByRole("menuitem", { name: "Rename" }));
+    const box = screen.getByRole("textbox", { name: "Form name" });
+    await user.clear(box);
+    await user.type(box, "Probate intake{Enter}");
+    await open();
+    await user.click(screen.getByRole("menuitem", { name: "Delete form" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(set.pinForm).toHaveBeenCalledWith({ formId: "f1", pinned: false });
+    expect(set.renameForm).toHaveBeenCalledWith({ formId: "f1", name: "Probate intake" });
+    expect(set.removeForm).toHaveBeenCalledWith({ formId: "f1" });
+    expect(refresh).toHaveBeenCalledTimes(3);
   });
 
   it("should be reachable and openable by keyboard when tabbing through the list", async () => {

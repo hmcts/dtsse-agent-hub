@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { deleteConversation, pinConversation, renameConversation, saveAssistantModel, startConversation } from "@/app/_actions/assistant";
 import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/assistant-files";
 import { readAssistantAgent, readGitIdentity, readSchedule, saveSchedule } from "@/app/_actions/assistant-settings";
+import { pinBulkScanSpec, removeBulkScanSpec, renameBulkScanSpec } from "@/app/_actions/bulk-scan";
 import { clearGitIdentity, removeCredential, resetClaudeMd, saveClaudeMd, saveCredential, saveGitIdentity } from "@/app/_actions/credentials";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
 import { archiveFeedbackProject, pinFeedbackProject } from "@/app/_actions/feedback";
@@ -24,7 +25,10 @@ const ROW_ACTIONS: ConversationActions = {
   pin: pinConversation,
   remove: deleteConversation,
   pinFeedback: pinFeedbackProject,
-  archiveFeedback: archiveFeedbackProject
+  archiveFeedback: archiveFeedbackProject,
+  renameForm: renameBulkScanSpec,
+  pinForm: pinBulkScanSpec,
+  removeForm: removeBulkScanSpec
 };
 
 /** What every Assistant page's shell is drawn from, read once per request: the sidebar, the settings and the viewer's cookies. */

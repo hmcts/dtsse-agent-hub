@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ConnectionsData } from "@/assistant/connections";
 import type { SidebarGroup } from "@/assistant/grouping";
@@ -43,6 +43,9 @@ export interface ConversationActions {
   remove: (input: { conversationId: unknown }) => Promise<ActionResult>;
   pinFeedback: (input: { projectId: unknown; pinned: unknown }) => Promise<ActionResult>;
   archiveFeedback: (input: { projectId: unknown }) => Promise<ActionResult>;
+  renameForm: (input: { formId: unknown; name: unknown }) => Promise<ActionResult>;
+  pinForm: (input: { formId: unknown; pinned: unknown }) => Promise<ActionResult>;
+  removeForm: (input: { formId: unknown }) => Promise<ActionResult>;
 }
 
 interface ShellContextValue {
@@ -200,6 +203,7 @@ export function AssistantShell({
   children: React.ReactNode;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   // As the server rendered it, from the cookie, so a sidebar the person collapsed never shows open first. A narrow
   // screen closes it as a drawer once mounted, and a drawer is never remembered, since it closes on every pick.
   const [open, setOpen] = useState(!collapsed);
@@ -365,7 +369,7 @@ export function AssistantShell({
                           <Link
                             href={rowHref(item)}
                             aria-current={active ? "page" : undefined}
-                            className={`flex items-center gap-1.5 rounded-lg py-2 pl-2.5 text-sm ${actions === undefined || item.kind === "form" ? "pr-2.5" : "pr-9"} ${
+                            className={`flex items-center gap-1.5 rounded-lg py-2 pl-2.5 text-sm ${actions === undefined ? "pr-2.5" : "pr-9"} ${
                               active ? "bg-asst-active text-asst-text" : "text-asst-body hover:bg-asst-raised"
                             }`}
                           >
@@ -375,7 +379,7 @@ export function AssistantShell({
                             {item.kind === "feedback" && item.unread > 0 ? <UnreadBadge count={item.unread} /> : null}
                             {item.kind === "form" && item.signedOff ? <SignedOffMark /> : null}
                           </Link>
-                          {actions === undefined || item.kind === "form" ? null : (
+                          {actions === undefined ? null : (
                             // A sibling of the link, not a child: an anchor may not hold a button.
                             <div className="absolute right-1 top-1 flex">
                               {item.kind === "feedback" ? (
@@ -395,6 +399,37 @@ export function AssistantShell({
                                     // The open project's page would show it archived; its list is where its owner goes.
                                     if (result.ok && active) {
                                       router.push("/assistant/feedback");
+                                    }
+                                  }}
+                                />
+                              ) : item.kind === "form" ? (
+                                <ChatMenu
+                                  title={item.title}
+                                  noun="form"
+                                  label={`Options for ${item.title}`}
+                                  triggerClassName={triggerClassName}
+                                  pinned={item.pinnedAt !== null}
+                                  onOpen={() => setFailed(null)}
+                                  onPin={async (pinned) => {
+                                    report(await actions.pinForm({ formId: item.id, pinned }));
+                                    router.refresh();
+                                  }}
+                                  onRename={async (name) => {
+                                    report(await actions.renameForm({ formId: item.id, name }));
+                                    router.refresh();
+                                  }}
+                                  onDelete={async () => {
+                                    const result = await actions.removeForm({ formId: item.id });
+                                    if (!result.ok) {
+                                      report(result);
+                                      return;
+                                    }
+                                    setFailed(null);
+                                    // The form's own page has nothing left to show, so leave it for the list of forms.
+                                    if (pathname.startsWith(`/assistant/bulk-scan/${item.id}`)) {
+                                      router.push("/assistant/bulk-scan");
+                                    } else {
+                                      router.refresh();
                                     }
                                   }}
                                 />

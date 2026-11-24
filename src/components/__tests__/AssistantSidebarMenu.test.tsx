@@ -45,7 +45,7 @@ function ok() {
 }
 
 function actions(overrides: Partial<ConversationActions> = {}): ConversationActions {
-  return { rename: ok(), pin: ok(), remove: ok(), pinFeedback: ok(), archiveFeedback: ok(), ...overrides };
+  return { rename: ok(), pin: ok(), remove: ok(), pinFeedback: ok(), archiveFeedback: ok(), renameForm: ok(), pinForm: ok(), removeForm: ok(), ...overrides };
 }
 
 /** The sidebar with two chats, the second of which, "Story draft", is the one open. */

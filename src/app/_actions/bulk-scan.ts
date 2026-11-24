@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { deleteSpec, signOffVersion } from "@/bulk-scan/spec-store";
+import { deleteSpec, pinSpec, renameSpec, signOffVersion } from "@/bulk-scan/spec-store";
 import { prisma } from "@/store/prisma";
 import { requireViewer } from "@/viewer/current";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
@@ -47,5 +47,46 @@ export async function deleteBulkScanSpec(form: FormData): Promise<ActionResult<{
     }
     revalidate();
     return { ok: true, confirmation: "The form spec is deleted" };
+  });
+}
+
+/** Renames one of the person's own form specs, from its row in the sidebar. */
+export async function renameBulkScanSpec(input: { formId: unknown; name: unknown }): Promise<ActionResult> {
+  return await runAction("rename spec", async (): Promise<ActionResult> => {
+    if (!virtualAgentsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    await renameSpec(prisma, { actorOid: viewer.oid, ownerOid: viewer.oid }, text(input.formId), input.name);
+    revalidate();
+    return { ok: true };
+  });
+}
+
+/** Pins one of the person's own form specs above the date groups, or unpins it. */
+export async function pinBulkScanSpec(input: { formId: unknown; pinned: unknown }): Promise<ActionResult> {
+  return await runAction("pin spec", async (): Promise<ActionResult> => {
+    if (!virtualAgentsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    await pinSpec(prisma, { actorOid: viewer.oid, ownerOid: viewer.oid }, text(input.formId), input.pinned);
+    revalidate();
+    return { ok: true };
+  });
+}
+
+/** Deletes one of the person's own form specs, from its row in the sidebar. */
+export async function removeBulkScanSpec(input: { formId: unknown }): Promise<ActionResult> {
+  return await runAction("delete spec", async (): Promise<ActionResult> => {
+    if (!virtualAgentsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    if (!(await deleteSpec(prisma, { actorOid: viewer.oid, ownerOid: viewer.oid }, text(input.formId)))) {
+      return { ok: false, error: "that is not one of your form specs" };
+    }
+    revalidate();
+    return { ok: true };
   });
 }

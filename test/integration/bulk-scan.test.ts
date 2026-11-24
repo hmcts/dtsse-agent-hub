@@ -457,6 +457,41 @@ describe("the forms in the sidebar", () => {
     expect((await forms(BOB)).map((row) => row.id)).not.toContain(first);
   });
 
+  it("should rename a form in the list, pin it into the Pinned group and unpin it", async () => {
+    const [id] = (await upload("alice", "a.xlsx")) as [string];
+
+    expect(await actions.renameBulkScanSpec({ formId: id, name: "  Probate intake  " })).toEqual({ ok: true });
+    expect(await actions.pinBulkScanSpec({ formId: id, pinned: true })).toEqual({ ok: true });
+    expect(await forms(ALICE)).toMatchObject([{ id, title: "Probate intake", group: "Pinned", pinnedAt: expect.any(String) }]);
+
+    expect(await actions.pinBulkScanSpec({ formId: id, pinned: false })).toEqual({ ok: true });
+    expect((await forms(ALICE)).map((row) => [row.group, row.pinnedAt])).toEqual([["Today", null]]);
+  });
+
+  it("should refuse a blank name, a pin that is not a yes or no and a form that is not the person's, and change nothing", async () => {
+    const [id] = (await upload("alice", "a.xlsx")) as [string];
+    await upload("bob", "b.xlsx");
+    const bobs = (await prisma.bulkScanSpec.findFirstOrThrow({ where: { ownerOid: BOB.oid }, select: { id: true } })).id;
+
+    expect(await actions.renameBulkScanSpec({ formId: id, name: "   " })).toMatchObject({ ok: false });
+    expect(await actions.pinBulkScanSpec({ formId: id, pinned: "yes" })).toMatchObject({ ok: false });
+    expect(await actions.renameBulkScanSpec({ formId: bobs, name: "Mine now" })).toMatchObject({ ok: false });
+    expect(await actions.pinBulkScanSpec({ formId: bobs, pinned: true })).toMatchObject({ ok: false });
+    expect(await actions.removeBulkScanSpec({ formId: bobs })).toMatchObject({ ok: false });
+
+    expect(await prisma.bulkScanSpec.findUniqueOrThrow({ where: { id: bobs }, select: { name: true, pinnedAt: true } })).toMatchObject({ pinnedAt: null });
+    expect((await forms(ALICE)).map((row) => row.title)).not.toContain("");
+  });
+
+  it("should delete a form from its row, with all its versions", async () => {
+    const [id] = (await upload("alice", "a.xlsx")) as [string];
+
+    expect(await actions.removeBulkScanSpec({ formId: id })).toEqual({ ok: true });
+
+    expect(await forms(ALICE)).toEqual([]);
+    expect(await prisma.bulkScanSpecVersion.count({ where: { specId: id } })).toBe(0);
+  });
+
   it("should mark a version signed off when the latest version is signed off", async () => {
     const [id] = (await upload()) as [string];
     await actions.signOffSpec(formOf({ id, version: "1" }));
