@@ -40,6 +40,7 @@ const CASES = [
   "checkout-untracked-clobber",
   "checkout-local-commit",
   "checkout-other-branch",
+  "checkout-other-worktree",
   "checkout-ignored-path",
   "checkout-reset-fails",
   "checkout-fetch-fails",

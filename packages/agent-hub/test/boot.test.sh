@@ -20,7 +20,7 @@ set -u
 
 CASES=(no-token refused-token sign-in-not-completed sign-in-transient-failure stored-token-no-access checkout-client broken-checkout-client
     checkout-untracked-file checkout-modified-file checkout-modified-collision checkout-untracked-clobber checkout-local-commit
-    checkout-other-branch checkout-ignored-path checkout-reset-fails checkout-fetch-fails
+    checkout-other-branch checkout-other-worktree checkout-ignored-path checkout-reset-fails checkout-fetch-fails
     no-client trailing-slash
     client-upgrade client-upgrade-offline client-upgrade-no-npm client-upgrade-pinned client-upgrade-ships-entrypoint
     org-member org-not-member org-invitation-pending org-invited-after-refusal org-check-forbidden org-check-without-read-org
@@ -174,7 +174,6 @@ case "$1" in
         # `real_checkout` built. Every other case has no repository and gets the canned answers.
         [ -z "${FAKE_GIT_REAL:-}" ] || exec "$REAL_GIT" "$@"
         case "$3" in
-            rev-parse) echo master ;;
             symbolic-ref) echo origin/master ;;
             checkout)
                 [ -z "${FAKE_CHECKOUT_FAIL:-}" ] || { echo "fatal: Unable to create '.git/index.lock': File exists." >&2; exit 128; } ;;
@@ -434,8 +433,8 @@ case_broken_checkout_client() {
     grep -q "signing in to GitHub with $C/bin/agent-hub" "$C/out" && ok "falls through to the installed client" || no "did not fall through: $(grep 'signing in' "$C/out")"
 }
 
-# Every case below boots against a real checkout one commit behind origin/master and expects the boot to leave
-# it exactly at origin/master, whatever the pod had done to it.
+# For the cases that boot against a real checkout behind origin/master: the boot must leave it exactly at
+# origin/master, whatever the pod had done to it.
 expect_reset() {
     [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git fetch git checkout npm install entrypoint " &&
         ok "boots through the reset" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
@@ -526,7 +525,21 @@ case_checkout_other_branch() {
     [ ! -f "$C/ws/cft-workspace/feature.md" ] && ok "leaves the feature branch's files behind" || no "feature.md is still in the tree"
 }
 
-# The repo clones under apps/, libs/ and platops/ are ignored paths, which a forced checkout must not touch.
+# The default branch may be checked out in another worktree of the repo; the reset must still land on it.
+case_checkout_other_worktree() {
+    setup checkout-other-worktree
+    real_checkout
+    origin_commit new-from-origin.md
+    rgit -C "$C/ws/cft-workspace" checkout --quiet -b feature
+    rgit -C "$C/ws/cft-workspace" worktree add --quiet "$C/ws/other-worktree" master
+    seed_github "$GOOD_TOKEN"
+    boot FAKE_GIT_REAL=1
+    expect_reset
+    [ -f "$C/ws/cft-workspace/new-from-origin.md" ] && ok "reaches origin/master" || no "the checkout did not reach origin/master"
+}
+
+# The repo clones under apps/, libs/ and platops/ are ignored paths. An ignored file upstream does not track is
+# left alone by a forced checkout; one upstream starts tracking is overwritten.
 case_checkout_ignored_path() {
     setup checkout-ignored-path
     real_checkout
@@ -828,6 +841,7 @@ run_case() {
         checkout-untracked-clobber) case_checkout_untracked_clobber ;;
         checkout-local-commit) case_checkout_local_commit ;;
         checkout-other-branch) case_checkout_other_branch ;;
+        checkout-other-worktree) case_checkout_other_worktree ;;
         checkout-ignored-path) case_checkout_ignored_path ;;
         checkout-reset-fails) case_checkout_reset_fails ;;
         checkout-fetch-fails) case_checkout_fetch_fails ;;

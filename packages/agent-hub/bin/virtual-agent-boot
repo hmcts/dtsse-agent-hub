@@ -291,7 +291,7 @@ checkout_workspace() {
     local default
     default=$(git -C "$WORKSPACE" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/master)
     default="${default#origin/}"
-    if git -C "$WORKSPACE" checkout --quiet --force -B "$default" "origin/$default" 2>"$TMP/git.err"; then
+    if git -C "$WORKSPACE" checkout --quiet --force --ignore-other-worktrees -B "$default" "origin/$default" 2>"$TMP/git.err"; then
         log "reset $WORKSPACE to origin/$default"
     else
         err=$(head -c 380 "$TMP/git.err" | tr -s '\n\t ' ' ')
