@@ -76,8 +76,7 @@ export async function importUpload(fileName: string, bytes: Uint8Array, picked?:
     const result = await fromPdf({
       pdf: fileName,
       bytes,
-      ...(picked ? { ccdFields: picked.fields } : {}),
-      ...(picked ? { caseType: picked.caseType } : {})
+      ...(picked ? { ccdFields: picked.fields, caseType: picked.caseType } : {})
     }).catch((error: unknown) => {
       console.error(`a form PDF could not be read: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`);
       return undefined;

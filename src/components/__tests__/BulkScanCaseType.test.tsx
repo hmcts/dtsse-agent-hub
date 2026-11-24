@@ -147,6 +147,18 @@ describe("the case type picker", () => {
     expect(onCleared).toHaveBeenCalled();
   });
 
+  it("should show an id typed earlier as the selected case type and clear it when no case type is chosen", async () => {
+    fetchMock.mockImplementation(podJobs());
+    const onCleared = vi.fn();
+    render(<BulkScanCaseTypePicker conversationId="c1" selected={{ product: "", caseType: "CIC" }} onPicked={vi.fn()} onCleared={onCleared} />);
+
+    expect(select().value).toBe("CIC");
+    expect(screen.getByRole("option", { name: "CIC (typed earlier)" })).toBeTruthy();
+    await userEvent.selectOptions(select(), "");
+
+    expect(onCleared).toHaveBeenCalled();
+  });
+
   it("should say how many fields were left out when the answer could not hold them all", async () => {
     fetchMock.mockImplementation(podJobs());
     answers[1] = { kind: "ccd.case-type-fields", answer: { status: "done", kind: "x", result: { fields: ROWS, total: 9000, omitted: 40 } } };

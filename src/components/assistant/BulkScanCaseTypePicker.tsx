@@ -65,10 +65,11 @@ export function BulkScanCaseTypePicker({
   disabled = false
 }: Readonly<{
   conversationId: string | null;
+  /** The case type the form names; an empty `product` is an id typed earlier, which no listed case type is known to match. */
   selected: { product: string; caseType: string } | null;
   onPicked: (picked: PickedCaseType) => void;
   onCleared: () => void;
-  /** Told when the fields of a chosen case type start and stop being fetched, so what is typed meanwhile is not overwritten by them. */
+  /** Told when the fields of a chosen case type start and stop being fetched, so the upload can wait for them. */
   onFetching?: (fetching: boolean) => void;
   /** Lays the picker out as one of the form header's labelled inputs, rather than a stand-alone control. */
   compact?: boolean;
@@ -173,7 +174,8 @@ export function BulkScanCaseTypePicker({
   }
 
   const types = list.state === "ready" ? list.types : [];
-  const current = fetching ?? (selected === null ? "" : `${selected.product}/${selected.caseType}`);
+  const typedEarlier = selected !== null && selected.product === "";
+  const current = fetching ?? (selected === null ? "" : typedEarlier ? selected.caseType : `${selected.product}/${selected.caseType}`);
   const known = types.some((t) => keyOf(t) === current);
 
   return (
@@ -191,7 +193,9 @@ export function BulkScanCaseTypePicker({
         onChange={(event) => void choose(event.target.value)}
       >
         <option value="">{list.state === "loading" ? "Reading your workspace…" : "No case type"}</option>
-        {current !== "" && !known ? <option value={current}>{current.replace("/", ": ")}</option> : null}
+        {current !== "" && !known ? (
+          <option value={current}>{typedEarlier && fetching === null ? `${current} (typed earlier)` : current.replace("/", ": ")}</option>
+        ) : null}
         {[...types]
           .sort((a, b) => byCode(`${a.service}: ${a.case_type}`, `${b.service}: ${b.case_type}`))
           .map((t) => (

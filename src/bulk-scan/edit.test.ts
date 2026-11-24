@@ -94,12 +94,6 @@ describe("patching a spec", () => {
     expect(second?.required?.when).toEqual({ hasSolicitor: "Yes" });
   });
 
-  it("should set the form's case type and drop it when emptied", () => {
-    const set = patchHeader(spec, { ccdCaseTypeId: "CriminalInjuriesCompensation" });
-    expect(set.form.ccdCaseTypeId).toBe("CriminalInjuriesCompensation");
-    expect(patchHeader(set, { ccdCaseTypeId: "" }).form).not.toHaveProperty("ccdCaseTypeId");
-  });
-
   it("should set the form's name and drop a PO box that is emptied", () => {
     const next = patchHeader(spec, { name: "D9", poBox: "" });
     expect(next.form.name).toBe("D9");

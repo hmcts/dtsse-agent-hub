@@ -26,7 +26,7 @@ export function BulkScanHeaderCaseType({
     <div className="flex min-w-0 flex-col gap-1.5">
       <BulkScanCaseTypePicker
         conversationId={conversationId}
-        selected={ccdCaseTypeId && ccdProduct ? { product: ccdProduct, caseType: ccdCaseTypeId } : null}
+        selected={ccdCaseTypeId ? { product: ccdProduct ?? "", caseType: ccdCaseTypeId } : null}
         onPicked={(picked) =>
           onSpec((current) =>
             withCaseType(current, { product: picked.product, caseType: picked.caseType, config: picked.config, repo: picked.repo }, ccdFieldsOf(picked.rows))

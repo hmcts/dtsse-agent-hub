@@ -67,12 +67,7 @@ export function BulkScanFieldDetails({
             <input value={field.id ?? ""} className={INPUT} onChange={(e) => onPatch({ id: e.target.value })} />
           </Labelled>
           <Labelled label="Label">
-            <textarea
-              value={field.label}
-              rows={1}
-              className={`${INPUT} field-sizing-content resize-none`}
-              onChange={(e) => onPatch({ label: e.target.value })}
-            />
+            <textarea value={field.label} rows={1} className={`${INPUT} field-sizing-content resize-y`} onChange={(e) => onPatch({ label: e.target.value })} />
           </Labelled>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

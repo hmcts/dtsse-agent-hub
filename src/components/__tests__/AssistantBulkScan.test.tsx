@@ -347,7 +347,7 @@ describe("bulk scan editor", () => {
     const label = screen.getByLabelText("Label") as HTMLTextAreaElement;
     expect(label.rows).toBe(1);
     expect(label.className).toContain("field-sizing-content");
-    expect(label.className).toContain("resize-none");
+    expect(label.className).toContain("resize-y");
   });
 
   it("should mark the fields the schema refused and keep the person's edits when a save is refused", async () => {
