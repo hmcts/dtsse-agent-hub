@@ -420,7 +420,7 @@ function AllComments({
           </label>
         ) : null}
         <label className="flex items-center gap-2">
-          Group by
+          <span>Group by</span>
           <select value={groupBy} onChange={(event) => setGroupBy(event.target.value as GroupBy)} className={FIELD}>
             <option value="page">Page</option>
             <option value="theme">Theme</option>

@@ -58,8 +58,13 @@ export function pageName(page: Pick<PageGroup, "pageTitle" | "pagePath">): strin
   if (page.pageTitle === null) {
     return page.pagePath;
   }
-  const [first] = page.pageTitle.split(/\s+[–—|-]\s+/);
-  return first === undefined || first.trim() === "" ? page.pageTitle : first.trim();
+  // The first separator found by plain search rather than a pattern, which would backtrack on a long run of spaces.
+  const flat = page.pageTitle
+    .split(/\s/)
+    .filter((word) => word !== "")
+    .join(" ");
+  const cuts = [" – ", " — ", " | ", " - "].map((separator) => flat.indexOf(separator)).filter((at) => at > 0);
+  return cuts.length === 0 ? page.pageTitle : flat.slice(0, Math.min(...cuts));
 }
 
 /** Each page with threads, per link, in path order, with how many threads it has and the title it last had. */

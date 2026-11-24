@@ -55,7 +55,12 @@ export function refinementOrder<T extends Pick<FeedbackThreadView, "theme" | "pa
 
 function quote(body: string): string {
   const cut = body.length > MAX_QUOTED_COMMENT ? `${body.slice(0, MAX_QUOTED_COMMENT)}…` : body;
-  return cut.replace(/\s*\n\s*/g, " / ").trim();
+  // Line by line rather than one pattern across the whole comment, which would backtrack on a long run of spaces.
+  return cut
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+    .join(" / ");
 }
 
 function threadBlock(thread: FeedbackThreadView, number: number, linkLabel: string | null): string {
