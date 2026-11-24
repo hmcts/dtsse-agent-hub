@@ -1061,6 +1061,14 @@ describe("sign-ins made on request", () => {
     expect(offersConnect({ kind, state: "waiting" })).toBe(false);
   });
 
+  it.each(["expired", "failed"] as const)("should offer to connect Atlassian from settings when its sign-in is %s", (state) => {
+    expect(offersConnect({ kind: "atlassian", state })).toBe(true);
+  });
+
+  it("should offer no connect from settings for Jenkins when its sign-in has lapsed, since it is pasted", () => {
+    expect(offersConnect({ kind: "jenkins", state: "expired" })).toBe(false);
+  });
+
   // A connected GitHub token can still lack a scope the hub asks for now, and nothing marks it lapsed, so signing in
   // again from settings is the only way to the new one.
   it.each([

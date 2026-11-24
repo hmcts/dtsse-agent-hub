@@ -1135,7 +1135,8 @@ export function AssistantSettings({
         aria-expanded={open}
         aria-label={attention.length === 0 ? "Settings" : `Settings. ${attention.join(". ")}`}
         title="Settings"
-        onClick={() => show(null)}
+        // Straight to Connections when that is what the warning is about, so the badge leads to its cause.
+        onClick={() => show(warning === null ? null : "connections")}
         // 36px, the size of the composer's own buttons, with the two extra pixels each way taken out of the margin
         // again so the footer row stays the height the 32px avatar beside it sets.
         className="relative -my-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-asst-muted hover:bg-asst-hover hover:text-asst-text"

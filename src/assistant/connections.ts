@@ -536,7 +536,16 @@ export function offersConnect(row: Pick<Connection, "kind" | "state">): boolean 
   if (row.kind === "github") {
     return row.state === "connected" || row.state === "waiting" || hasLapsed(row.state);
   }
-  return signsInOnRequest(row.kind) && (row.state === "waiting" || hasLapsed(row.state));
+  return (signsInOnRequest(row.kind) && (row.state === "waiting" || hasLapsed(row.state))) || (restartsToSignIn(row.kind) && hasLapsed(row.state));
+}
+
+/**
+ * Whether the only way to this kind's sign-in is the assistant relaying one: one made on request, or a kind with
+ * nothing to paste that its pod relays, like Atlassian. Without the second, a lapsed Atlassian sign-in showed its
+ * state and no button, because it is relayed at boot rather than on request and so was never offered Connect.
+ */
+function restartsToSignIn(kind: CredentialKind): boolean {
+  return signsInOnRequest(kind) || (isConnection(kind) && CONNECTORS[kind].paste === null && CONNECTORS[kind].relays);
 }
 
 /** What a connection held back by `awaitsGithub` says in place of its controls. */
