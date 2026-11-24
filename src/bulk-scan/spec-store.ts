@@ -70,20 +70,24 @@ export interface SpecRow {
 }
 
 /** Up to `limit` of the owner's specs that meet `where`, each at its latest version, most recently saved first. */
-async function latestSpecs(db: Database, ownerOid: string, where: Prisma.Sql, limit: number): Promise<SpecRow[]> {
+async function latestSpecs(db: Database, ownerOid: string, where: Prisma.Sql, limit: number, pinnedFirst = false): Promise<SpecRow[]> {
+  // Pinned ones lead where asked, so the limit can never cut off a form the person pinned.
+  const order = pinnedFirst
+    ? clientPrisma().sql`(s.pinned_at IS NULL), s.pinned_at DESC, v.created_at DESC, s.id`
+    : clientPrisma().sql`v.created_at DESC, s.id`;
   return await db.$queryRaw<SpecRow[]>`
     SELECT s.id::text AS id, s.name, v.created_at AS "savedAt", v.signed_off_at IS NOT NULL AS "signedOff", s.pinned_at AS "pinnedAt"
       FROM bulk_scan_spec s
       JOIN LATERAL (SELECT created_at, signed_off_at FROM bulk_scan_spec_version WHERE spec_id = s.id ORDER BY version DESC LIMIT 1) v ON true
      WHERE s.owner_oid = ${ownerOid} AND ${where}
-     ORDER BY v.created_at DESC, s.id
+     ORDER BY ${order}
      LIMIT ${limit}
   `;
 }
 
 /** The forms the sidebar lists: the owner's, at most `SIDEBAR_LIMIT`, with no spec JSON read. */
 export async function sidebarSpecs(db: Database, ownerOid: string, limit = SIDEBAR_LIMIT): Promise<SpecRow[]> {
-  return await latestSpecs(db, ownerOid, clientPrisma().sql`true`, limit);
+  return await latestSpecs(db, ownerOid, clientPrisma().sql`true`, limit, true);
 }
 
 /** Up to `limit` of the owner's specs whose name holds every one of `terms`, which are lower-case already. */
@@ -261,7 +265,10 @@ export async function pinSpec(prisma: PrismaClient, target: SpecTarget, id: stri
     if (owned === 0) {
       throw new HttpError(404, GONE);
     }
-    const { count } = await tx.bulkScanSpec.updateMany({ where: { id, pinnedAt: pinned ? null : { not: null } }, data: { pinnedAt: pinned ? now : null } });
+    const { count } = await tx.bulkScanSpec.updateMany({
+      where: { id, ownerOid: target.ownerOid, pinnedAt: pinned ? null : { not: null } },
+      data: { pinnedAt: pinned ? now : null }
+    });
     if (count > 0) {
       await notify(tx, { type: "bulk_scan_spec", owner_oid: target.ownerOid });
     }

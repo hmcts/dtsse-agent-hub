@@ -411,12 +411,18 @@ export function AssistantShell({
                                   pinned={item.pinnedAt !== null}
                                   onOpen={() => setFailed(null)}
                                   onPin={async (pinned) => {
-                                    report(await actions.pinForm({ formId: item.id, pinned }));
-                                    router.refresh();
+                                    const result = await actions.pinForm({ formId: item.id, pinned });
+                                    report(result);
+                                    if (result.ok) {
+                                      router.refresh();
+                                    }
                                   }}
                                   onRename={async (name) => {
-                                    report(await actions.renameForm({ formId: item.id, name }));
-                                    router.refresh();
+                                    const result = await actions.renameForm({ formId: item.id, name });
+                                    report(result);
+                                    if (result.ok) {
+                                      router.refresh();
+                                    }
                                   }}
                                   onDelete={async () => {
                                     const result = await actions.removeForm({ formId: item.id });
@@ -426,7 +432,7 @@ export function AssistantShell({
                                     }
                                     setFailed(null);
                                     // The form's own page has nothing left to show, so leave it for the list of forms.
-                                    if (pathname.startsWith(`/assistant/bulk-scan/${item.id}`)) {
+                                    if (pathname === `/assistant/bulk-scan/${item.id}` || pathname.startsWith(`/assistant/bulk-scan/${item.id}/`)) {
                                       router.push("/assistant/bulk-scan");
                                     } else {
                                       router.refresh();
