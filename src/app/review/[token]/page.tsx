@@ -56,6 +56,7 @@ export default async function ReviewPage({ params, searchParams }: Props) {
     <div className="asst-theme flex min-h-0 flex-1 flex-col" data-theme={theme}>
       <ReviewShell
         token={token}
+        projectId={link.project.id}
         frameSrc={frameSrc}
         projectName={link.project.name}
         linkLabel={link.label}

@@ -3,7 +3,7 @@
  */
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { POLL_MS, ReviewShell } from "@/components/feedback/ReviewShell";
+import { commentsPath, POLL_MS, ReviewShell } from "@/components/feedback/ReviewShell";
 import { AUDIO_SLICE_MS } from "@/components/feedback/recording";
 import { MAX_RECORDING_MS } from "@/feedback/limits";
 import { type ShellMessage, type WidgetMessageBody, widgetMessage } from "@/feedback/protocol";
@@ -160,17 +160,19 @@ function snapshotPuts(): Call[] {
   return calls.filter((call) => call.url === "https://blob.example/snapshot?sas");
 }
 
-function shell() {
+function shell(more: { access?: "team" | "reviewer"; go?: (href: string) => void } = {}) {
   render(
     <ReviewShell
       token={TOKEN}
+      projectId="p1"
       frameSrc={FRAME_SRC}
       projectName="Claims prototype"
       linkLabel="Version 1"
       viewerName="Ann Reviewer"
-      access="reviewer"
+      access={more.access ?? "reviewer"}
       maskInputs={true}
       retentionDays={30}
+      go={more.go}
     />
   );
   posted = [];
@@ -223,6 +225,7 @@ describe("ReviewShell", () => {
   it("should keep the frame where it is when the page renders again with a fresh ticket", () => {
     const props = {
       token: TOKEN,
+      projectId: "p1",
       projectName: "Claims prototype",
       linkLabel: "Version 1",
       viewerName: "Ann Reviewer",
@@ -274,6 +277,45 @@ describe("ReviewShell", () => {
     expect(screen.getByRole("heading", { name: "Comment 2: Ann Reviewer" })).toBeTruthy();
   });
 
+  it("should take the team to the project's comments when they finish", async () => {
+    const go = vi.fn();
+    shell({ access: "team", go });
+    await fromWidget({ type: "hello", path: "/start", title: "", version: "" });
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Finish" })));
+
+    expect(go).toHaveBeenCalledWith("/assistant/feedback/p1?tab=comments");
+    expect(commentsPath("p2")).toBe("/assistant/feedback/p2?tab=comments");
+  });
+
+  it("should tell a reviewer their comments are saved when they finish, and let them go back", async () => {
+    const go = vi.fn();
+    shell({ go });
+    await fromWidget({ type: "hello", path: "/start", title: "", version: "" });
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Finish" })));
+
+    expect(go).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog", { name: "Thank you, your comments are saved" });
+    expect(dialog.textContent).toContain("You can close this tab.");
+    fireEvent.click(screen.getByRole("button", { name: "Back to the prototype" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("should ask for the comment being written to be saved or discarded before finishing", async () => {
+    const go = vi.fn();
+    shell({ access: "team", go });
+    await fromWidget({ type: "hello", path: "/start", title: "", version: "" });
+    fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
+    await fromWidget({ type: "picked", path: "/start", anchor: ANCHOR, snapshot: SNAPSHOT });
+    fireEvent.change(screen.getByRole("combobox", { name: "Your comment" }), { target: { value: "Half a thought" } });
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Finish" })));
+
+    expect(go).not.toHaveBeenCalled();
+    expect(screen.getByText("Save or discard the comment you are writing before you finish.")).toBeTruthy();
+  });
+
   it("should cancel picking from the bar and when the widget cancels", async () => {
     shell();
     await fromWidget({ type: "hello", path: "/start", title: "", version: "" });
@@ -296,6 +338,25 @@ describe("ReviewShell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Not now" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(getUserMedia).not.toHaveBeenCalled();
+  });
+
+  it("should stop and save a recording before taking the team to the comments", async () => {
+    vi.setSystemTime(new Date("2026-11-13T10:00:00.000Z"));
+    const go = vi.fn();
+    shell({ access: "team", go });
+    await fromWidget({ type: "hello", path: "/start", title: "", version: "" });
+    fireEvent.click(screen.getByRole("button", { name: "Record" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
+    await settle();
+    await settle();
+
+    fireEvent.click(screen.getByRole("button", { name: "Finish" }));
+    await settle(500);
+    await untilReal(() => go.mock.calls.length > 0);
+
+    expect(posted.some((message) => message.type === "record-stop")).toBe(true);
+    expect(calls.some((call) => call.url.endsWith("/complete"))).toBe(true);
+    expect(go).toHaveBeenCalledWith("/assistant/feedback/p1?tab=comments");
   });
 
   it("should record, upload each chunk and complete the recording", async () => {
