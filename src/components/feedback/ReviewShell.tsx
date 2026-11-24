@@ -28,6 +28,8 @@ import { ThreadCard } from "./ThreadCard";
 
 export interface ReviewShellProps {
   token: string;
+  /** The project the link is of, whose comments page Finish takes the team to. */
+  projectId: string;
   /** The frame's first `src`: the viewer's `/_auth?ticket=…`, which lands on the page under the link's prefix. */
   frameSrc: string;
   projectName: string;
@@ -38,6 +40,13 @@ export interface ReviewShellProps {
   retentionDays: number;
   /** For tests, which replace the hub's routes. */
   api?: ReviewApi;
+  /** For tests: where Finish sends the team; the browser's own navigation otherwise. */
+  go?: (href: string) => void;
+}
+
+/** Where Finish takes the project's team: its comments, where everyone's are read and refined. */
+export function commentsPath(projectId: string): string {
+  return `/assistant/feedback/${projectId}?tab=comments`;
 }
 
 export const POLL_MS = 15_000;
@@ -67,7 +76,7 @@ function messageOf(error: unknown): string {
 }
 
 export function ReviewShell(props: ReviewShellProps) {
-  const { token, projectName, linkLabel, viewerName, access, maskInputs, retentionDays } = props;
+  const { token, projectId, projectName, linkLabel, viewerName, access, maskInputs, retentionDays } = props;
   const api = useMemo(() => props.api ?? reviewApi(token), [props.api, token]);
   // The first ticket only: the page mints a fresh one each time it renders, as a refresh does, and a new `src` would
   // reload the prototype at the link's landing page, losing the reviewer's place and the page being recorded.
@@ -85,6 +94,7 @@ export function ReviewShell(props: ReviewShellProps) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [draftBody, setDraftBody] = useState("");
   const [saving, setSaving] = useState(false);
+  const [finished, setFinished] = useState(false);
   const [focused, setFocused] = useState<string | null>(null);
   const [missing, setMissing] = useState<readonly string[]>([]);
   const [showResolved, setShowResolved] = useState(false);
@@ -165,6 +175,28 @@ export function ReviewShell(props: ReviewShellProps) {
       setRecordBusy(false);
     }
   }, [send]);
+
+  /**
+   * Ends the review: a comment still being written has to be saved or discarded first, a recording is stopped and
+   * saved, and then the team goes to the project's comments while a reviewer, who cannot open them, is told theirs are
+   * saved. Every comment was saved as it was made, so there is nothing else to send.
+   */
+  const finish = async () => {
+    if (draft !== null && draftBody.trim() !== "") {
+      setPanelOpen(true);
+      setNotice("Save or discard the comment you are writing before you finish.");
+      return;
+    }
+    setDraft(null);
+    if (recordingRef.current !== null) {
+      await stopRecording();
+    }
+    if (access === "team") {
+      (props.go ?? ((href: string) => window.location.assign(href)))(commentsPath(projectId));
+      return;
+    }
+    setFinished(true);
+  };
 
   const onWidget = useCallback(
     (message: WidgetMessage) => {
@@ -468,6 +500,14 @@ export function ReviewShell(props: ReviewShellProps) {
             >
               {openCount === 1 ? "1 open comment" : `${openCount} open comments`}
             </button>
+            <button
+              type="button"
+              onClick={() => void finish()}
+              disabled={recordBusy || saving}
+              className="rounded-lg border border-asst-strong px-3 py-1 text-sm font-semibold hover:bg-asst-field disabled:opacity-50"
+            >
+              Finish
+            </button>
             <details className="relative">
               <summary className="cursor-pointer list-none rounded-lg px-2 py-1 text-sm text-asst-muted hover:bg-asst-field">Help</summary>
               <div className="absolute right-0 top-[calc(100%+4px)] z-30 w-72 rounded-xl border border-asst-strong bg-asst-raised p-3 text-sm shadow-2xl">
@@ -595,6 +635,7 @@ export function ReviewShell(props: ReviewShellProps) {
           </aside>
         ) : null}
       </div>
+      {finished ? <FinishedDialog onBack={() => setFinished(false)} /> : null}
       {consentOpen ? (
         <ConsentDialog
           retentionDays={retentionDays}
@@ -605,6 +646,36 @@ export function ReviewShell(props: ReviewShellProps) {
           }}
         />
       ) : null}
+    </div>
+  );
+}
+
+/** What a reviewer sees once they finish: that their comments are kept, and the way back if they have more to say. */
+function FinishedDialog({ onBack }: { onBack: () => void }) {
+  const back = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    back.current?.focus();
+  }, []);
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-5">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="finished-title"
+        className="flex w-full max-w-md flex-col gap-3 rounded-2xl border border-asst-strong bg-asst-raised p-5 shadow-2xl"
+      >
+        <h2 id="finished-title" className="text-base font-semibold">
+          Thank you, your comments are saved
+        </h2>
+        <p className="text-sm text-asst-body">The project's team can read them now. You can close this tab.</p>
+        <div className="flex justify-end">
+          <button ref={back} type="button" onClick={onBack} className="rounded-lg border border-asst-strong px-3 py-1.5 text-sm hover:bg-asst-field">
+            Back to the prototype
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
