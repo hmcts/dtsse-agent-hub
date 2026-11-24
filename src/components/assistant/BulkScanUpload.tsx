@@ -4,8 +4,7 @@ import { useRouter } from "next/navigation";
 import { type FormEvent, useId, useState } from "react";
 import { describeBytes } from "@/assistant/uploads";
 import { MAX_BULK_SCAN_FILE_BYTES } from "@/bulk-scan/limits";
-import { BulkScanCaseTypePicker, type ListedCaseTypes, type PickedCaseType } from "@/components/assistant/BulkScanCaseTypePicker";
-import { BulkScanTypedCaseType } from "@/components/assistant/BulkScanTypedCaseType";
+import { BulkScanCaseTypePicker, type PickedCaseType } from "@/components/assistant/BulkScanCaseTypePicker";
 import { FIELD } from "@/components/assistant/WelshParts";
 
 /** Starts a spec from a form PDF, an Exela SIP or an HMCTS transformation sheet, and opens it. */
@@ -17,8 +16,6 @@ export function BulkScanUpload({ podConversationId = null }: Readonly<{ podConve
   const [form, setForm] = useState<File | null>(null);
   const [picked, setPicked] = useState<PickedCaseType | null>(null);
   const [loadingFields, setLoadingFields] = useState(false);
-  const [typedCaseType, setTypedCaseType] = useState("");
-  const [list, setList] = useState<ListedCaseTypes>({ state: podConversationId === null ? "none" : "idle", types: [] });
 
   async function upload(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -32,9 +29,6 @@ export function BulkScanUpload({ podConversationId = null }: Readonly<{ podConve
     }
     const body = new FormData();
     body.set("form", form);
-    if (picked === null && typedCaseType.trim() !== "") {
-      body.set("caseType", typedCaseType.trim());
-    }
     if (picked !== null) {
       body.set("caseType", picked.caseType);
       body.set("product", picked.product);
@@ -88,14 +82,7 @@ export function BulkScanUpload({ podConversationId = null }: Readonly<{ podConve
           onPicked={setPicked}
           onCleared={() => setPicked(null)}
           onFetching={setLoadingFields}
-          onList={setList}
           disabled={busy}
-        />
-        <BulkScanTypedCaseType
-          value={typedCaseType}
-          reason={list.state === "none" || list.state === "failed" ? "The list of your workspace's case types is not available." : null}
-          disabled={busy || picked !== null}
-          onChange={setTypedCaseType}
         />
         <button type="submit" disabled={busy || loadingFields} className="w-fit rounded-lg border border-asst-line px-3 py-1.5 text-[13px] font-medium">
           Start the form

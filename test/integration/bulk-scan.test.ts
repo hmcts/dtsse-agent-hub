@@ -146,17 +146,6 @@ describe("starting a spec", () => {
     expect(await prisma.bulkScanSpec.count()).toBe(0);
   });
 
-  it("should name the case type in the spec's header when one is typed with an upload", async () => {
-    const bytes = new Uint8Array((await generateTransformWorkbook(SPEC).xlsx.writeBuffer()) as ArrayBuffer);
-    const body = uploadForm("t1.xlsx", bytes);
-    body.set("caseType", "CriminalInjuriesCompensation");
-
-    const response = await uploadRoute.POST(as("alice", "/api/ui/assistant/bulk-scan", { method: "POST", body }));
-    const [id] = (await jsonOf<{ ids: string[] }>(response)).ids;
-
-    expect((await readSpec(prisma, own(ALICE), id as string))?.spec).toMatchObject({ form: { ccdCaseTypeId: "CriminalInjuriesCompensation" } });
-  });
-
   it("should be unavailable where virtual agents are off", async () => {
     vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "false");
     expect((await uploadRoute.POST(as("alice", "/api/ui/assistant/bulk-scan", { method: "POST", body: "x" }))).status).toBe(404);

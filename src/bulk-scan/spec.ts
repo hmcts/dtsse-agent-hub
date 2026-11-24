@@ -68,17 +68,19 @@ export interface Imported {
 }
 
 /**
- * Reads an uploaded form PDF, Exela SIP or HMCTS transformation sheet into one spec per form it holds, with `caseType`
- * as each form's CCD case type id. A PDF's fields are matched against `picked`, the case type the person chose.
+ * Reads an uploaded form PDF, Exela SIP or HMCTS transformation sheet into one spec per form it holds. A PDF's fields are
+ * matched against `picked`, the case type the person chose, which each form's header then names.
  */
-export async function importUpload(fileName: string, bytes: Uint8Array, caseType?: string, picked?: UploadedCaseType): Promise<Imported> {
+export async function importUpload(fileName: string, bytes: Uint8Array, picked?: UploadedCaseType): Promise<Imported> {
   if (isPdf(bytes)) {
-    const result = await fromPdf({ pdf: fileName, bytes, ...(picked ? { ccdFields: picked.fields } : {}), ...(caseType ? { caseType } : {}) }).catch(
-      (error: unknown) => {
-        console.error(`a form PDF could not be read: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`);
-        return undefined;
-      }
-    );
+    const result = await fromPdf({
+      pdf: fileName,
+      bytes,
+      ...(picked ? { ccdFields: picked.fields, caseType: picked.caseType } : {})
+    }).catch((error: unknown) => {
+      console.error(`a form PDF could not be read: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`);
+      return undefined;
+    });
     if (!result) {
       throw new HttpError(400, "that PDF could not be read");
     }
@@ -100,13 +102,13 @@ export async function importUpload(fileName: string, bytes: Uint8Array, caseType
     if (forms.length === 0) {
       throw new HttpError(422, "that SIP has no filled-in form tab");
     }
-    return openable({ kind: "sip", forms: withPicked(withSource(withTypedCaseType(forms, caseType), "sip"), picked) });
+    return openable({ kind: "sip", forms: withPicked(withSource(forms, "sip"), picked) });
   }
   const { spec } = readSheet(() => importTransformSheet(selectSheet(workbook, undefined)));
   if (spec.sections.every((s) => s.fields.length === 0)) {
     throw new HttpError(422, "no field rows were found in the first sheet: is it a transformation sheet?");
   }
-  return openable({ kind: "transformation sheet", forms: withPicked(withSource(withTypedCaseType([spec], caseType), "sheet"), picked) });
+  return openable({ kind: "transformation sheet", forms: withPicked(withSource([spec], "sheet"), picked) });
 }
 
 /** The forms with the case type the person picked: its header, and each row that carries an id checked against its fields. */
@@ -123,11 +125,6 @@ const choiceOf = (picked: UploadedCaseType): CaseTypeChoice => ({
 
 function withSource(forms: FormSpec[], source: "pdf" | "sip" | "sheet"): FormSpec[] {
   return forms.map((f) => ({ ...f, form: { ...f.form, source } }));
-}
-
-/** The forms with the CCD case type the person typed as their header's, when one was typed. */
-function withTypedCaseType(forms: FormSpec[], caseType: string | undefined): FormSpec[] {
-  return caseType ? forms.map((f) => ({ ...f, form: { ...f.form, ccdCaseTypeId: caseType } })) : forms;
 }
 
 /** An importer's refusal of a sheet that is not laid out as it expects, as the 422 that says where. */

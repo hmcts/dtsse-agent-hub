@@ -4,6 +4,7 @@ import type { CcdRow } from "@hmcts-cft/bulk-scan-spec/ccd-match";
 import { byCode } from "@hmcts-cft/bulk-scan-spec/compare";
 import type { CcdConfig } from "@hmcts-cft/bulk-scan-spec/schema";
 import { useEffect, useId, useRef, useState } from "react";
+import { INPUT } from "@/components/assistant/BulkScanParts";
 import { type PodJobWords, runPodJob } from "@/components/assistant/podJobRun";
 import { FIELD } from "@/components/assistant/WelshParts";
 import { useHubSubscribe } from "@/components/live/HubStream";
@@ -32,12 +33,6 @@ const WORDS: PodJobWords = {
   noPod: "This chat runs on your own computer, so the CFT Workspace cannot read your workspace for it. You can carry on without a case type.",
   assistantGone: "Your assistant has been replaced. You can carry on without a case type."
 };
-/** What the picker's list has come to: not asked for yet or being read, read, or not readable (no assistant to ask, or the ask failed). */
-export interface ListedCaseTypes {
-  state: "none" | "idle" | "loading" | "ready" | "failed";
-  types: ListedCaseType[];
-}
-
 export const WAKING_WORDS = "Your assistant is starting. This takes a minute or two, then this carries on by itself.";
 export const NO_CHAT = "Start a chat in the CFT Workspace first, so your assistant is running, and this list is read from your workspace.";
 
@@ -53,7 +48,6 @@ const FINAL_CODES: readonly string[] = ["script_missing", "tool_missing", "not_c
 const retryable = (outcome: { status?: string; code?: string }): boolean =>
   outcome.status !== "unsupported" && outcome.status !== "no_pod" && outcome.status !== "assistant_gone" && !FINAL_CODES.includes(outcome.code ?? "");
 
-const NONE: ListedCaseType[] = [];
 const keyOf = (type: Pick<ListedCaseType, "product" | "case_type">): string => `${type.product}/${type.case_type}`;
 
 /**
@@ -67,17 +61,18 @@ export function BulkScanCaseTypePicker({
   onPicked,
   onCleared,
   onFetching,
-  onList,
+  compact = false,
   disabled = false
 }: Readonly<{
   conversationId: string | null;
+  /** The case type the form names; an empty `product` is an id typed earlier, which no listed case type is known to match. */
   selected: { product: string; caseType: string } | null;
   onPicked: (picked: PickedCaseType) => void;
   onCleared: () => void;
-  /** Told when the fields of a chosen case type start and stop being fetched, so what is typed meanwhile is not overwritten by them. */
+  /** Told when the fields of a chosen case type start and stop being fetched, so the upload can wait for them. */
   onFetching?: (fetching: boolean) => void;
-  /** Told what the list of case types has come to, so the form can offer a typed id where the list cannot be read or lacks the case type. */
-  onList?: (list: ListedCaseTypes) => void;
+  /** Lays the picker out as one of the form header's labelled inputs, rather than a stand-alone control. */
+  compact?: boolean;
   disabled?: boolean;
 }>) {
   const id = useId();
@@ -94,11 +89,6 @@ export function BulkScanCaseTypePicker({
   const listing = useRef<AbortController | null>(null);
   const fetchingRef = useRef(onFetching);
   fetchingRef.current = onFetching;
-  const listedRef = useRef(onList);
-  listedRef.current = onList;
-  const listState = list.state;
-  const listedTypes = list.state === "ready" ? list.types : NONE;
-  useEffect(() => listedRef.current?.({ state: listState, types: listedTypes }), [listState, listedTypes]);
   const isFetching = fetching !== null;
   useEffect(() => fetchingRef.current?.(isFetching), [isFetching]);
 
@@ -184,17 +174,18 @@ export function BulkScanCaseTypePicker({
   }
 
   const types = list.state === "ready" ? list.types : [];
-  const current = fetching ?? (selected === null ? "" : `${selected.product}/${selected.caseType}`);
+  const typedEarlier = selected !== null && selected.product === "";
+  const current = fetching ?? (selected === null ? "" : typedEarlier ? selected.caseType : `${selected.product}/${selected.caseType}`);
   const known = types.some((t) => keyOf(t) === current);
 
   return (
-    <div className="flex flex-col gap-1.5">
-      <label htmlFor={id} className="text-[13px] text-asst-muted">
+    <div className={`flex flex-col ${compact ? "gap-1" : "gap-1.5"}`}>
+      <label htmlFor={id} className={compact ? "text-xs font-medium text-asst-muted" : "text-[13px] text-asst-muted"}>
         Case type
       </label>
       <select
         id={id}
-        className={`${FIELD} max-w-md`}
+        className={compact ? `${INPUT} w-full` : `${FIELD} max-w-md`}
         value={current}
         disabled={disabled || list.state === "none" || fetching !== null}
         onFocus={() => (list.state === "idle" ? loadList() : undefined)}
@@ -202,7 +193,9 @@ export function BulkScanCaseTypePicker({
         onChange={(event) => void choose(event.target.value)}
       >
         <option value="">{list.state === "loading" ? "Reading your workspace…" : "No case type"}</option>
-        {current !== "" && !known ? <option value={current}>{current.replace("/", ": ")}</option> : null}
+        {current !== "" && !known ? (
+          <option value={current}>{typedEarlier && fetching === null ? `${current} (typed earlier)` : current.replace("/", ": ")}</option>
+        ) : null}
         {[...types]
           .sort((a, b) => byCode(`${a.service}: ${a.case_type}`, `${b.service}: ${b.case_type}`))
           .map((t) => (

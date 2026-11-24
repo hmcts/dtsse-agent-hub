@@ -23,7 +23,7 @@ async function parseForm(request: NextRequest): Promise<FormData | undefined> {
   return await new Response(body, { headers: { "content-type": request.headers.get("content-type") ?? "" } }).formData().catch(() => undefined);
 }
 
-/** A form PDF, Exela SIP or transformation sheet, uploaded to start a spec, with the CCD case type the person picked (its id, product and fields) or typed (its id alone); one spec is made for each form the file holds. */
+/** A form PDF, Exela SIP or transformation sheet, uploaded to start a spec, with the CCD case type the person picked (its id, product and fields), if any; one spec is made for each form the file holds. */
 export async function POST(request: NextRequest): Promise<Response> {
   const viewer = await uiViewer(request);
   if (viewer instanceof Response) {
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     if (picked instanceof Response) {
       return picked;
     }
-    const imported = await importUpload(name, new Uint8Array(await file.arrayBuffer()), caseType || undefined, picked);
+    const imported = await importUpload(name, new Uint8Array(await file.arrayBuffer()), picked);
     const fallback = name.replace(/\.(pdf|xlsx)$/i, "");
     const ids = await createSpecs(
       prisma,

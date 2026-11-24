@@ -12,7 +12,7 @@ import { labelLine } from "./outline.ts";
  */
 
 /** The form-level values the editor changes. */
-export type HeaderPatch = Partial<Pick<FormSpec["form"], "name" | "formType" | "poBox" | "ccdCaseTypeId">>;
+export type HeaderPatch = Partial<Pick<FormSpec["form"], "name" | "formType" | "poBox">>;
 
 export function patchHeader(spec: FormSpec, patch: HeaderPatch): FormSpec {
   const form = { ...spec.form };
