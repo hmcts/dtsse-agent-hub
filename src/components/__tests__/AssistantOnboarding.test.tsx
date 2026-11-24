@@ -4,7 +4,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CONNECTORS, canSignInAgain, connectionsPrompt, offeredConnections, signsInOnRequest } from "@/assistant/connections";
+import { CONNECTORS, canSignInAgain, connectionsPrompt, NO_CONNECTIONS, offeredConnections, signsInOnRequest } from "@/assistant/connections";
 import { readiness } from "@/assistant/onboarding";
 import type { AssistantSummary } from "@/assistant/views";
 import { GettingReady, OnboardingGate } from "@/components/assistant/GettingReady";
@@ -167,7 +167,10 @@ describe("GettingReady progress", () => {
   it("should say the assistant is unavailable when the page says so", () => {
     render(ready({ unavailable: "Virtual agents are not available here" }));
 
-    expect(screen.getByText("Virtual agents are not available here")).toBeTruthy();
+    expect(screen.getByText("Technical detail: Virtual agents are not available here.")).toBeTruthy();
+    expect(screen.getByText(NO_CONNECTIONS.body)).toBeTruthy();
+    // The screen says it in full, so the shell does not say the short version on top.
+    expect(screen.queryByText(NO_CONNECTIONS.short)).toBeNull();
   });
 });
 
@@ -279,8 +282,9 @@ describe("GettingReady connectors", () => {
     render(ready({ assistant: assistant("running", { logins: [login("github", { state: "failed" })] }) }));
 
     const github = connector("GitHub");
-    expect(within(github).getByText("Last sign-in failed")).toBeTruthy();
-    expect(within(github).getByRole("button", { name: "Sign in again" })).toBeTruthy();
+    expect(within(github).getByText("Sign-in did not work")).toBeTruthy();
+    expect(within(github).getByText("Signing in to GitHub did not work. Get a new code to try again.")).toBeTruthy();
+    expect(within(github).getByRole("button", { name: "Get a new code" })).toBeTruthy();
   });
 
   // A key the person pastes has its own way back, so the row says what became of the sign-in and points at it rather
@@ -459,7 +463,10 @@ describe("GettingReady connectors", () => {
     render(ready({ assistant: summary, statuses: statuses("github") }));
 
     const claude = connector("Claude");
-    expect(within(claude).getByText("Through the HMCTS AI Gateway, on your Azure sign-in")).toBeTruthy();
+    expect(within(claude).getByText("Through the HMCTS AI Gateway, using your Azure sign-in")).toBeTruthy();
+    // Nothing to do on this row, so no Required: the Azure row it rides on carries the mark and the button.
+    expect(within(claude).queryByText("Required")).toBeNull();
+    expect(within(connector("Azure")).getByText("Required")).toBeTruthy();
     expect(within(claude).queryByRole("button")).toBeNull();
     expect(within(claude).queryByRole("form")).toBeNull();
     // What it does ask for: the Azure sign-in the gateway authorises, which is this route's model credential.
@@ -699,8 +706,8 @@ describe("GettingReady when the hub cannot read the credentials", () => {
   it("should say the sign-ins cannot be read, and why, when the credential store cannot be read", () => {
     render(unreadable());
 
-    expect(screen.getByText(/cannot read your sign-ins/)).toBeTruthy();
-    expect(screen.getByText(REASON)).toBeTruthy();
+    expect(screen.getByText(/nowhere to keep sign-ins, so you cannot connect GitHub/)).toBeTruthy();
+    expect(screen.getByText(`Technical detail: ${REASON}.`)).toBeTruthy();
     expect(screen.queryByRole("list", { name: "Connections" })).toBeNull();
   });
 
@@ -775,8 +782,8 @@ describe("OnboardingGate", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.queryByRole("list", { name: "Connections" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Connect accounts" })).toBeNull();
-    const banner = screen.getByRole("region", { name: "Your sign-ins cannot be checked" });
-    expect(banner.textContent).toContain("still connected");
+    const banner = screen.getByRole("region", { name: "Connections are not set up here" });
+    expect(banner.textContent).toContain("nothing can be connected here");
     for (const name of ["GitHub", "Azure", "Claude"]) {
       expect(banner.textContent).not.toContain(name);
     }
@@ -785,10 +792,10 @@ describe("OnboardingGate", () => {
   it("should say why on the screen when someone the hub cannot read the credentials for opens it", () => {
     render(unreadable());
 
-    fireEvent.click(screen.getByRole("button", { name: "Show progress" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show details" }));
 
-    expect(screen.getByText(/cannot read your sign-ins/)).toBeTruthy();
-    expect(screen.getByText(UNREADABLE)).toBeTruthy();
+    expect(screen.getByText(/nowhere to keep sign-ins, so you cannot connect GitHub/)).toBeTruthy();
+    expect(screen.getByText(`Technical detail: ${UNREADABLE}.`)).toBeTruthy();
     expect(screen.queryByRole("list", { name: "Connections" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Carry on" }));
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -796,19 +803,19 @@ describe("OnboardingGate", () => {
 
   // Unlike the ask to connect, this one can be sent away: there is nothing for the person to do about it, so saying
   // it once is enough. The same cookie carries that choice, so a navigation does not say it again.
-  it("should go when the person sends away a message about sign-ins that cannot be checked", () => {
+  it("should go when the person sends away the message that connections are not set up here", () => {
     render(unreadable());
 
     fireEvent.click(screen.getByRole("button", { name: "Hide this message" }));
 
-    expect(screen.queryByRole("region", { name: "Your sign-ins cannot be checked" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Connections are not set up here" })).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("should stay gone across a navigation when the page has read that choice from the cookie", () => {
     render(unreadable(assistant("running"), true));
 
-    expect(screen.queryByRole("region", { name: "Your sign-ins cannot be checked" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Connections are not set up here" })).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
@@ -880,7 +887,7 @@ describe("OnboardingGate", () => {
     });
     render(gate(summary, statuses("github", "azure")));
 
-    expect(screen.getByRole("region", { name: "Sign in" }).textContent).toContain("could not sign in to Azure");
+    expect(screen.getByRole("region", { name: "Sign in" }).textContent).toContain("Signing in to Azure did not finish");
   });
 
   it("should open the connections when the person asks for them from the banner", () => {
@@ -995,7 +1002,7 @@ describe("OnboardingGate", () => {
     it("should ask about a stored sign-in that a later sign-in lapsed over", () => {
       render(gate(running([lapsed("atlassian")]), statuses(...ONBOARDED)));
 
-      expect(screen.getByRole("region", { name: "Sign in" }).textContent).toContain("could not sign in to Atlassian, and is not asking again by itself");
+      expect(screen.getByRole("region", { name: "Sign in" }).textContent).toContain("Signing in to Atlassian did not finish. Get a new code to connect it.");
     });
 
     it("should offer the person a way to have their assistant sign in again when the stored sign-in has lapsed", async () => {
@@ -1049,7 +1056,7 @@ describe("OnboardingGate", () => {
       fireEvent.click(within(connector("Atlassian")).getByRole("button", { name: "Sign in again" }));
 
       const row = connector("Atlassian");
-      expect(row.textContent).toContain("which all your virtual agents use");
+      expect(row.textContent).toContain("This deletes your saved Atlassian sign-in, which all your agents use");
       expect(row.textContent).toContain("Your chats are kept");
       await act(async () => undefined);
       expect(reconnect).not.toHaveBeenCalled();
@@ -1075,10 +1082,11 @@ describe("OnboardingGate", () => {
       render(gate(running([lapsed("atlassian")]), statuses("github", "azure", "claude")));
 
       fireEvent.click(screen.getByRole("button", { name: "Show the sign-in" }));
-      fireEvent.click(within(connector("Atlassian")).getByRole("button", { name: "Sign in again" }));
+      fireEvent.click(within(connector("Atlassian")).getByRole("button", { name: "Get a new code" }));
 
       const row = connector("Atlassian");
       expect(within(row).getByRole("form", { name: "Sign in to Atlassian again" })).toBeTruthy();
+      expect(row.textContent).toContain("The Atlassian sign-in code ran out before it was used.");
       expect(row.textContent).not.toContain("Delete");
       expect(row.textContent).not.toContain("will appear here");
     });
@@ -1226,8 +1234,8 @@ describe("OnboardingGate", () => {
         }
         fireEvent.click(screen.getByRole("button", { name: "Show the sign-in" }));
         // A key the person pastes opens its box on Connect, and a sign-in the assistant makes puts its confirmation
-        // behind "Sign in again"; a relayed code already shows what it has.
-        for (const label of ["Connect", "Sign in again"]) {
+        // behind "Sign in again", or "Get a new code" with nothing saved; a relayed code already shows what it has.
+        for (const label of ["Connect", "Sign in again", "Get a new code"]) {
           const control = within(connector(named(kind))).queryByRole("button", { name: label });
           if (control !== null) {
             fireEvent.click(control);
@@ -1354,7 +1362,7 @@ describe("OnboardingGate holding the person at GitHub and Claude", () => {
     render(held(assistant("running", OWN_LICENCE), [], { unavailable: "this deployment has no credentials vault, so credentials cannot be stored here" }));
 
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(screen.getByRole("region", { name: "Your sign-ins cannot be checked" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Connections are not set up here" })).toBeTruthy();
   });
 
   it("should offer the way to the chats when GitHub and Claude are connected during the visit", () => {
@@ -1636,5 +1644,42 @@ describe("GettingReady guidance", () => {
     const help = document.getElementById(field.getAttribute("aria-describedby") ?? "");
     expect(help?.textContent).toContain("claude setup-token");
     expect(within(help as HTMLElement).queryByRole("link")).toBeNull();
+  });
+});
+
+describe("GettingReady for a person on their own Claude account", () => {
+  it("should mark Claude required and say it is their own account rather than the gateway", () => {
+    render(ready({ assistant: assistant("awaiting_credentials"), statuses: statuses("github") }));
+
+    const claude = connector("Claude");
+    expect(within(claude).getByText("Your own Claude account, rather than the HMCTS AI Gateway")).toBeTruthy();
+    expect(within(claude).getByText("Required")).toBeTruthy();
+    expect(within(connector("GitHub")).getByText("Required")).toBeTruthy();
+  });
+});
+
+describe("GettingReady when the assistant is stopped", () => {
+  // `reconnectSignIn` starts a stopped assistant, so the question offers to start it rather than to wait for a start.
+  it("should offer to start the assistant for a new code when a sign-in ran out and nothing is saved", () => {
+    render(ready({ assistant: assistant("stopped", { desired: "stopped", logins: [lapsed("atlassian")] }), statuses: statuses("github", "claude") }));
+
+    fireEvent.click(within(connector("Atlassian")).getByRole("button", { name: "Get a new code" }));
+
+    expect(screen.getByText("Start your assistant to get a new Atlassian sign-in code?")).toBeTruthy();
+    expect(screen.queryByText(/when it next starts/)).toBeNull();
+  });
+
+  it("should say the saved sign-in goes and the assistant starts when one is saved", () => {
+    render(
+      ready({
+        assistant: assistant("stopped", { desired: "stopped", logins: [lapsed("atlassian")] }),
+        statuses: statuses("github", "claude", "atlassian")
+      })
+    );
+
+    fireEvent.click(within(connector("Atlassian")).getByRole("button", { name: "Sign in again" }));
+
+    expect(screen.getByText(/This deletes your saved Atlassian sign-in, which all your agents use, and starts your assistant to get a new code/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Delete and sign in again" })).toBeTruthy();
   });
 });

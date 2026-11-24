@@ -181,7 +181,7 @@ describe("the Assistant's settings cog", () => {
   it("should warn that GitHub needs attention when it alone is not connected", () => {
     render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN.filter((kind) => kind !== "github"))} />);
 
-    expect(cog().getAttribute("aria-label")).toBe("Settings. GitHub needs your attention");
+    expect(cog().getAttribute("aria-label")).toBe("Settings. GitHub needs you to sign in");
   });
 
   // Azure is in the background, as Jenkins is: never connecting it is a choice, so the cog says nothing about it.
@@ -195,7 +195,7 @@ describe("the Assistant's settings cog", () => {
   it("should name both when GitHub is missing and the optional one has lapsed", () => {
     render(<AssistantSettings now={Date.now()} connections={data(["claude"], [login("atlassian", "expired")])} />);
 
-    expect(cog().getAttribute("aria-label")).toBe("Settings. GitHub and Atlassian need your attention");
+    expect(cog().getAttribute("aria-label")).toBe("Settings. GitHub and Atlassian need you to sign in");
   });
 
   it("should not nag about Atlassian when the person has simply never set it up", () => {
@@ -208,7 +208,7 @@ describe("the Assistant's settings cog", () => {
   it.each(["expired", "failed"] as const)("should warn about Atlassian once its sign-in has %s", (state) => {
     render(<AssistantSettings now={Date.now()} connections={data(["github", "azure", "claude"], [login("atlassian", state)])} />);
 
-    expect(cog().getAttribute("aria-label")).toBe("Settings. Atlassian needs your attention");
+    expect(cog().getAttribute("aria-label")).toBe("Settings. Atlassian needs you to sign in");
   });
 
   it("should open on Connections, with a way to sign in again, when the cog warns that Atlassian has expired", () => {
@@ -229,7 +229,7 @@ describe("the Assistant's settings cog", () => {
   it("should say a sign-in needs attention while a code is waiting behind a working one", () => {
     render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN, [login("github", "pending")])} />);
 
-    expect(cog().getAttribute("aria-label")).toBe("Settings. GitHub needs your attention");
+    expect(cog().getAttribute("aria-label")).toBe("Settings. GitHub needs you to sign in");
     expect(cog().textContent).toBe("!");
   });
 
@@ -239,7 +239,7 @@ describe("the Assistant's settings cog", () => {
     const stale = login("atlassian", "expired", new Date(Date.now() - 600_000).toISOString(), AFTER_STORED);
     render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN, [stale])} />);
 
-    expect(cog().getAttribute("aria-label")).toBe("Settings. Atlassian needs your attention");
+    expect(cog().getAttribute("aria-label")).toBe("Settings. Atlassian needs you to sign in");
     expect(cog().textContent).toBe("!");
   });
 
@@ -254,7 +254,7 @@ describe("the Assistant's settings cog", () => {
     const stale = login(kind, "expired", new Date(Date.now() - 600_000).toISOString(), AFTER_STORED);
     render(<AssistantSettings now={Date.now()} connections={data([...ALL_SIGNED_IN, kind], [stale])} />);
 
-    expect(cog().getAttribute("aria-label")).toBe(`Settings. ${name} needs your attention`);
+    expect(cog().getAttribute("aria-label")).toBe(`Settings. ${name} needs you to sign in`);
   });
 
   // The badge sends the person to the ask above their chats, and `signInPrompt` raises none for a code they have
@@ -295,7 +295,7 @@ describe("the Assistant's settings cog", () => {
 
     const html = renderToString(<AssistantSettings now={built} connections={connections} />);
 
-    expect(html).toContain('aria-label="Settings. GitHub needs your attention"');
+    expect(html).toContain('aria-label="Settings. GitHub needs you to sign in"');
   });
 
   // And the browser's own as it takes over, so a mark the page was built with does not outlast what it was about.
@@ -336,7 +336,7 @@ describe("the Assistant's settings cog", () => {
   it("should warn when a sign-in is still waiting for the person", () => {
     render(<AssistantSettings now={Date.now()} connections={data(["azure", "claude", "atlassian"], [login("github", "pending")])} />);
 
-    expect(cog().getAttribute("aria-label")).toBe("Settings. GitHub needs your attention");
+    expect(cog().getAttribute("aria-label")).toBe("Settings. GitHub needs you to sign in");
   });
 
   it("should not warn when only model access and a Jenkins token are missing", () => {
@@ -560,8 +560,8 @@ describe("the Assistant's settings dialog", () => {
     expect(rows.map((row) => row.textContent)).toEqual([
       "GGitHubalice@hmcts.netConnected",
       "AzAzureYour HMCTS account, for pipelines and environments (optional)Waiting for you",
-      "CClaudeYour Claude licenceConnected",
-      "JJenkinsBuilds and pipelines on Jenkins (optional)Last sign-in failed",
+      "CClaudeYour own Claude account, rather than the HMCTS AI GatewayConnected",
+      "JJenkinsBuilds and pipelines on Jenkins (optional)Sign-in did not work",
       "AAtlassianJira tickets and Confluence pages (optional)Sign-in expired",
       MICROSOFT_ROW
     ]);
@@ -593,8 +593,8 @@ describe("the Assistant's settings dialog", () => {
     fireEvent.click(cog());
     go("Connections");
 
-    expect(screen.getByText("the credentials Key Vault is not configured")).toBeTruthy();
-    expect(screen.queryByText(/Your credentials cannot be shown/)).toBeNull();
+    expect(screen.getByText("Technical detail: the credentials Key Vault is not configured.")).toBeTruthy();
+    expect(screen.getAllByText("Connections are not set up here")).toHaveLength(1);
     expect(screen.queryByRole("list", { name: "Connections" })).toBeNull();
   });
 
@@ -611,14 +611,16 @@ describe("the Assistant's settings dialog", () => {
     open({ connections: data(["azure", "claude", "atlassian"]) }, "Connections");
     const dialog = screen.getByRole("dialog");
 
-    expect(within(dialog).getByText("GitHub needs your attention")).toBeTruthy();
-    expect(within(dialog).getByText(/You can carry on chatting/)).toBeTruthy();
+    expect(within(dialog).getByText("GitHub needs you to sign in")).toBeTruthy();
+    // It points at the rows below it, which carry the buttons, rather than away from the dialog.
+    expect(within(dialog).getByText(/Use the button on each one below\. You can keep chatting while you do\./)).toBeTruthy();
+    expect(within(dialog).queryByText(/Close this/)).toBeNull();
   });
 
   it("should show no warning inside the dialog when every sign-in it prompts about is connected", () => {
     open({}, "Connections");
 
-    expect(screen.queryByText(/needs your attention/)).toBeNull();
+    expect(screen.queryByText(/needs you to sign in/)).toBeNull();
   });
 });
 
@@ -687,8 +689,8 @@ describe("how the Assistant's settings say its agents reach Claude", () => {
 
     expect(connectionRows()).toEqual([
       "GGitHubRead repositories and open pull requestsConnected",
-      "CClaudeThrough the HMCTS AI Gateway, on your Azure sign-inConnected",
-      "AzAzureYour HMCTS account, which your agents reach Claude on, as well as your pipelines and environmentsConnected",
+      "CClaudeThrough the HMCTS AI Gateway, using your Azure sign-inConnected",
+      "AzAzureYour HMCTS account. Your assistant uses it to reach Claude, and for pipelines and environmentsConnected",
       "JJenkinsBuilds and pipelines on Jenkins (optional)Not connected",
       "AAtlassianJira tickets and Confluence pages (optional)Not connected",
       MICROSOFT_ROW
@@ -700,13 +702,13 @@ describe("how the Assistant's settings say its agents reach Claude", () => {
   it("should say Claude is the person's own licence, on the one row their token is, when that is what their agents use", () => {
     open({ connections: routeData("own-licence", ALL_SIGNED_IN) }, "Connections");
 
-    expect(connectionRows().filter((row) => row.includes("Claude"))).toEqual(["CClaudeYour Claude licenceConnected"]);
+    expect(connectionRows().filter((row) => row.includes("Claude"))).toEqual(["CClaudeYour own Claude account, rather than the HMCTS AI GatewayConnected"]);
     expect(connectionRows().findIndex((row) => row.includes("Claude"))).toBe(1);
   });
 
   it.each([
     ["waiting for the person", "pending", "Waiting for you"],
-    ["lapsed", "failed", "Last sign-in failed"]
+    ["lapsed", "failed", "Sign-in did not work"]
   ] as const)("should say Claude's access is %s when the Azure sign-in behind it is", (_what, state, detail) => {
     open({ connections: routeData("gateway", ["github"], [login("azure", state)]) }, "Connections");
 
@@ -725,7 +727,7 @@ describe("how the Assistant's settings say its agents reach Claude", () => {
   it("should say Azure needs attention, and never Claude as well, when the sign-in behind both is waiting", () => {
     render(<AssistantSettings now={Date.now()} connections={routeData("gateway", ["github"], [login("azure", "pending")])} />);
 
-    expect(cog().getAttribute("aria-label")).toBe("Settings. Azure needs your attention");
+    expect(cog().getAttribute("aria-label")).toBe("Settings. Azure needs you to sign in");
   });
 
   /**
@@ -736,7 +738,7 @@ describe("how the Assistant's settings say its agents reach Claude", () => {
     const over = login("azure", "failed", new Date(Date.now() - 600_000).toISOString(), AFTER_STORED);
     render(<AssistantSettings now={Date.now()} connections={routeData("gateway", ["github", "azure"], [over])} />);
 
-    expect(cog().getAttribute("aria-label")).toBe("Settings. Azure needs your attention");
+    expect(cog().getAttribute("aria-label")).toBe("Settings. Azure needs you to sign in");
     expect(cog().textContent).toBe("!");
   });
 
@@ -754,21 +756,22 @@ describe("signing in to GitHub again from the Assistant's settings", () => {
     return connectionRow("GitHub");
   }
 
-  // A token granted before the hub asked for `project` works for everything else, so this is the only way to it.
-  it("should offer to sign in to GitHub again while it is connected", () => {
+  // The Project search offers the sign-in a token from before the `project` scope needs, where that is missed.
+  it("should offer nothing to press on GitHub while it is connected", () => {
     open({ connections: data(ALL_SIGNED_IN), connect: connectWith() }, "Connections");
 
-    expect(within(githubRow()).getByRole("button", { name: "Connect GitHub" }).textContent).toBe("Sign in again");
+    expect(within(githubRow()).queryByRole("button", { name: "Connect GitHub" })).toBeNull();
   });
 
-  it("should delete the saved GitHub token and restart the assistant when the person confirms", async () => {
+  it("should delete the saved GitHub token and restart the assistant when the person confirms signing in again after it lapsed", async () => {
     const reconnect = ok();
-    open({ connections: data(ALL_SIGNED_IN), connect: connectWith({ reconnect }) }, "Connections");
+    const lapsed = [login("github", "failed", new Date(Date.now() - 600_000).toISOString(), new Date().toISOString())];
+    open({ connections: data(ALL_SIGNED_IN, lapsed), connect: connectWith({ reconnect }) }, "Connections");
 
     fireEvent.click(within(githubRow()).getByRole("button", { name: "Connect GitHub" }));
     expect(
       screen.getByText(
-        "Delete your saved GitHub sign-in, which all your virtual agents use, and restart your assistant so it asks you to sign in again? Your chats are kept."
+        "Sign in to GitHub again? This deletes your saved GitHub sign-in, which all your agents use, and restarts your assistant to get a new code. Your chats are kept."
       )
     ).toBeTruthy();
     await act(async () => {
@@ -808,7 +811,7 @@ describe("connecting Azure from the Assistant's settings", () => {
     open({ connections: data(["github", "claude"]), connect: connectWith({ reconnect }) }, "Connections");
 
     fireEvent.click(within(azureRow()).getByRole("button", { name: "Connect Azure" }));
-    expect(screen.getByText("Restart your assistant so it asks you to sign in to Azure? Your chats are kept.")).toBeTruthy();
+    expect(screen.getByText("Restart your assistant to get a sign-in code for Azure? Anything it is working on stops, but your chats are kept.")).toBeTruthy();
     await act(async () => {
       fireEvent.submit(within(azureRow()).getByRole("form", { name: "Connect Azure" }));
     });
@@ -830,12 +833,12 @@ describe("connecting Azure from the Assistant's settings", () => {
     expect(screen.getByText("Your assistant is restarting to sign in to Azure")).toBeTruthy();
   });
 
-  it("should say the sign-in is asked for at the next start when the assistant is stopped", () => {
+  it("should offer to start the assistant for the sign-in when it is stopped", () => {
     open({ connections: data(["github", "claude"]), connect: connectWith({ running: false }) }, "Connections");
 
     fireEvent.click(within(azureRow()).getByRole("button", { name: "Connect Azure" }));
 
-    expect(screen.getByText("Have your assistant ask you to sign in to Azure? It is stopped, so it asks when it next starts.")).toBeTruthy();
+    expect(screen.getByText("Start your assistant to get a sign-in code for Azure?")).toBeTruthy();
   });
 
   it("should put the question away again when the person cancels", () => {
@@ -859,8 +862,24 @@ describe("connecting Azure from the Assistant's settings", () => {
 
     fireEvent.click(within(azureRow()).getByRole("button", { name: "Connect Azure" }));
 
-    expect(screen.getByText(/^Delete your saved Azure sign-in, which all your virtual agents use, and restart your assistant/)).toBeTruthy();
-    expect(within(azureRow()).getByRole("button", { name: "Sign in to Azure" })).toBeTruthy();
+    expect(
+      screen.getByText(/^Sign in to Azure again\? This deletes your saved Azure sign-in, which all your agents use, and restarts your assistant/)
+    ).toBeTruthy();
+    expect(within(azureRow()).getByRole("button", { name: "Delete and sign in again" })).toBeTruthy();
+  });
+
+  it("should say the saved sign-in goes and the assistant starts when a stored Azure sign-in has lapsed and it is stopped", () => {
+    open(
+      {
+        connections: data(["github", "claude", "azure"], [login("azure", "failed", new Date(Date.now() - 600_000).toISOString(), new Date().toISOString())]),
+        connect: connectWith({ running: false })
+      },
+      "Connections"
+    );
+
+    fireEvent.click(within(azureRow()).getByRole("button", { name: "Connect Azure" }));
+
+    expect(screen.getByText(/which all your agents use, and starts your assistant to get a new code/)).toBeTruthy();
   });
 
   it("should offer no connect when Azure is connected", () => {
@@ -880,11 +899,11 @@ describe("connecting Azure from the Assistant's settings", () => {
     ).toEqual(["Copy the Azure code"]);
   });
 
-  it("should offer a connect for nothing but GitHub, Azure and Microsoft 365 when GitHub is connected", () => {
+  it("should offer a connect for nothing but Azure and Microsoft 365 when GitHub is connected", () => {
     open({ connections: data(["github"]), connect: connectWith() }, "Connections");
 
     const buttons = within(screen.getByRole("list", { name: "Connections" })).getAllByRole("button");
-    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual(["Connect GitHub", "Connect Azure", "Connect Microsoft 365"]);
+    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual(["Connect Azure", "Connect Microsoft 365"]);
   });
 
   it("should only say where Azure stands when the page gives no way to connect it", () => {
@@ -2591,7 +2610,7 @@ describe("the Assistant's size", () => {
   it("should carry its warning on the one settings cog, naming both reasons when a sign-in needs attention too", () => {
     render(<AssistantSettings now={Date.now()} connections={data(["azure", "claude", "atlassian"])} size={size({ use: use(0) })} />);
 
-    expect(cog().getAttribute("aria-label")).toBe("Settings. GitHub needs your attention. Your assistant is low on memory");
+    expect(cog().getAttribute("aria-label")).toBe("Settings. GitHub needs you to sign in. Your assistant is low on memory");
     expect(cog().textContent).toBe("!");
   });
 

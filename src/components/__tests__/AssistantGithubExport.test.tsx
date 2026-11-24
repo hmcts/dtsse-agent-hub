@@ -412,3 +412,51 @@ describe("openingDestination with GitHub", () => {
     expect(openingDestination({ status: "pending", repo: "hmcts/x", project: null, requestedAt: "2026-11-02T10:00:00.000Z" }, none, "github")).toBe("github");
   });
 });
+
+// A token from before the `project` scope was asked for is the one thing a connected GitHub cannot do, so the search
+// is where signing in again is offered, with what it costs said first.
+describe("the GitHub Project search when GitHub wants a new sign-in", () => {
+  const WHY = "Your GitHub sign-in is from before your assistant needed access to GitHub Projects. Sign in to GitHub again to give it that access.";
+
+  function refusing(): ReturnType<typeof vi.fn<LookUp>> {
+    return vi.fn<LookUp>(async (request) => (request.signIn === true ? { status: "signing_in" } : { status: "signed_out", detail: WHY }));
+  }
+
+  it("should say why, say the assistant restarts, and offer to sign in to GitHub again", async () => {
+    vi.useFakeTimers();
+    render(panel({ lookUp: refusing(), defaultRepo: "hmcts/cft-workspace" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose a GitHub Project to add the issue to" }));
+    await search("Search hmcts's GitHub Projects", "roadmap");
+
+    expect(screen.getByText(WHY)).toBeTruthy();
+    expect(screen.getByText("This restarts your assistant. Anything it is working on stops, but your chats are kept.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Sign in to GitHub again" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Sign in to Atlassian" })).toBeNull();
+  });
+
+  it("should ask for the GitHub sign-in and say where its code will appear when the person presses it", async () => {
+    vi.useFakeTimers();
+    const lookUp = refusing();
+    render(panel({ lookUp, defaultRepo: "hmcts/cft-workspace" }));
+    fireEvent.click(screen.getByRole("button", { name: "Choose a GitHub Project to add the issue to" }));
+    await search("Search hmcts's GitHub Projects", "roadmap");
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Sign in to GitHub again" }));
+    });
+
+    expect(lookUp).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "github_project", signIn: true }), expect.any(AbortSignal));
+    expect(screen.getByText(/restarting to sign in to GitHub\. A sign-in code appears above your chats/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Sign in to GitHub again" })).toBeNull();
+  });
+
+  it("should give a general reason when the pod gives none", async () => {
+    vi.useFakeTimers();
+    render(panel({ lookUp: vi.fn<LookUp>(async () => ({ status: "signed_out" })), defaultRepo: "hmcts/cft-workspace" }));
+    fireEvent.click(screen.getByRole("button", { name: "Choose a GitHub Project to add the issue to" }));
+    await search("Search hmcts's GitHub Projects", "roadmap");
+
+    expect(screen.getByText("Your GitHub sign-in cannot do this search. Sign in to GitHub again to fix it.")).toBeTruthy();
+  });
+});

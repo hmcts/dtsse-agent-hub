@@ -4,7 +4,16 @@ import { useSearchParams } from "next/navigation";
 import { useId, useState } from "react";
 import { type ConnectionRow, connectionRows } from "@/assistant/connection-rows";
 import type { Connection, ConnectionState, MicrosoftConnection, ModelAccess } from "@/assistant/connections";
-import { awaitsGithub, checklistState, codeCollectable, connectorFor, GITHUB_FIRST, isConnection, offersConnect } from "@/assistant/connections";
+import {
+  awaitsGithub,
+  checklistState,
+  codeCollectable,
+  connectorFor,
+  GITHUB_FIRST,
+  isConnection,
+  NO_CONNECTIONS,
+  offersConnect
+} from "@/assistant/connections";
 import type { SavedCredential } from "@/assistant/saved-credentials";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
 import { PasteHelp } from "@/components/assistant/PasteHelp";
@@ -21,7 +30,7 @@ import type { LoginView } from "@/virtual-agents/logins";
  */
 export interface AssistantConnect {
   assistantId: string;
-  /** Whether it is meant to be running, which is whether connecting restarts it now or asks when it next starts. */
+  /** Whether it is meant to be running, which is whether connecting restarts it or starts it. */
   running: boolean;
   reconnect: FormAction;
   paste: FormAction;
@@ -79,20 +88,21 @@ const FIELD =
 /** Where a row's question or field opens: under the row, the full width of it. */
 const BELOW = "flex basis-full flex-col gap-2 pt-1";
 
-/** What connecting asks first and what its button says, by whether a saved sign-in goes and whether it restarts. */
+/**
+ * What connecting asks first and what its button says, by whether a saved sign-in goes and whether the assistant is
+ * running. `reconnectSignIn` starts a stopped one, so the code comes now either way.
+ */
 function connectWords(name: string, stored: boolean, running: boolean): { question: string; confirm: string } {
   if (stored) {
     return {
-      question: running
-        ? `Delete your saved ${name} sign-in, which all your virtual agents use, and restart your assistant so it asks you to sign in again? Your chats are kept.`
-        : `Delete your saved ${name} sign-in, which all your virtual agents use? Your assistant is stopped, so it asks you to sign in when it next starts.`,
-      confirm: `Sign in to ${name}`
+      question: `Sign in to ${name} again? This deletes your saved ${name} sign-in, which all your agents use, and ${running ? "restarts" : "starts"} your assistant to get a new code. Your chats are kept.`,
+      confirm: "Delete and sign in again"
     };
   }
   return {
     question: running
-      ? `Restart your assistant so it asks you to sign in to ${name}? Your chats are kept.`
-      : `Have your assistant ask you to sign in to ${name}? It is stopped, so it asks when it next starts.`,
+      ? `Restart your assistant to get a sign-in code for ${name}? Anything it is working on stops, but your chats are kept.`
+      : `Start your assistant to get a sign-in code for ${name}?`,
     confirm: `Connect ${name}`
   };
 }
@@ -398,6 +408,7 @@ export function Connections({ view }: { view: ConnectionsView }) {
   // Said by the section rather than the row: a removed credential that cannot be pasted has no row once it is gone.
   const [said, setSaid] = useState<string | null>(null);
   const rows = connectionRows(view.list, view.access, view.tokens?.rows ?? [], view.microsoft, view.route);
+  const unavailable = [...new Set([view.unavailable, view.tokens?.unavailable ?? null].filter((reason): reason is string => reason !== null))];
   return (
     <section aria-labelledby="assistant-settings-connections" className="flex flex-col gap-2.5">
       <h3 id="assistant-settings-connections" className="text-sm font-semibold">
@@ -411,20 +422,30 @@ export function Connections({ view }: { view: ConnectionsView }) {
         <div className="flex flex-col gap-1 rounded-[10px] border border-asst-warn bg-asst-raised px-3.5 py-3">
           <p className="text-[13px] font-semibold text-asst-text">{view.warning}</p>
           {/*
-           * The list says where each sign-in stands and nothing more, so this says where to go and not what will
-           * be there. What is above the chats is whichever ask applies — the accounts to connect on a first visit, a
-           * code to type, or a lapsed sign-in to ask for again — and promising one of the three would be wrong for
-           * the other two.
+           * Every row the warning names carries its own way forward — the code to type, Connect, or Get a new code —
+           * so this points at the rows rather than away from the dialog.
            */}
           <p className="text-pretty text-[13px] text-asst-body">
-            Your assistant cannot use these until you have signed in. Close this and the message above your chats takes you to them. You can carry on chatting
-            either way.
+            Your assistant cannot use these until you sign in. Use the button on each one below. You can keep chatting while you do.
           </p>
         </div>
       )}
-      {/* Two reads that fail apart: the sign-ins the assistant asks for, and the credentials saved for the person. */}
-      {view.unavailable === null ? null : <p className="text-[13px] text-asst-error">{view.unavailable}</p>}
-      {view.tokens?.unavailable == null ? null : <p className="text-[13px] text-asst-error">Your credentials cannot be shown: {view.tokens.unavailable}</p>}
+      {/*
+       * Two reads that fail apart, the sign-ins the assistant asks for and the credentials saved for the person, but
+       * from the one backend, so one explanation: the reason each gives is a detail for whoever runs this copy, and
+       * the same reason twice is said once.
+       */}
+      {unavailable.length === 0 ? null : (
+        <div role="alert" className="flex flex-col gap-1 rounded-[10px] border border-asst-warn bg-asst-raised px-3.5 py-3">
+          <p className="text-[13px] font-semibold text-asst-text">{NO_CONNECTIONS.title}</p>
+          <p className="text-pretty text-[13px] text-asst-body">{NO_CONNECTIONS.body}</p>
+          {unavailable.map((reason) => (
+            <p key={reason} className="text-pretty text-xs text-asst-faint">
+              {NO_CONNECTIONS.detail(reason)}
+            </p>
+          ))}
+        </div>
+      )}
       {said === null ? null : (
         <p role="status" className="text-[13px] text-asst-ok">
           {said}

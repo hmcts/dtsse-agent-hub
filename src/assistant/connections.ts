@@ -92,7 +92,7 @@ export const CONNECTORS = {
   claude: {
     name: "Claude",
     initial: "C",
-    desc: "Your Claude licence",
+    desc: "Your own Claude account, rather than the HMCTS AI Gateway",
     paste: "Claude token",
     relays: true,
     help: { text: "On a computer with Claude Code, run claude setup-token in a terminal, sign in, and paste the token it prints.", link: null }
@@ -125,7 +125,7 @@ export function isConnection(kind: CredentialKind): kind is ConnectionKind {
  * build, and the `own-licence` wording is `CONNECTORS`'s own rather than a second copy of it.
  */
 const AZURE_DESC: Readonly<Record<ModelRoute, string>> = {
-  gateway: "Your HMCTS account, which your agents reach Claude on, as well as your pipelines and environments",
+  gateway: "Your HMCTS account. Your assistant uses it to reach Claude, and for pipelines and environments",
   "own-licence": CONNECTORS.azure.desc
 };
 
@@ -167,7 +167,7 @@ export const CONNECTION_DETAILS: Record<ConnectionState, string> = {
   refreshing: "Waiting for you to sign in again",
   "signing-in": "Waiting for you",
   expired: "Sign-in expired",
-  failed: "Last sign-in failed",
+  failed: "Sign-in did not work",
   waiting: "Not connected"
 };
 
@@ -208,6 +208,20 @@ export function hasLapsed(state: ConnectionState): boolean {
 
 export function needsPerson(state: ConnectionState): boolean {
   return MEANING[state].needsPerson;
+}
+
+/**
+ * What became of a lapsed sign-in, in words for someone who has never met a sign-in code: what happened, then what
+ * to press. A stored value that has stopped working is told apart from a code that ran out or was refused, because
+ * getting past the first means deleting what is saved.
+ */
+export function lapsedWords(name: string, stored: boolean, state: ConnectionState): string {
+  if (stored) {
+    return `Your saved ${name} sign-in has stopped working. Sign in again to reconnect ${name}.`;
+  }
+  return state === "failed"
+    ? `Signing in to ${name} did not work. Get a new code to try again.`
+    : `The ${name} sign-in code ran out before it was used. Get a new code to try again.`;
 }
 
 /**
@@ -386,7 +400,7 @@ export interface ModelAccess {
 const MODEL_ACCESS: Readonly<Record<ModelRoute, { behind: ConnectionKind; row: Omit<ModelAccess, "state" | "detail"> } | null>> = {
   gateway: {
     behind: "azure",
-    row: { name: CONNECTORS.claude.name, initial: CONNECTORS.claude.initial, desc: "Through the HMCTS AI Gateway, on your Azure sign-in" }
+    row: { name: CONNECTORS.claude.name, initial: CONNECTORS.claude.initial, desc: "Through the HMCTS AI Gateway, using your Azure sign-in" }
   },
   "own-licence": null
 };
@@ -528,13 +542,13 @@ function asksAbout(row: Pick<Connection, "kind" | "state" | "modelCredential">):
  * waiting on a code already. The connect restarts the assistant so its pod relays the sign-in, and a code that is live
  * is already the thing to do.
  *
- * GitHub is offered while connected as well. A token granted before the hub asked for a scope it now needs — `project`,
- * for the Project search — works for everything else, so nothing ever marks it lapsed, and signing in again is the only
- * way to the new scope. The confirmation says the saved token goes, and `reconnectSignIn` deletes it before the restart.
+ * A connected GitHub is not offered one, even though a token granted before the hub asked for the `project` scope
+ * works for everything but the Project search: a "Sign in again" beside "Connected" reads as something wrong for
+ * everyone else. The Project search offers it instead, at the one place that scope is missed (see `lookups`).
  */
 export function offersConnect(row: Pick<Connection, "kind" | "state">): boolean {
   if (row.kind === "github") {
-    return row.state === "connected" || row.state === "waiting" || hasLapsed(row.state);
+    return row.state === "waiting" || hasLapsed(row.state);
   }
   if (!restartsToSignIn(row.kind)) {
     return false;
@@ -674,6 +688,21 @@ export interface ConnectionsPrompt {
 }
 
 /**
+ * What every surface says when `credentialBackend` answers unavailable: a deployment that keeps no credentials at all
+ * — a preview, sign-in turned off, a vault setting that is wrong — rather than a passing fault. So it says that nothing
+ * can be connected, that this is not the person's accounts, and who can do something about it. The backend's own
+ * reason is for whoever runs the deployment, and is shown beside this as a detail rather than as the message.
+ */
+export const NO_CONNECTIONS = {
+  title: "Connections are not set up here",
+  short: "This copy of CFT Workspace has nowhere to keep sign-ins, so nothing can be connected here.",
+  body:
+    "This copy of CFT Workspace has nowhere to keep sign-ins, so you cannot connect GitHub, Azure, Claude or anything else here, and your assistant cannot use them. " +
+    "This is how this copy is set up, not a problem with your accounts. If you expected to connect here, tell the people who run it.",
+  detail: (reason: string) => `Technical detail: ${reason}.`
+} as const;
+
+/**
  * What the Assistant's connections banner says, or `null` when it has nothing to say. Which of the three it is is
  * `connectionsAsk`'s answer, from every credential the hub holds; this only words it, from the statuses the
  * connections screen was given.
@@ -683,21 +712,16 @@ export interface ConnectionsPrompt {
  * row still reads as something rather than disappearing from the ask. And when there is nothing to name it asks in
  * general rather than going quiet.
  *
- * An `unknown` is the opposite message, and the one thing it must never read as is the first: nothing is missing as
- * far as anybody knows, the hub simply cannot see the sign-ins, and there is nothing for the person to do. Telling
- * someone who has connected everything to connect it again is the mistake these two wordings exist to keep apart.
+ * An `unknown` is the opposite message, and the one thing it must never read as is the first: `credentialBackend`
+ * answers unavailable only for a deployment that keeps no credentials at all, so there is nothing the person could
+ * connect and nothing for them to do but tell whoever runs it. `NO_CONNECTIONS` is that, in their words.
  */
 export function connectionsPrompt(ask: ConnectionsAsk, needed: readonly CredentialKind[], stored: ReadonlySet<CredentialKind>): ConnectionsPrompt | null {
   if (ask === "done") {
     return null;
   }
   if (ask === "unknown") {
-    return {
-      label: "Your sign-ins cannot be checked",
-      message:
-        "Your sign-ins cannot be checked just now. Whatever you have already connected is still connected, and there is nothing for you to set up again.",
-      action: "Show progress"
-    };
+    return { label: NO_CONNECTIONS.title, message: NO_CONNECTIONS.short, action: "Show details" };
   }
   const names = needed.filter((kind) => !stored.has(kind)).map((kind) => CONNECTORS[kind]?.name ?? kind);
   return {
@@ -740,7 +764,7 @@ export function connectionsWarning(list: readonly Connection[]): string | null {
   if (names.length === 0) {
     return null;
   }
-  return `${inWords(names)} ${names.length === 1 ? "needs" : "need"} your attention`;
+  return `${inWords(names)} ${names.length === 1 ? "needs" : "need"} you to sign in`;
 }
 
 /**
@@ -769,7 +793,7 @@ export function signInPrompt(list: readonly Connection[]): ConnectionsPrompt | n
     label: "Sign in",
     message: asking.some((row) => !hasLapsed(row.state))
       ? `Your assistant is waiting for you to sign in to ${names}.`
-      : `Your assistant could not sign in to ${names}, and is not asking again by itself.`,
+      : `Signing in to ${names} did not finish. Get a new code to connect ${asking.length === 1 ? "it" : "them"}.`,
     action: "Show the sign-in"
   };
 }
