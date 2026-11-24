@@ -1348,14 +1348,15 @@ model FeedbackRefinement {
   projectId      String   @map("project_id") @db.Uuid
   /// Null once the conversation is deleted; its Jira keys stay, so the threads still show them.
   conversationId String?  @unique @map("conversation_id") @db.Uuid
-  ownerOid       String   @map("owner_oid")
+  /// Null once the person who started it is deleted; its Jira keys stay.
+  ownerOid       String?  @map("owner_oid")
   /// The keys of the Jira issues exported from the conversation, oldest first.
   jiraKeys       String[] @default([]) @map("jira_keys")
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   project      FeedbackProject            @relation(fields: [projectId], references: [id], onDelete: Cascade)
   conversation AssistantConversation?     @relation(fields: [conversationId], references: [id], onDelete: SetNull)
-  owner        User                       @relation(fields: [ownerOid], references: [oid], onDelete: Cascade)
+  owner        User?                      @relation(fields: [ownerOid], references: [oid], onDelete: SetNull)
   threads      FeedbackRefinementThread[]
 
   @@index([projectId], map: "feedback_refinement_project_idx")

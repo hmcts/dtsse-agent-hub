@@ -329,6 +329,17 @@ describe("CommentsView's choosing, themes and refining", () => {
     expect(screen.queryByRole("region", { name: "Chosen comments" })).toBeNull();
   });
 
+  it("should say how many were resolved before one failed", async () => {
+    const status = vi.fn(async (id: string) => (id === "b" ? "that project is archived" : null));
+    render(<CommentsView projectId="p1" threads={threads()} links={project().links} people={[ANN, BEN]} handlers={choosing({ status })} initialMode="list" />);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Choose the comment by Ann Reviewer: Comment a/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Choose the comment by Ben Reviewer/ }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Resolve" })));
+
+    expect(screen.getByRole("alert").textContent).toMatch(/^that project is archived \((1 of 2 were resolved first)\)$/);
+  });
+
   it("should offer Reopen once every chosen comment is resolved, and reopen them", async () => {
     const chosen = choosing();
     render(<CommentsView projectId="p1" threads={threads()} links={project().links} people={[ANN, BEN]} handlers={chosen} initialMode="list" />);

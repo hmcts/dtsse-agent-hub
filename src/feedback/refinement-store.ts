@@ -81,10 +81,15 @@ export async function recordRefinement(
  * own transaction.
  */
 export async function recordRefinementJira(db: Database, conversationId: string, key: string): Promise<void> {
-  const refinement = await db.feedbackRefinement.findUnique({ where: { conversationId }, select: { id: true, projectId: true, jiraKeys: true } });
-  if (refinement === null || refinement.jiraKeys.includes(key)) {
-    return;
+  // One statement, so two exports finishing together cannot both find the key missing and both add it.
+  const added = await db.$queryRaw<{ project_id: string }[]>`
+    UPDATE "feedback_refinement"
+       SET "jira_keys" = array_append("jira_keys", ${key})
+     WHERE "conversation_id" = ${conversationId}::uuid
+       AND NOT (${key} = ANY ("jira_keys"))
+ RETURNING "project_id"
+  `;
+  for (const row of added) {
+    await notify(db, { type: "feedback", project_id: row.project_id, link_id: null });
   }
-  await db.feedbackRefinement.update({ where: { id: refinement.id }, data: { jiraKeys: { push: key } } });
-  await notify(db, { type: "feedback", project_id: refinement.projectId, link_id: null });
 }

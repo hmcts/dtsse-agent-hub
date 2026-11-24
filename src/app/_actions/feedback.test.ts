@@ -260,6 +260,7 @@ describe("refineFeedback", () => {
     expect(request.body).not.toContain("about t3");
     expect(request.body).not.toContain("Version 1");
     expect(refinements.recordRefinement).toHaveBeenCalledWith({}, "alice-oid", "p1", "conv-1", ["t1", "t2"]);
+    expect(Object.keys(startConversation.mock.calls[0]?.[0] as object).sort()).toEqual(["body", "product", "title"]);
   });
 
   it("should name each comment's link when the project has more than one", async () => {

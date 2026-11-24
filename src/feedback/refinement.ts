@@ -119,7 +119,7 @@ export function refinementRequest(input: {
   /** A link's label, for a project with more than one link; null leaves links unnamed. */
   linkLabel: ((linkId: string) => string) | null;
   now: Date;
-}): { product: string; title: string; body: string } {
+}): { product: string; title: string; body: string; threadIds: string[] } {
   const ordered = refinementOrder(input.threads).slice(0, MAX_REFINE_THREADS);
   // The opening says how many comments follow, which is only known once they are fitted in: room is kept for the
   // longest it could be.
@@ -127,7 +127,7 @@ export function refinementRequest(input: {
   const sections: string[] = [];
   let used = room;
   let theme: string | undefined;
-  let included = 0;
+  const included: string[] = [];
   for (const [index, thread] of ordered.entries()) {
     const heading = (thread.theme ?? NO_THEME) === theme ? "" : `\n\nTheme: ${thread.theme ?? NO_THEME}`;
     const block = `${heading}\n${threadBlock(thread, index + 1, input.linkLabel === null ? null : input.linkLabel(thread.linkId))}`;
@@ -138,14 +138,16 @@ export function refinementRequest(input: {
     sections.push(block);
     used += block.length;
     theme = thread.theme ?? NO_THEME;
-    included += 1;
+    included.push(thread.id);
   }
-  const left = ordered.length - included;
+  const left = ordered.length - included.length;
   const note =
     left === 0 ? "" : `\n\n(${left === 1 ? "1 more comment was" : `${left} more comments were`} left out to keep this message short enough to send.)`;
   return {
     product: DEFAULT_PRODUCT,
     title: `Refine feedback: ${input.projectName}, ${ukLongDate(input.now)}`,
-    body: `${opening(input.projectName, included, input.mode)}${sections.join("")}${note}`
+    body: `${opening(input.projectName, included.length, input.mode)}${sections.join("")}${note}`,
+    // The threads the message lists, which alone are refined in the conversation it starts.
+    threadIds: included
   };
 }

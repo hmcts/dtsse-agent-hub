@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { canSeeFeedbackTeamNotes } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import { isUuid } from "../agents/ids.ts";
 import { notify } from "../realtime/notify.ts";
@@ -118,7 +119,7 @@ function commentView(row: CommentRow): FeedbackCommentView {
 function threadView(row: ThreadRow, viewerOid: string, scope: Pick<ResolvedScope, "access">): FeedbackThreadView {
   const { refinements, ...rest } = row;
   const done = refinements.map((link) => link.refinement);
-  const team = scope.access === "team";
+  const team = canSeeFeedbackTeamNotes(scope.access);
   return {
     ...rest,
     theme: team ? row.theme : null,

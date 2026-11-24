@@ -161,6 +161,21 @@ describe("recordRefinement and the Jira export", () => {
     expect((await listThreads(prisma, BOB.oid, { projectId: made.id }))[0]).toMatchObject({ jiraKeys: ["PCS-7"], refinedIn: null });
   });
 
+  it("should keep a refinement's Jira issues on its threads after the person who started it is deleted", async () => {
+    const { made, first } = await setUp();
+    const { conversation, exportId } = await exportingConversation(BOB.oid);
+    await recordRefinement(prisma, BOB.oid, made.id, conversation.id, [first]);
+    await recordJiraExport(prisma, conversation, { export_id: exportId, key: "PCS-8" });
+
+    // Bob leaves: his chat and assistant go with him, then his membership and his user row.
+    await prisma.assistantConversation.deleteMany({ where: { ownerOid: BOB.oid } });
+    await prisma.virtualAgent.deleteMany({ where: { ownerOid: BOB.oid } });
+    await prisma.feedbackMember.deleteMany({ where: { memberOid: BOB.oid } });
+    await prisma.user.delete({ where: { oid: BOB.oid } });
+
+    expect((await listThreads(prisma, ALICE.oid, { projectId: made.id }))[0]?.jiraKeys).toEqual(["PCS-8"]);
+  });
+
   it("should leave a failed export, and a conversation that refines nothing, without issues on any thread", async () => {
     const { made, first } = await setUp();
     const refining = await exportingConversation(ALICE.oid);

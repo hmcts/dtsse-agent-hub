@@ -32,6 +32,7 @@ import {
   canRemoveUploadFromDisk,
   canRequestPodJob,
   canSeeFeedbackRecording,
+  canSeeFeedbackTeamNotes,
   canSessionUseAttachment,
   canShareConversationWith,
   canSuggestPerson,
@@ -1135,6 +1136,17 @@ describe("prototype feedback", () => {
 
     it("should refuse the author when the link gives no access", () => {
       expect(canRecordFeedback("none", ELSEWHERE, ELSEWHERE)).toBe(false);
+    });
+  });
+
+  describe("canSeeFeedbackTeamNotes", () => {
+    it("should show the team its own themes and refining chats", () => {
+      expect(canSeeFeedbackTeamNotes("team")).toBe(true);
+    });
+
+    it("should show a reviewer, and anyone with no access, neither", () => {
+      expect(canSeeFeedbackTeamNotes("reviewer")).toBe(false);
+      expect(canSeeFeedbackTeamNotes("none")).toBe(false);
     });
   });
 });

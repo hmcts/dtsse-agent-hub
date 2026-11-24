@@ -292,12 +292,14 @@ export async function refineFeedback(input: { projectId: unknown; threadIds: unk
       linkLabel: labels.size > 1 ? (linkId) => labels.get(linkId) ?? "a removed link" : null,
       now: new Date()
     });
-    const started = await startConversation(request);
+    const { threadIds, ...first } = request;
+    const started = await startConversation(first);
     if (!started.ok) {
       return started;
     }
     try {
-      await recordRefinement(prisma, viewer.oid, projectId, started.id, ids);
+      // Only the threads the message listed: one left out to keep it short is not in the stories it leads to.
+      await recordRefinement(prisma, viewer.oid, projectId, started.id, threadIds);
     } catch (error) {
       // The project changed under the click (archived, its threads gone): a chat its threads never hear of is no use,
       // and a second click would only start another, so it goes.

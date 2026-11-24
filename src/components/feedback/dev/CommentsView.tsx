@@ -390,10 +390,12 @@ function AllComments({
   const reopening = !selected.some((thread) => thread.status === "open") && selected.some((thread) => thread.status === "resolved");
   const setChosenStatus = async (): Promise<string | null> => {
     const [from, to] = reopening ? (["resolved", "open"] as const) : (["open", "resolved"] as const);
-    for (const thread of selected.filter((t) => t.status === from)) {
+    const todo = selected.filter((t) => t.status === from);
+    for (const [done, thread] of todo.entries()) {
       const failure = await handlers.status(thread.id, to);
       if (failure !== null) {
-        return failure;
+        // Each one is saved as it goes, so say how far it got rather than leave the person guessing.
+        return done === 0 ? failure : `${failure} (${done} of ${todo.length} were ${to === "open" ? "reopened" : "resolved"} first)`;
       }
     }
     return null;
