@@ -2,10 +2,12 @@ import {
   addFeedbackLink,
   archiveFeedbackProject,
   probeFeedbackLink,
+  refineFeedback,
   replyToFeedbackThread,
   revokeFeedbackLink,
   rotateFeedbackLink,
   setFeedbackMembers,
+  setFeedbackTheme,
   setFeedbackThreadStatus,
   updateFeedbackSettings
 } from "@/app/_actions/feedback";
@@ -21,5 +23,7 @@ export const PROJECT_ACTIONS: ProjectActions = {
   archive: archiveFeedbackProject,
   reply: replyToFeedbackThread,
   setStatus: setFeedbackThreadStatus,
-  probe: probeFeedbackLink
+  probe: probeFeedbackLink,
+  setTheme: setFeedbackTheme,
+  refine: refineFeedback
 };

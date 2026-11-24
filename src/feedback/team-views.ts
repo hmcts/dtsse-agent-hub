@@ -45,19 +45,42 @@ export function filterThreads<T extends FeedbackThreadView>(threads: readonly T[
 export interface PageGroup {
   linkId: string;
   pagePath: string;
+  /** The title the page had on its newest thread that recorded one; null when none did. */
+  pageTitle: string | null;
   threads: number;
 }
 
-/** Each page with threads, per link, in path order, with how many threads it has. */
-export function pagesOf(threads: readonly Pick<FeedbackThreadView, "linkId" | "pagePath">[]): PageGroup[] {
-  const pages = new Map<string, PageGroup>();
+/**
+ * What to call a page: its title, or its path where it has none. A title is cut at its first spaced dash or bar, since
+ * GOV.UK pages are titled "Page – Service – GOV.UK" and every page of a project would otherwise read the same at the end.
+ */
+export function pageName(page: Pick<PageGroup, "pageTitle" | "pagePath">): string {
+  if (page.pageTitle === null) {
+    return page.pagePath;
+  }
+  // The first separator found by plain search rather than a pattern, which would backtrack on a long run of spaces.
+  const flat = page.pageTitle
+    .split(/\s/)
+    .filter((word) => word !== "")
+    .join(" ");
+  const cuts = [" – ", " — ", " | ", " - "].map((separator) => flat.indexOf(separator)).filter((at) => at > 0);
+  return cuts.length === 0 ? page.pageTitle : flat.slice(0, Math.min(...cuts));
+}
+
+/** Each page with threads, per link, in path order, with how many threads it has and the title it last had. */
+export function pagesOf(threads: readonly Pick<FeedbackThreadView, "linkId" | "pagePath" | "pageTitle" | "createdAt">[]): PageGroup[] {
+  const pages = new Map<string, PageGroup & { titledAt: string }>();
   for (const thread of threads) {
     const key = `${thread.linkId} ${thread.pagePath}`;
-    const page = pages.get(key) ?? { linkId: thread.linkId, pagePath: thread.pagePath, threads: 0 };
+    const page = pages.get(key) ?? { linkId: thread.linkId, pagePath: thread.pagePath, pageTitle: null, titledAt: "", threads: 0 };
     page.threads += 1;
+    if (thread.pageTitle !== null && thread.createdAt >= page.titledAt) {
+      page.pageTitle = thread.pageTitle;
+      page.titledAt = thread.createdAt;
+    }
     pages.set(key, page);
   }
-  return [...pages.values()].sort((a, b) => byCodePoint(a.linkId, b.linkId) || byCodePoint(a.pagePath, b.pagePath));
+  return [...pages.values()].map(({ titledAt: _, ...page }) => page).sort((a, b) => byCodePoint(a.linkId, b.linkId) || byCodePoint(a.pagePath, b.pagePath));
 }
 
 /**
@@ -103,9 +126,9 @@ export function reviewersOf(threads: readonly FeedbackThreadView[], recordings: 
 }
 
 export type Activity =
-  | { kind: "thread"; at: string; who: string; threadId: string; pagePath: string; text: string }
-  | { kind: "reply"; at: string; who: string; threadId: string; pagePath: string; text: string }
-  | { kind: "resolved"; at: string; who: string; threadId: string; pagePath: string }
+  | { kind: "thread"; at: string; who: string; threadId: string; pagePath: string; pageTitle: string | null; text: string }
+  | { kind: "reply"; at: string; who: string; threadId: string; pagePath: string; pageTitle: string | null; text: string }
+  | { kind: "resolved"; at: string; who: string; threadId: string; pagePath: string; pageTitle: string | null }
   | { kind: "recording"; at: string; who: string; recordingId: string; durationMs: number | null; status: FeedbackRecordingStatus };
 
 /** What happened on the project, newest first, at most `limit` of it. */
@@ -113,7 +136,7 @@ export function recentActivity(threads: readonly FeedbackThreadView[], recording
   const items: Activity[] = [];
   for (const thread of threads) {
     const [first, ...replies] = thread.comments;
-    const base = { threadId: thread.id, pagePath: thread.pagePath };
+    const base = { threadId: thread.id, pagePath: thread.pagePath, pageTitle: thread.pageTitle };
     items.push({ kind: "thread", at: thread.createdAt, who: thread.author.name, text: first?.body ?? "", ...base });
     for (const reply of replies) {
       items.push({ kind: "reply", at: reply.createdAt, who: reply.author.name, text: reply.body, ...base });

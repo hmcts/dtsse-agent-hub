@@ -51,7 +51,8 @@ export type WidgetMessage = Envelope<
   | { type: "present"; path: string }
   | { type: "navigated"; path: string }
   | { type: "pick-cancel" }
-  | { type: "picked"; path: string; anchor: WidgetAnchor; snapshot: RecordedEvent[] }
+  /** `title` is the page's `document.title` when the element was picked; a widget from before it was sent leaves it out. */
+  | { type: "picked"; path: string; title?: string; anchor: WidgetAnchor; snapshot: RecordedEvent[] }
   | { type: "marker-clicked"; id: string }
   | { type: "replay-events"; path: string; events: RecordedEvent[] }
   | { type: "detached"; ids: string[] }
@@ -159,7 +160,7 @@ export function isWidgetMessage(value: unknown): value is WidgetMessage {
     case "pick-cancel":
       return true;
     case "picked":
-      return isPath(value.path) && isAnchor(value.anchor) && isRecordedEvents(value.snapshot);
+      return isPath(value.path) && (value.title === undefined || isText(value.title)) && isAnchor(value.anchor) && isRecordedEvents(value.snapshot);
     case "marker-clicked":
       return isText(value.id, 64);
     case "replay-events":

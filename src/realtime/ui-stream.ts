@@ -230,6 +230,9 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
       }
       return sseEvent({ event: "feedback", data: JSON.stringify({ project_id: event.project_id, link_id: event.link_id }) });
     }
+    // Only the people a comment names hear of it, and only that they were named: the list says by whom, and where.
+    case "feedback_mention":
+      return event.person_oids.includes(sources.viewerOid) ? sseEvent({ event: "feedback_mention", data: "{}" }) : undefined;
     case "resync":
       return RESYNC;
   }

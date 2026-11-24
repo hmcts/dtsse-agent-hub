@@ -7,7 +7,7 @@ import { MentionInput, type MentionPerson } from "./MentionInput";
 
 /**
  * One comment thread, as a card in the review shell's panel and the team's comments view: who raised it and when,
- * every comment with the people it names picked out, a reply box and Resolve or Reopen. Focusing the card (choosing
+ * the Jira issues it went into, every comment with the people it names picked out, a reply box and Resolve or Reopen. Focusing the card (choosing
  * its heading, or any focus inside it) tells the page, which points at the thread's element.
  */
 
@@ -37,7 +37,8 @@ export function mentionRuns(body: string, names: readonly string[]): { text: str
   return runs;
 }
 
-function CommentBody({ body, mentions, people }: { body: string; mentions: readonly string[]; people: readonly MentionPerson[] }) {
+/** A comment's text with the people it names picked out. */
+export function CommentBody({ body, mentions, people }: { body: string; mentions: readonly string[]; people: readonly MentionPerson[] }) {
   const names = people.filter((person) => mentions.includes(person.oid)).map((person) => person.name.trim());
   return (
     <p className="whitespace-pre-wrap break-words text-sm text-asst-body">
@@ -50,7 +51,7 @@ function CommentBody({ body, mentions, people }: { body: string; mentions: reado
   );
 }
 
-const STATUS_WORDS: Record<FeedbackThreadView["status"], string> = { open: "Open", resolved: "Resolved", detached: "Not found on the page" };
+export const STATUS_WORDS: Record<FeedbackThreadView["status"], string> = { open: "Open", resolved: "Resolved", detached: "Not found on the page" };
 
 export function ThreadCard({
   thread,
@@ -139,6 +140,7 @@ export function ThreadCard({
             {first === undefined ? null : <Timestamp iso={first.createdAt} />}
             <span> · {STATUS_WORDS[thread.status]}</span>
             {resolved && thread.resolvedBy !== null ? <span> by {thread.resolvedBy.name}</span> : null}
+            {thread.jiraKeys.length === 0 ? null : <span> · In Jira {thread.jiraKeys.join(", ")}</span>}
           </p>
         </div>
       </header>
@@ -183,7 +185,7 @@ export function ThreadCard({
           type="button"
           disabled={pending || reply.trim() === ""}
           onClick={sendReply}
-          className="rounded-lg bg-asst-accent px-3 py-1 text-sm font-semibold text-asst-ink hover:bg-asst-accent-hover disabled:opacity-60"
+          className="rounded-lg bg-asst-accent px-3 py-1 text-sm font-semibold text-asst-ink hover:bg-asst-accent-hover disabled:cursor-not-allowed disabled:bg-asst-field disabled:text-asst-faint"
         >
           Reply
         </button>

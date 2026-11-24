@@ -134,6 +134,7 @@ export function AssistantShell({
   welsh = false,
   briefing = false,
   feedback,
+  mentions = null,
   start,
   model,
   claudeMd,
@@ -175,6 +176,8 @@ export function AssistantShell({
   briefing?: boolean;
   /** Prototype feedback is on, so the way to a new feedback project is shown. */
   feedback?: boolean;
+  /** How many feedback comments named the viewer that they have not seen; null hides Mentions, for someone nobody has mentioned. */
+  mentions?: number | null;
   /** How the morning briefing starts its chat; without it, the briefing is not offered. */
   start?: StartChatAction;
   /** The Claude model the person's chats run on, which the footer's settings shows and changes. */
@@ -348,6 +351,21 @@ export function AssistantShell({
             {/* The workflows a person can open beside their chats, behind one plus. */}
             <WorkflowsMenu welsh={welsh} briefing={briefing} feedback={feedback} start={start} />
           </div>
+          {mentions === null ? null : (
+            <div className="px-3 pb-2">
+              <Link
+                href={MENTIONS_PATH}
+                aria-current={activeId === MENTIONS_PATH ? "page" : undefined}
+                className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm ${activeId === MENTIONS_PATH ? "bg-asst-active text-asst-text" : "text-asst-body hover:bg-asst-raised"}`}
+              >
+                <span aria-hidden="true" className="w-4 text-center font-semibold text-asst-accent">
+                  @
+                </span>
+                Mentions
+                {mentions > 0 ? <UnreadBadge count={mentions} /> : null}
+              </Link>
+            </div>
+          )}
           <LiveLocalSessions served={served}>
             <ConversationSearch>
               {groups.length === 0 ? <p className="px-2.5 text-[13px] text-asst-faint">Your chats appear here.</p> : null}
@@ -551,7 +569,10 @@ function SignedOffMark() {
   );
 }
 
-/** How many new comments and recordings a feedback project has, in words for a screen reader. */
+/** Where the viewer's Mentions list is, which is also the `activeId` its page passes, so its row reads as open. */
+export const MENTIONS_PATH = "/assistant/feedback/mentions";
+
+/** How many new comments and recordings a feedback project has, or new mentions, in words for a screen reader. */
 function UnreadBadge({ count }: { count: number }) {
   const label = unreadLabel(count);
   return (

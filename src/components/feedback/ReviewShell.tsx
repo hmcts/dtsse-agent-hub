@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { describeElement } from "@/feedback/anchor-words";
 import { MAX_RECORDING_MS } from "@/feedback/limits";
 import {
   isWidgetMessage,
@@ -45,6 +46,7 @@ export const HELLO_TIMEOUT_MS = 5000;
 
 interface Draft {
   path: string;
+  title: string;
   anchor: WidgetAnchor;
   snapshot: RecordedEvent[];
 }
@@ -52,11 +54,6 @@ interface Draft {
 interface Recording {
   session: RecordingSession;
   startedAt: number;
-}
-
-function describeAnchor(anchor: WidgetAnchor): string {
-  const text = anchor.text === "" ? "" : ` “${anchor.text.length > 60 ? `${anchor.text.slice(0, 60)}…` : anchor.text}”`;
-  return `${anchor.tag}${text}`;
 }
 
 function clock(ms: number): string {
@@ -208,7 +205,7 @@ export function ReviewShell(props: ReviewShellProps) {
           break;
         case "picked":
           setPicking(false);
-          setDraft({ path: message.path, anchor: message.anchor, snapshot: message.snapshot });
+          setDraft({ path: message.path, title: message.title ?? "", anchor: message.anchor, snapshot: message.snapshot });
           setDraftBody("");
           setPanelOpen(true);
           break;
@@ -317,6 +314,7 @@ export function ReviewShell(props: ReviewShellProps) {
     try {
       const { thread, snapshotUrl } = await api.createThread({
         pagePath: draft.path,
+        pageTitle: draft.title,
         anchor: draft.anchor,
         body,
         snapshot: draft.snapshot.length > 0,
@@ -548,7 +546,7 @@ export function ReviewShell(props: ReviewShellProps) {
                 className="flex flex-col gap-2 rounded-xl border border-asst-accent-line bg-asst-raised p-3"
               >
                 <p className="text-xs text-asst-muted">
-                  On <span className="font-semibold text-asst-text">{describeAnchor(draft.anchor)}</span>
+                  Commenting on <span className="font-semibold text-asst-text">{describeElement(draft.anchor)}</span>
                 </p>
                 <MentionInput
                   value={draftBody}
@@ -567,7 +565,7 @@ export function ReviewShell(props: ReviewShellProps) {
                   <button
                     type="submit"
                     disabled={saving || draftBody.trim() === ""}
-                    className="rounded-lg bg-asst-accent px-3 py-1 text-sm font-semibold text-asst-ink hover:bg-asst-accent-hover disabled:opacity-60"
+                    className="rounded-lg bg-asst-accent px-3 py-1 text-sm font-semibold text-asst-ink hover:bg-asst-accent-hover disabled:cursor-not-allowed disabled:bg-asst-field disabled:text-asst-faint"
                   >
                     {saving ? "Saving…" : "Save comment"}
                   </button>

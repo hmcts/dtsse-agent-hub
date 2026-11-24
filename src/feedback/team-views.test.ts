@@ -6,6 +6,7 @@ import {
   lastActivity,
   marginOrder,
   NO_FILTER,
+  pageName,
   pagesOf,
   recentActivity,
   reviewersOf,
@@ -25,6 +26,10 @@ function thread(id: string, more: Partial<FeedbackThreadView> = {}): FeedbackThr
     projectId: "p",
     linkId: "l1",
     pagePath: "/start",
+    pageTitle: null,
+    theme: null,
+    jiraKeys: [],
+    refinedIn: null,
     anchor: { selector: "#x", text: "x", tag: "p", rect: { x: 0, y: 100, width: 10, height: 10 }, viewport: { width: 1200, height: 800 } },
     status: "open",
     author,
@@ -87,10 +92,34 @@ describe("pagesOf", () => {
     const threads = [thread("a", { pagePath: "/z" }), thread("b", { linkId: "l0", pagePath: "/z" }), thread("c"), thread("d", { pagePath: "/z" })];
 
     expect(pagesOf(threads)).toEqual([
-      { linkId: "l0", pagePath: "/z", threads: 1 },
-      { linkId: "l1", pagePath: "/start", threads: 1 },
-      { linkId: "l1", pagePath: "/z", threads: 2 }
+      { linkId: "l0", pagePath: "/z", pageTitle: null, threads: 1 },
+      { linkId: "l1", pagePath: "/start", pageTitle: null, threads: 1 },
+      { linkId: "l1", pagePath: "/z", pageTitle: null, threads: 2 }
     ]);
+  });
+
+  it("should name a page by the title on its newest thread that has one", () => {
+    const threads = [
+      thread("a", { pageTitle: "Old title", createdAt: "2026-11-10T10:00:00.000Z" }),
+      thread("b", { pageTitle: "New title", createdAt: "2026-11-11T10:00:00.000Z" }),
+      thread("c", { pageTitle: null, createdAt: "2026-11-12T10:00:00.000Z" })
+    ];
+
+    expect(pagesOf(threads)).toEqual([{ linkId: "l1", pagePath: "/start", pageTitle: "New title", threads: 3 }]);
+  });
+});
+
+describe("pageName", () => {
+  it("should call a page by its title, or by its path when it has none", () => {
+    expect(pageName({ pageTitle: "Check your answers", pagePath: "/check" })).toBe("Check your answers");
+    expect(pageName({ pageTitle: null, pagePath: "/check" })).toBe("/check");
+  });
+
+  it("should drop the service and GOV.UK from a title, keeping a title with no separator whole", () => {
+    expect(pageName({ pageTitle: "Check your answers – Make a possession claim – GOV.UK", pagePath: "/check" })).toBe("Check your answers");
+    expect(pageName({ pageTitle: "Home | Example site", pagePath: "/" })).toBe("Home");
+    expect(pageName({ pageTitle: "Pre-action protocol", pagePath: "/pap" })).toBe("Pre-action protocol");
+    expect(pageName({ pageTitle: " – GOV.UK", pagePath: "/x" })).toBe(" – GOV.UK");
   });
 });
 
@@ -154,7 +183,7 @@ describe("recentActivity", () => {
 
   it("should stop at the limit asked for, and give an empty first comment for a thread with none", () => {
     expect(recentActivity([thread("x", { comments: [] })], [], 1)).toEqual([
-      { kind: "thread", at: "2026-11-10T10:00:00.000Z", who: "Ann", text: "", threadId: "x", pagePath: "/start" }
+      { kind: "thread", at: "2026-11-10T10:00:00.000Z", who: "Ann", text: "", threadId: "x", pagePath: "/start", pageTitle: null }
     ]);
   });
 

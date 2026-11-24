@@ -127,6 +127,10 @@ function thread(overrides: Partial<FeedbackThreadView> = {}): FeedbackThreadView
     projectId: "p",
     linkId: "l",
     pagePath: "/start",
+    pageTitle: null,
+    theme: null,
+    jiraKeys: [],
+    refinedIn: null,
     anchor: { selector: "#a", text: "", tag: "a", rect: { x: 0, y: 0, width: 1, height: 1 }, viewport: { width: 1, height: 1 } },
     status: "open",
     author: { oid: "o2", name: "Bob Builder" },
@@ -152,6 +156,14 @@ describe("ThreadCard", () => {
     expect(screen.getByRole("heading", { name: "Bob Builder" })).toBeTruthy();
     expect(screen.getByText("@Ann Lee").tagName).toBe("STRONG");
     expect(screen.getByText("Will do")).toBeTruthy();
+  });
+
+  it("should say which Jira issues the thread went into, and nothing when it went into none", () => {
+    const { rerender } = render(<ThreadCard thread={thread({ jiraKeys: ["PCS-1", "PCS-2"] })} people={PEOPLE} onReply={vi.fn()} onStatus={vi.fn()} />);
+    expect(screen.getByText("· In Jira PCS-1, PCS-2")).toBeTruthy();
+
+    rerender(<ThreadCard thread={thread()} people={PEOPLE} onReply={vi.fn()} onStatus={vi.fn()} />);
+    expect(screen.queryByText(/In Jira/)).toBeNull();
   });
 
   it("should show a reply's error and keep the draft", async () => {

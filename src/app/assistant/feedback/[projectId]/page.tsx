@@ -20,7 +20,7 @@ export async function generateMetadata({ params }: Readonly<{ params: Promise<{ 
   return { title: name?.trim() || "Feedback project" };
 }
 
-/** One feedback project, for its owner and team; `?tab=` picks the section. Anyone else's is not found. */
+/** One feedback project, for its owner and team; `?tab=` picks the section, and `?thread=` a comment to open. Anyone else's is not found. */
 export default async function FeedbackProjectPage({
   params,
   searchParams
@@ -38,7 +38,13 @@ export default async function FeedbackProjectPage({
       <MarkSeen projectId={data.project.id} markSeen={markFeedbackProjectSeen} />
       <div className="mx-auto flex max-w-[1280px] flex-col gap-5 px-5 pb-10 pt-5">
         <FeedbackHeader title={data.project.name} back={{ href: "/assistant/feedback", label: "Feedback projects" }} />
-        <ProjectPage data={data} tab={tab} actions={PROJECT_ACTIONS} allowHttp={allowPrivateTargets()} />
+        <ProjectPage
+          data={data}
+          tab={tab}
+          actions={PROJECT_ACTIONS}
+          allowHttp={allowPrivateTargets()}
+          thread={typeof query.thread === "string" ? query.thread : null}
+        />
       </div>
     </AssistantFrame>
   );

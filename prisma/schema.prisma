@@ -176,6 +176,7 @@ model User {
   feedbackMentions            FeedbackMention[]   @relation("feedbackMention")
   feedbackRecordings          FeedbackRecording[] @relation("feedbackRecordingAuthor")
   feedbackProjectStates       FeedbackProjectPerson[]
+  feedbackRefinements         FeedbackRefinement[]
 
   @@map("user")
 }
@@ -571,6 +572,7 @@ model AssistantConversation {
   notifyVersions   AssistantNotifyVersion[]
   videos           AssistantVideo[]
   documents        AssistantDocument[]
+  feedbackRefinement FeedbackRefinement?
 
   @@index([ownerOid, lastActiveAt(sort: Desc)], map: "assistant_conversation_owner_active_idx")
   @@map("assistant_conversation")
@@ -1191,6 +1193,7 @@ model FeedbackProject {
   threads    FeedbackThread[]
   recordings FeedbackRecording[]
   people     FeedbackProjectPerson[]
+  refinements FeedbackRefinement[]
 
   @@index([ownerOid, createdAt], map: "feedback_project_owner_idx")
   @@map("feedback_project")
@@ -1254,6 +1257,10 @@ model FeedbackThread {
   linkId           String    @map("link_id") @db.Uuid
   authorOid        String    @map("author_oid")
   pagePath         String    @map("page_path")
+  /// The page's document title when the thread was raised; null when the widget sent none.
+  pageTitle        String?   @map("page_title")
+  /// What the team says the thread is about, to read and refine it with others; null is none.
+  theme            String?
   /// {selector, text, tag, rect, viewport}, checked by src/feedback/schemas.ts.
   anchor           Json
   snapshotBlob     String?   @map("snapshot_blob")
@@ -1273,6 +1280,7 @@ model FeedbackThread {
   resolvedBy User?              @relation("feedbackThreadResolver", fields: [resolvedByOid], references: [oid], onDelete: SetNull)
   recording  FeedbackRecording? @relation(fields: [recordingId], references: [id], onDelete: SetNull)
   comments   FeedbackComment[]
+  refinements FeedbackRefinementThread[]
 
   @@index([linkId, pagePath, createdAt], map: "feedback_thread_link_idx")
   @@index([projectId, updatedAt], map: "feedback_thread_project_idx")
@@ -1300,6 +1308,8 @@ model FeedbackMention {
   commentId  String    @map("comment_id") @db.Uuid
   personOid  String    @map("person_oid")
   notifiedAt DateTime? @map("notified_at") @db.Timestamptz(6)
+  /// When the person first saw it in their Mentions list; null is unseen, which the sidebar counts.
+  seenAt     DateTime? @map("seen_at") @db.Timestamptz(6)
 
   comment FeedbackComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
   person  User            @relation("feedbackMention", fields: [personOid], references: [oid], onDelete: Cascade)
@@ -1331,6 +1341,39 @@ model FeedbackRecording {
   @@index([projectId, startedAt], map: "feedback_recording_project_idx")
   @@index([authorOid], map: "feedback_recording_author_idx")
   @@map("feedback_recording")
+}
+
+model FeedbackRefinement {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId      String   @map("project_id") @db.Uuid
+  /// Null once the conversation is deleted; its Jira keys stay, so the threads still show them.
+  conversationId String?  @unique @map("conversation_id") @db.Uuid
+  /// Null once the person who started it is deleted; its Jira keys stay.
+  ownerOid       String?  @map("owner_oid")
+  /// The keys of the Jira issues exported from the conversation, oldest first.
+  jiraKeys       String[] @default([]) @map("jira_keys")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  project      FeedbackProject            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  conversation AssistantConversation?     @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  owner        User?                      @relation(fields: [ownerOid], references: [oid], onDelete: SetNull)
+  threads      FeedbackRefinementThread[]
+
+  @@index([projectId], map: "feedback_refinement_project_idx")
+  @@index([ownerOid], map: "feedback_refinement_owner_idx")
+  @@map("feedback_refinement")
+}
+
+model FeedbackRefinementThread {
+  refinementId String @map("refinement_id") @db.Uuid
+  threadId     String @map("thread_id") @db.Uuid
+
+  refinement FeedbackRefinement @relation(fields: [refinementId], references: [id], onDelete: Cascade)
+  thread     FeedbackThread     @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@id([refinementId, threadId])
+  @@index([threadId], map: "feedback_refinement_thread_thread_idx")
+  @@map("feedback_refinement_thread")
 }
 
 model FeedbackRecordingSegment {

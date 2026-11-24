@@ -35,6 +35,9 @@ describe("encodeEvent and decodeEvent", () => {
 
   it.each([
     ["no payload", undefined],
+    ["a mention naming nobody", JSON.stringify({ type: "feedback_mention", person_oids: [] })],
+    ["a mention naming someone by number", JSON.stringify({ type: "feedback_mention", person_oids: ["a", 7] })],
+    ["a mention without its people", JSON.stringify({ type: "feedback_mention" })],
     ["something that is not JSON", "{"],
     ["JSON that is not an object", "42"],
     ["null", "null"],

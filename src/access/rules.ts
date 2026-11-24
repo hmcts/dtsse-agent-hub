@@ -674,3 +674,12 @@ export function canSeeFeedbackRecording(access: FeedbackLinkAccess, viewerOid: s
 export function canRecordFeedback(access: FeedbackLinkAccess, viewerOid: string, authorOid: string): boolean {
   return access !== "none" && viewerOid === authorOid;
 }
+
+/**
+ * Whether a thread is shown with the team's own notes on it: the theme they sort it under, and the chat a team member
+ * refined it in. The team's alone; a reviewer reading through a link sees the thread and the Jira issues it went into,
+ * not how the team has filed it.
+ */
+export function canSeeFeedbackTeamNotes(access: FeedbackLinkAccess): boolean {
+  return access === "team";
+}

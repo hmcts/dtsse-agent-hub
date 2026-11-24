@@ -89,6 +89,7 @@ export function AssistantShellFrame({
       welsh={home.welsh}
       briefing={home.briefing}
       feedback={feedbackEnabled()}
+      mentions={home.mentions}
       start={startConversation}
       claudeMd={{ settings: claudeMd, save: saveClaudeMd, reset: resetClaudeMd }}
       templates={{ mine, save: saveTemplate, remove: deleteTemplate }}

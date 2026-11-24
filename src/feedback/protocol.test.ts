@@ -14,6 +14,7 @@ describe("isWidgetMessage", () => {
     widgetMessage({ type: "present", path: "/start" }),
     widgetMessage({ type: "pick-cancel" }),
     widgetMessage({ type: "picked", path: "/start", anchor: ANCHOR, snapshot: EVENTS }),
+    widgetMessage({ type: "picked", path: "/start", title: "Start – Claims", anchor: ANCHOR, snapshot: EVENTS }),
     widgetMessage({ type: "marker-clicked", id: "t1" }),
     widgetMessage({ type: "replay-events", path: "/start", events: EVENTS }),
     widgetMessage({ type: "detached", ids: ["t1", "t2"] })
@@ -29,6 +30,7 @@ describe("isWidgetMessage", () => {
     ["a protocol-relative path", widgetMessage({ type: "navigated", path: "//evil.example/" })],
     ["a present with no path", { ...widgetMessage({ type: "present", path: "/" }), path: undefined }],
     ["a picked with no anchor", { ...widgetMessage({ type: "picked", path: "/", anchor: ANCHOR, snapshot: [] }), anchor: null }],
+    ["a picked whose title is not text", { ...widgetMessage({ type: "picked", path: "/", anchor: ANCHOR, snapshot: [] }), title: 7 }],
     ["events without timestamps", widgetMessage({ type: "replay-events", path: "/", events: [{ type: 3 } as never] })],
     ["an empty id", widgetMessage({ type: "detached", ids: [""] })],
     ["a shell message", shellMessage({ type: "pick-start" })],

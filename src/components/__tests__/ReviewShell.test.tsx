@@ -25,6 +25,10 @@ function thread(id: string, status: FeedbackThreadView["status"] = "open", body 
     projectId: "p",
     linkId: "l",
     pagePath: "/start",
+    pageTitle: null,
+    theme: null,
+    jiraKeys: [],
+    refinedIn: null,
     anchor: ANCHOR,
     status,
     author: { oid: "o1", name: "Ann Reviewer" },
@@ -255,14 +259,14 @@ describe("ReviewShell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
     expect(posted.at(-1)).toMatchObject({ type: "pick-start" });
     expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
-    await fromWidget({ type: "picked", path: "/start", anchor: ANCHOR, snapshot: SNAPSHOT });
-    expect(screen.getByText(/button “Continue”/)).toBeTruthy();
+    await fromWidget({ type: "picked", path: "/start", title: "Start – Claims", anchor: ANCHOR, snapshot: SNAPSHOT });
+    expect(screen.getByText("the “Continue” button")).toBeTruthy();
     fireEvent.change(screen.getByRole("combobox", { name: "Your comment" }), { target: { value: "Where does this go?" } });
     fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
     await untilReal(() => snapshotPuts().length > 0);
     await settle();
     const created = calls.find((call) => call.method === "POST" && call.url === `${BASE}/threads`);
-    expect(created?.body).toEqual({ page_path: "/start", anchor: ANCHOR, body: "Where does this go?", snapshot: true });
+    expect(created?.body).toEqual({ page_path: "/start", page_title: "Start – Claims", anchor: ANCHOR, body: "Where does this go?", snapshot: true });
     const put = snapshotPuts()[0];
     expect(put?.method).toBe("PUT");
     expect(put?.headers["x-ms-blob-type"]).toBe("BlockBlob");
@@ -547,7 +551,7 @@ describe("ReviewShell's refusals and dialogs", () => {
     shell();
     await fromWidget({ type: "hello", path: "/start", title: "", version: "" });
     await fromWidget({ type: "picked", path: "/start", anchor: { ...ANCHOR, text: "x".repeat(80) }, snapshot: [] });
-    expect(screen.getByText(/button “x+…”/)).toBeTruthy();
+    expect(screen.getByText(/the “x+…” button/)).toBeTruthy();
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => json({ error: "body: too long" }, 400))

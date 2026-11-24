@@ -68,6 +68,8 @@ import { DEFAULT_CLAUDE_MD } from "../credentials/claude-md.ts";
 import { type GitIdentity, readGitIdentity } from "../credentials/git-identity.ts";
 import type { CredentialKind } from "../credentials/names.ts";
 import { type CredentialStatus, credentialStatus, ownerRefusal, readCredential } from "../credentials/store.ts";
+import { mentionsBadge } from "../feedback/mention-store.ts";
+import { feedbackEnabled } from "../feedback/settings.ts";
 import { type LoadedThreadMessage, loadReplies, loadThreadMessage, type ThreadMessage } from "../messages/direct-thread.ts";
 import { channelFeed, type Match, type PostScope, recentPosts } from "../messages/feed.ts";
 import { FEED_PAGE_SIZE, type FeedPageView, toPage } from "../messages/pagination.ts";
@@ -294,6 +296,8 @@ export interface AssistantHome {
   skills: Skill[];
   /** Whether the page may render the chat, or only the getting-ready screen; see `chatGate`. */
   chat: ChatGate;
+  /** How many feedback comments have named the viewer that they have not seen; null, hiding Mentions, while they have none or prototype feedback is off. */
+  mentions: number | null;
 }
 
 function storedKinds(credentials: CredentialSettings): Set<CredentialKind> {
@@ -339,7 +343,12 @@ function pluginSettings(assistant: { plugins: string[] }): AssistantHome["plugin
  */
 export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
   const { assistant, claims } = await ensureAssistantWithClaims(prisma, viewer);
-  const [credentials, conversations, skills] = await Promise.all([credentialSettings(viewer), sidebarGroups(prisma, viewer.oid), podSkills(prisma, assistant)]);
+  const [credentials, conversations, skills, mentions] = await Promise.all([
+    credentialSettings(viewer),
+    sidebarGroups(prisma, viewer.oid),
+    podSkills(prisma, assistant),
+    feedbackEnabled() ? mentionsBadge(prisma, viewer.oid) : null
+  ]);
   const stored = storedKinds(credentials);
   const summary = await assistantSummary(prisma, assistant, stored);
   return {
@@ -350,7 +359,8 @@ export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
     welsh: hasWelshPlugin(assistant),
     briefing: canConnectMicrosoft(viewer.modelRoute) && offersBriefing(stored, claims),
     skills,
-    chat: chatGateOf(summary.toChat, credentials, stored)
+    chat: chatGateOf(summary.toChat, credentials, stored),
+    mentions
   };
 }
 

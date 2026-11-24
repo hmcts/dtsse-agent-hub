@@ -27,6 +27,8 @@ export interface Person {
 
 export interface NewThread {
   pagePath: string;
+  /** The page's title as the reviewer saw it; empty when the widget did not say. */
+  pageTitle?: string;
   anchor: WidgetAnchor;
   body: string;
   snapshot: boolean;
@@ -80,6 +82,7 @@ export function reviewApi(token: string): ReviewApi {
         `${base}/threads`,
         post({
           page_path: input.pagePath,
+          ...(input.pageTitle === undefined || input.pageTitle.trim() === "" ? {} : { page_title: input.pageTitle }),
           anchor: input.anchor,
           body: input.body,
           snapshot: input.snapshot,

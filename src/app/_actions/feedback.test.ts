@@ -8,9 +8,14 @@ const store = {
   rotateLink: vi.fn(),
   setMembers: vi.fn(),
   updateSettings: vi.fn(),
-  archiveProject: vi.fn()
+  archiveProject: vi.fn(),
+  getProject: vi.fn()
 };
-const threads = { replyToThread: vi.fn(), patchThread: vi.fn() };
+const threads = { replyToThread: vi.fn(), patchThread: vi.fn(), listThreads: vi.fn() };
+const refinements = { setThreadsTheme: vi.fn(), refinableThreads: vi.fn(), recordRefinement: vi.fn() };
+const startConversation = vi.fn();
+const deleteConversation = vi.fn();
+const mentions = { markMentionsSeen: vi.fn() };
 const probeTarget = vi.fn();
 let enabled = true;
 let resolves = true;
@@ -21,6 +26,12 @@ vi.mock("@/store/prisma", () => ({ prisma: {} }));
 vi.mock("@/feedback/settings", () => ({ feedbackEnabled: () => enabled }));
 vi.mock("@/feedback/store", () => store);
 vi.mock("@/feedback/thread-store", () => threads);
+vi.mock("@/feedback/mention-store", () => mentions);
+vi.mock("@/feedback/refinement-store", () => refinements);
+vi.mock("@/app/_actions/assistant", () => ({
+  startConversation: (...args: unknown[]) => startConversation(...args),
+  deleteConversation: (...args: unknown[]) => deleteConversation(...args)
+}));
 vi.mock("@/feedback/probe", () => ({ probeTarget: (...args: unknown[]) => probeTarget(...args) }));
 vi.mock("@/feedback/targets", async (original) => ({
   ...(await original<typeof import("@/feedback/targets")>()),
@@ -142,5 +153,168 @@ describe("probeFeedbackLink", () => {
       probe: { result: "pass", status: 200, reason: "it answered 200" }
     });
     expect(probeTarget).toHaveBeenCalledWith("https://proto.example.com");
+  });
+});
+
+describe("markFeedbackMentionsSeen", () => {
+  beforeEach(() => {
+    enabled = true;
+    mentions.markMentionsSeen.mockReset();
+  });
+
+  it("should mark the viewer's mentions on the comments given, ignoring anything that is not an id", async () => {
+    mentions.markMentionsSeen.mockResolvedValue(1);
+    const { revalidatePath } = await import("next/cache");
+    vi.mocked(revalidatePath).mockClear();
+
+    expect(await actions.markFeedbackMentionsSeen({ commentIds: ["c1", 7, "c2"] })).toEqual({ ok: true });
+
+    expect(mentions.markMentionsSeen).toHaveBeenCalledWith({}, "alice-oid", ["c1", "c2"]);
+    expect(revalidatePath).toHaveBeenCalledWith("/assistant", "layout");
+  });
+
+  it("should re-render nothing when nothing was newly seen, and mark nothing when given no list", async () => {
+    mentions.markMentionsSeen.mockResolvedValue(0);
+    const { revalidatePath } = await import("next/cache");
+    vi.mocked(revalidatePath).mockClear();
+
+    expect(await actions.markFeedbackMentionsSeen({ commentIds: "c1" })).toEqual({ ok: true });
+
+    expect(mentions.markMentionsSeen).toHaveBeenCalledWith({}, "alice-oid", []);
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("should refuse while prototype feedback is off", async () => {
+    enabled = false;
+
+    expect(await actions.markFeedbackMentionsSeen({ commentIds: [] })).toEqual({ ok: false, error: "prototype feedback is not available on this deployment" });
+    expect(mentions.markMentionsSeen).not.toHaveBeenCalled();
+  });
+});
+
+describe("setFeedbackTheme", () => {
+  beforeEach(() => {
+    enabled = true;
+    refinements.setThreadsTheme.mockReset().mockResolvedValue(2);
+  });
+
+  it("should give the chosen threads the theme, as the store checks it, and say how many changed", async () => {
+    expect(await actions.setFeedbackTheme({ projectId: "p1", threadIds: ["t1", 3, "t2"], theme: "  Court  fees " })).toEqual({ ok: true, changed: 2 });
+
+    expect(refinements.setThreadsTheme).toHaveBeenCalledWith({}, "alice-oid", "p1", ["t1", "t2"], "Court fees");
+  });
+
+  it("should clear a theme, and refuse one too long without asking the store", async () => {
+    await actions.setFeedbackTheme({ projectId: "p1", threadIds: "t1", theme: null });
+    expect(refinements.setThreadsTheme).toHaveBeenCalledWith({}, "alice-oid", "p1", [], null);
+
+    refinements.setThreadsTheme.mockClear();
+    expect(await actions.setFeedbackTheme({ projectId: "p1", threadIds: ["t1"], theme: "x".repeat(61) })).toEqual({
+      ok: false,
+      error: "Keep the theme to 60 characters"
+    });
+    expect(refinements.setThreadsTheme).not.toHaveBeenCalled();
+    expect(await actions.setFeedbackTheme({ projectId: "p1", threadIds: ["t1"], theme: 7 })).toEqual({
+      ok: false,
+      error: "theme: must be text, or null to clear it"
+    });
+  });
+
+  it("should refuse while prototype feedback is off", async () => {
+    enabled = false;
+
+    expect((await actions.setFeedbackTheme({ projectId: "p1", threadIds: [], theme: "x" })).ok).toBe(false);
+  });
+});
+
+describe("refineFeedback", () => {
+  const T = (id: string, linkId = "l1") => ({
+    id,
+    linkId,
+    pagePath: "/start",
+    pageTitle: null,
+    theme: null,
+    anchor: { selector: "#x", text: "Start now", tag: "a", rect: { x: 0, y: 0, width: 1, height: 1 }, viewport: { width: 1, height: 1 } },
+    status: "open",
+    createdAt: "2026-11-10T10:00:00.000Z",
+    comments: [{ id: `${id}-c`, author: { oid: "ben", name: "Ben" }, body: `about ${id}`, createdAt: "2026-11-10T10:00:00.000Z", mentions: [] }]
+  });
+
+  beforeEach(() => {
+    enabled = true;
+    refinements.refinableThreads.mockReset().mockResolvedValue(["t1", "t2"]);
+    refinements.recordRefinement.mockReset().mockResolvedValue(undefined);
+    store.getProject.mockReset().mockResolvedValue({ name: "Claims", links: [{ id: "l1", label: "Version 1" }] });
+    threads.listThreads.mockReset().mockResolvedValue([T("t1"), T("t2"), T("t3")]);
+    startConversation.mockReset().mockResolvedValue({ ok: true, id: "conv-1" });
+  });
+
+  it("should start a conversation with the refinable threads, record it, and answer its id", async () => {
+    expect(await actions.refineFeedback({ projectId: "p1", threadIds: ["t1", "t2", 9], mode: "each" })).toEqual({ ok: true, id: "conv-1" });
+
+    expect(refinements.refinableThreads).toHaveBeenCalledWith({}, "alice-oid", "p1", ["t1", "t2"]);
+    const request = startConversation.mock.calls[0]?.[0] as { product: string; title: string; body: string };
+    expect(request.title).toMatch(/^Refine feedback: Claims, /);
+    expect(request.body).toContain("about t1");
+    expect(request.body).toContain("about t2");
+    expect(request.body).not.toContain("about t3");
+    expect(request.body).not.toContain("Version 1");
+    expect(refinements.recordRefinement).toHaveBeenCalledWith({}, "alice-oid", "p1", "conv-1", ["t1", "t2"]);
+    expect(Object.keys(startConversation.mock.calls[0]?.[0] as object).sort()).toEqual(["body", "product", "title"]);
+  });
+
+  it("should name each comment's link when the project has more than one", async () => {
+    store.getProject.mockResolvedValue({
+      name: "Claims",
+      links: [
+        { id: "l1", label: "Version 1" },
+        { id: "l2", label: "Version 2" }
+      ]
+    });
+    threads.listThreads.mockResolvedValue([T("t1", "l2"), T("t2", "gone")]);
+
+    await actions.refineFeedback({ projectId: "p1", threadIds: ["t1", "t2"], mode: "each" });
+
+    const [[request]] = startConversation.mock.calls as [[{ body: string }]];
+    const body = request.body;
+    expect(body).toContain("On /start, Version 2,");
+    expect(body).toContain("On /start, a removed link,");
+  });
+
+  it("should pass on why the conversation could not start, and record nothing", async () => {
+    startConversation.mockResolvedValue({ ok: false, error: "Connect GitHub and Claude to start chatting" });
+
+    expect(await actions.refineFeedback({ projectId: "p1", threadIds: ["t1"], mode: "each" })).toEqual({
+      ok: false,
+      error: "Connect GitHub and Claude to start chatting"
+    });
+    expect(refinements.recordRefinement).not.toHaveBeenCalled();
+  });
+
+  it("should refuse a mode that is neither one nor each, before starting anything", async () => {
+    expect(await actions.refineFeedback({ projectId: "p1", threadIds: ["t1"], mode: "all" })).toEqual({ ok: false, error: "mode: must be one or each" });
+    expect(startConversation).not.toHaveBeenCalled();
+  });
+
+  it("should ask for one story when that is the mode", async () => {
+    await actions.refineFeedback({ projectId: "p1", threadIds: ["t1"], mode: "one" });
+
+    const [[request]] = startConversation.mock.calls as [[{ body: string }]];
+    expect(request.body).toContain("Please turn these comments into one Jira story.");
+  });
+
+  it("should delete the chat it started when the refinement cannot be recorded, and say why", async () => {
+    refinements.recordRefinement.mockRejectedValue(new HttpError(409, "that project is archived"));
+    deleteConversation.mockReset().mockResolvedValue({ ok: true });
+
+    expect(await actions.refineFeedback({ projectId: "p1", threadIds: ["t1"], mode: "each" })).toEqual({ ok: false, error: "that project is archived" });
+    expect(deleteConversation).toHaveBeenCalledWith({ conversationId: "conv-1" });
+  });
+
+  it("should refuse while prototype feedback is off", async () => {
+    enabled = false;
+
+    expect((await actions.refineFeedback({ projectId: "p1", threadIds: ["t1"], mode: "each" })).ok).toBe(false);
+    expect(startConversation).not.toHaveBeenCalled();
   });
 });

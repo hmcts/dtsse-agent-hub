@@ -1,3 +1,4 @@
+import { MAX_PAGE_TITLE } from "../limits.ts";
 import { isShellMessage, type RecordedEvent, type ShellMessage, type WidgetMessageBody, widgetMessage } from "../protocol.ts";
 import { anchorFor } from "./anchor.ts";
 import { createLayer, type Layer } from "./layer.ts";
@@ -90,7 +91,13 @@ export function startWidget(view: Window, config: WidgetConfig, record: RecordFu
         stopPicking = startPicking(view, layer, {
           onPick: (element) => {
             stopPicking = undefined;
-            post({ type: "picked", path: path(), anchor: anchorFor(element, view), snapshot: recorder.snapshot(config.maskInputs) });
+            post({
+              type: "picked",
+              path: path(),
+              title: document.title.slice(0, MAX_PAGE_TITLE),
+              anchor: anchorFor(element, view),
+              snapshot: recorder.snapshot(config.maskInputs)
+            });
           },
           onCancel: () => {
             stopPicking = undefined;
@@ -145,7 +152,7 @@ export function startWidget(view: Window, config: WidgetConfig, record: RecordFu
   view.addEventListener("pagehide", onPageHide);
   document.addEventListener("visibilitychange", onVisibility);
   const stopLinks = installLinkCapture(view, context);
-  post({ type: "hello", path: lastPath, title: document.title, version: config.version });
+  post({ type: "hello", path: lastPath, title: document.title.slice(0, MAX_PAGE_TITLE), version: config.version });
 
   return {
     layer,

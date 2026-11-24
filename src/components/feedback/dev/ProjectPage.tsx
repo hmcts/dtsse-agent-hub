@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import type { ProbeOutcome } from "@/feedback/probe";
+import type { RefineMode } from "@/feedback/refinement";
 import type { FeedbackLinkView, FeedbackPerson, FeedbackProjectView } from "@/feedback/store";
-import { durationText, recentActivity, reviewersOf, reviewerTimeline, threadCounts } from "@/feedback/team-views";
+import { durationText, pageName, recentActivity, reviewersOf, reviewerTimeline, threadCounts } from "@/feedback/team-views";
 import type { FeedbackCommentView, FeedbackThreadView } from "@/feedback/thread-store";
 import type { ActionResult } from "@/web/action";
 import type { FeedbackProjectPageData, FeedbackRecordingRow } from "@/web/feedback-data";
@@ -15,7 +16,7 @@ import { CopyField, call, PeoplePicker, type PickedPerson, useOrigin } from "./p
 
 /**
  * One feedback project as its team sees it, in tabs: an overview with the share links, the comments laid out on
- * their pages, the recordings, the people, and the settings, which only the owner is shown. The tab is in the URL
+ * their pages (in one list, or page by page), the recordings, the people, and the settings, which only the owner is shown. The tab is in the URL
  * (`?tab=`), so a link can open any of them.
  */
 
@@ -33,12 +34,45 @@ export interface ProjectActions {
   reply: (input: Id & { threadId: unknown; body: unknown }) => Promise<ActionResult<{ comment: FeedbackCommentView }>>;
   setStatus: (input: Id & { threadId: unknown; status: unknown }) => Promise<ActionResult<{ thread: FeedbackThreadView }>>;
   probe: (input: { url: unknown }) => Promise<ActionResult<{ probe: ProbeOutcome }>>;
+  setTheme: (input: Id & { threadIds: unknown; theme: unknown }) => Promise<ActionResult<{ changed: number }>>;
+  refine: (input: Id & { threadIds: unknown; mode: unknown }) => Promise<ActionResult<{ id: string }>>;
 }
 
-/** The reply and resolve a thread card makes, refreshing the page once saved so every view of it agrees. */
-export function useThreadHandlers(projectId: string, actions: Pick<ProjectActions, "reply" | "setStatus">): ThreadHandlers {
+/**
+ * The reply and resolve a thread card makes, refreshing the page once saved so every view of it agrees, and, while
+ * the project can be changed, the themes and refining the comments list offers, refining going to the conversation it
+ * starts.
+ */
+export function useThreadHandlers(
+  projectId: string,
+  actions: Pick<ProjectActions, "reply" | "setStatus"> & Partial<Pick<ProjectActions, "setTheme" | "refine">>,
+  changeable = true
+): ThreadHandlers {
   const router = useRouter();
+  const { setTheme, refine } = actions;
   return {
+    ...(changeable && setTheme !== undefined
+      ? {
+          theme: async (threadIds: string[], theme: string | null) => {
+            const result = await call(() => setTheme({ projectId, threadIds, theme }));
+            if (result.ok) {
+              router.refresh();
+            }
+            return result.ok ? null : result.error;
+          }
+        }
+      : {}),
+    ...(changeable && refine !== undefined
+      ? {
+          refine: async (threadIds: string[], mode: RefineMode) => {
+            const result = await call(() => refine({ projectId, threadIds, mode }));
+            if (result.ok) {
+              router.push(`/assistant/${result.id}`);
+            }
+            return result.ok ? null : result.error;
+          }
+        }
+      : {}),
     reply: async (threadId, body) => {
       const result = await call(() => actions.reply({ projectId, threadId, body }));
       if (result.ok) {
@@ -61,13 +95,22 @@ export function ProjectPage({
   tab,
   actions,
   origin: givenOrigin,
-  allowHttp = false
-}: Readonly<{ data: FeedbackProjectPageData; tab: ProjectTab; actions: ProjectActions; origin?: string; allowHttp?: boolean }>) {
+  allowHttp = false,
+  thread = null
+}: Readonly<{
+  data: FeedbackProjectPageData;
+  tab: ProjectTab;
+  actions: ProjectActions;
+  origin?: string;
+  allowHttp?: boolean;
+  /** A thread to open the comments tab on, as a mention's link asks. */
+  thread?: string | null;
+}>) {
   const { project } = data;
   const owner = project.access === "owner";
   const archived = project.archivedAt !== null;
   const origin = useOrigin(givenOrigin);
-  const handlers = useThreadHandlers(project.id, actions);
+  const handlers = useThreadHandlers(project.id, actions, !archived);
   const tabs = TABS.filter((t) => t !== "settings" || owner);
 
   return (
@@ -94,7 +137,7 @@ export function ProjectPage({
       </nav>
       {tab === "overview" ? <Overview data={data} origin={origin} actions={actions} owner={owner && !archived} /> : null}
       {tab === "comments" ? (
-        <CommentsView projectId={project.id} threads={data.threads} links={project.links} people={data.people} handlers={handlers} />
+        <CommentsView projectId={project.id} threads={data.threads} links={project.links} people={data.people} handlers={handlers} initialThread={thread} />
       ) : null}
       {tab === "recordings" ? <Recordings projectId={project.id} recordings={data.recordings} links={project.links} /> : null}
       {tab === "people" ? <People data={data} actions={actions} owner={owner && !archived} /> : null}
@@ -146,11 +189,11 @@ function Overview({ data, origin, actions, owner }: Readonly<{ data: FeedbackPro
                 <span>
                   <strong className="font-semibold">{item.who}</strong>{" "}
                   {item.kind === "thread"
-                    ? `commented on ${item.pagePath}: “${item.text.slice(0, 120)}”`
+                    ? `commented on ${pageName(item)}: “${item.text.slice(0, 120)}”`
                     : item.kind === "reply"
-                      ? `replied on ${item.pagePath}: “${item.text.slice(0, 120)}”`
+                      ? `replied on ${pageName(item)}: “${item.text.slice(0, 120)}”`
                       : item.kind === "resolved"
-                        ? `resolved a comment on ${item.pagePath}`
+                        ? `resolved a comment on ${pageName(item)}`
                         : item.status === "ready"
                           ? `recorded ${durationText(item.durationMs)}`
                           : "started a recording"}
@@ -353,7 +396,7 @@ function People({ data, actions, owner }: Readonly<{ data: FeedbackProjectPageDa
                     <time dateTime={item.at} className="text-asst-faint">
                       {when(item.at)}
                     </time>
-                    <span>{item.thread.pagePath}</span>
+                    <span>{pageName(item.thread)}</span>
                     <Badge status={item.thread.status} />
                   </span>
                   <span className="text-asst-body">{item.thread.comments.find((comment) => comment.author.oid === chosen.oid)?.body}</span>
