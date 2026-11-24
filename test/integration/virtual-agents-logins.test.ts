@@ -399,7 +399,7 @@ describe("signing in again", () => {
     actAs("alice");
     expect(await actions.reconnectSignIn(form({ id, kind: "github" }))).toEqual({
       ok: true,
-      confirmation: "pcs-api is restarting to sign in to GitHub again"
+      confirmation: "pcs-api is restarting. If GitHub needs you to sign in, a code appears here in a minute or two"
     });
 
     expect(await readCredential(prisma, localStore(), ALICE.oid, "github")).toBeUndefined();
@@ -414,17 +414,22 @@ describe("signing in again", () => {
     expect((await status(id, claimed!.launch_token!, { phase: "awaiting_login" })).status).toBe(204);
   });
 
-  it("should delete the credential and leave the generation alone when the agent is stopped", async () => {
+  // Asked for from a screen that offers no other way to start it, so the code comes now rather than "when it next starts".
+  it("should delete the credential and start the agent when it is stopped", async () => {
     const { id } = await started(ALICE, "pcs-api");
     await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "azure", value: AZURE, via: "pod" });
     await setDesired(prisma, ALICE.oid, id, "stopped");
     const before = await row(id);
 
     actAs("alice");
-    expect(await actions.reconnectSignIn(form({ id, kind: "azure" }))).toEqual({ ok: true, confirmation: "pcs-api signs in to Azure when it next starts" });
+    expect(await actions.reconnectSignIn(form({ id, kind: "azure" }))).toEqual({
+      ok: true,
+      confirmation: "pcs-api is restarting. If Azure needs you to sign in, a code appears here in a minute or two"
+    });
 
     expect(await readCredential(prisma, localStore(), ALICE.oid, "azure")).toBeUndefined();
-    expect(await row(id)).toMatchObject({ generation: before.generation, desired: "stopped", status: before.status });
+    expect(await row(id)).toMatchObject({ desired: "running", status: "requested" });
+    expect((await row(id)).generation).toBeGreaterThan(before.generation);
   });
 
   async function requested(id: string, token: string, kind: "azure" | "github"): Promise<unknown> {
@@ -468,7 +473,10 @@ describe("signing in again", () => {
       const { id } = await started(ALICE, "pcs-api", route);
 
       actAs("alice");
-      expect(await actions.reconnectSignIn(form({ id, kind: "azure" }))).toEqual({ ok: true, confirmation: "pcs-api is restarting to sign in to Azure again" });
+      expect(await actions.reconnectSignIn(form({ id, kind: "azure" }))).toEqual({
+        ok: true,
+        confirmation: "pcs-api is restarting. If Azure needs you to sign in, a code appears here in a minute or two"
+      });
 
       expect(await row(id)).toMatchObject({ desired: "running", status: "provisioning" });
       expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id } })).azureSignInRequestedAt).not.toBeNull();
@@ -507,7 +515,7 @@ describe("signing in again", () => {
     actAs("alice");
     expect(await actions.reconnectSignIn(form({ id, kind: "azure", keep: "stored" }))).toEqual({
       ok: true,
-      confirmation: "pcs-api is restarting to sign in to Azure again"
+      confirmation: "pcs-api is restarting. If Azure needs you to sign in, a code appears here in a minute or two"
     });
 
     expect(await readCredential(prisma, localStore(), ALICE.oid, "azure")).toBe(AZURE);
@@ -543,7 +551,7 @@ describe("signing in again", () => {
     actAs("alice");
     expect(await actions.reconnectSignIn(form({ id, kind: "atlassian" }))).toEqual({
       ok: true,
-      confirmation: "pcs-api is restarting to sign in to Atlassian again"
+      confirmation: "pcs-api is restarting. If Atlassian needs you to sign in, a code appears here in a minute or two"
     });
 
     expect(await readCredential(prisma, localStore(), ALICE.oid, "atlassian")).toBeUndefined();
@@ -557,7 +565,10 @@ describe("signing in again", () => {
     await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "claude", value: CLAUDE, via: "web" });
 
     actAs("alice");
-    expect(await actions.reconnectSignIn(form({ id, kind: "claude" }))).toEqual({ ok: true, confirmation: "pcs-api is restarting to sign in to Claude again" });
+    expect(await actions.reconnectSignIn(form({ id, kind: "claude" }))).toEqual({
+      ok: true,
+      confirmation: "pcs-api is restarting. If Claude needs you to sign in, a code appears here in a minute or two"
+    });
 
     expect(await readCredential(prisma, localStore(), ALICE.oid, "claude")).toBeUndefined();
     expect(await row(id)).toMatchObject({ desired: "running", status: "provisioning", statusDetail: "restarting to sign in to Claude again" });

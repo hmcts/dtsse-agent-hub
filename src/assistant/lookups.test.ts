@@ -114,6 +114,11 @@ describe("lookupResponse", () => {
       { status: "done", results: lookupResults("confluence_page", [PAGE]) }
     ],
     [{ status: "failed", error: "signed_out" }, { status: "signed_out" }],
+    // A GitHub one carries why, since its way back is signing in again to an account that is already connected.
+    [
+      { status: "failed", error: "signed_out", detail: "Sign in to GitHub again" },
+      { status: "signed_out", detail: "Sign in to GitHub again" }
+    ],
     [
       { status: "failed", error: "superseded" },
       { status: "done", results: [] }

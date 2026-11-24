@@ -218,7 +218,12 @@ export function missingScope(result: RunResult): boolean {
   }
 }
 
-const NO_PROJECT_SCOPE = "Your GitHub sign-in cannot see Projects yet: it needs the project scope. Reconnect GitHub in Connections, then search again.";
+const NO_PROJECT_SCOPE = "Your GitHub sign-in is from before your assistant needed access to GitHub Projects. Sign in to GitHub again to give it that access.";
+
+/** Whether a new GitHub sign-in is what gets past this failure: gh is signed out, or its token lacks the Project scope. */
+function signInFixes(result: RunResult, what: "repositories" | "Projects"): boolean {
+  return result.code === GH_EXIT_AUTH || (what === "Projects" && missingScope(result));
+}
 
 /** Why a search failed, in one line the person can read. */
 export function ghLookupFailure(result: RunResult, what: "repositories" | "Projects"): string {
@@ -226,7 +231,7 @@ export function ghLookupFailure(result: RunResult, what: "repositories" | "Proje
     return `gh is not installed in your assistant, so it cannot search GitHub ${what}.`;
   }
   if (result.code === GH_EXIT_AUTH) {
-    return `Your assistant is not signed in to GitHub, so it cannot search ${what}. Reconnect GitHub in Connections.`;
+    return `Your assistant's GitHub sign-in has stopped working, so it cannot search ${what}. Sign in to GitHub again to fix this.`;
   }
   if (what === "Projects" && missingScope(result)) {
     return NO_PROJECT_SCOPE;
@@ -234,6 +239,14 @@ export function ghLookupFailure(result: RunResult, what: "repositories" | "Proje
   const said = `GitHub could not search ${what}`;
   const why = ghSaid(result, said, MAX_DETAIL);
   return why === said ? `GitHub ${what} could not be searched just now.` : why;
+}
+
+/**
+ * A failed search as the hub is answered it: `signed_out` when signing in to GitHub again is the way past it, which
+ * the hub offers beside the reason, and `failed` otherwise.
+ */
+export function ghLookupRefusal(result: RunResult, what: "repositories" | "Projects"): LookupAnswer {
+  return { error: signInFixes(result, what) ? "signed_out" : "failed", detail: ghLookupFailure(result, what) };
 }
 
 /**
@@ -297,7 +310,7 @@ export async function runGithubLookup(
     if (result.code === 0) {
       results = named === null ? parseProjects(result.stdout, frame.owner) : parseProject(result.stdout, named.owner);
     }
-    return results !== null ? { results } : { error: "failed", detail: ghLookupFailure(result, "Projects") };
+    return results !== null ? { results } : ghLookupRefusal(result, "Projects");
   }
   const { owner, words } = repoQuery(frame.query);
   if (words.length === 0) {
@@ -305,7 +318,7 @@ export async function runGithubLookup(
   }
   const owners = owner === null ? await deps.owners() : [owner];
   if (owners === null) {
-    return { error: "failed", detail: "Your assistant is not signed in to GitHub, so it cannot search repositories. Reconnect GitHub in Connections." };
+    return { error: "failed", detail: "Your assistant could not read your GitHub account, so it cannot search repositories. Try again in a moment." };
   }
   // One search per group of owners, side by side, merged in order. A group that fails leaves its owners out rather
   // than the whole answer; only when every one fails is the search said to have failed.
@@ -317,7 +330,7 @@ export async function runGithubLookup(
   );
   const found = searched.filter((one) => one.repos !== null);
   if (searched.length > 0 && found.length === 0) {
-    return { error: "failed", detail: ghLookupFailure((searched[0] as { result: RunResult }).result, "repositories") };
+    return ghLookupRefusal((searched[0] as { result: RunResult }).result, "repositories");
   }
   const seen = new Set<string>();
   const results = found

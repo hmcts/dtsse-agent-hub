@@ -145,11 +145,15 @@ export async function reconnectSignIn(form: FormData): Promise<ActionResult<{ co
     }
     const row = await reconnect(prisma, backend.store, viewer.oid, id, kind, { keepStored: form.get("keep") === "stored" });
     revalidate();
+    // `reconnect` starts a stopped agent too, so the only way this is not on its way to a code is an agent that
+    // stopped meanwhile, which is told so rather than promised a code that is not coming.
     const title = SIGN_IN_TITLES[kind];
     return {
       ok: true,
       confirmation:
-        row.desired === "running" ? `${row.name} is restarting to sign in to ${title} again` : `${row.name} signs in to ${title} when it next starts`
+        row.desired === "running"
+          ? `${row.name} is restarting. If ${title} needs you to sign in, a code appears here in a minute or two`
+          : `${row.name} is stopped. Start it to get a sign-in code for ${title}`
     };
   });
 }

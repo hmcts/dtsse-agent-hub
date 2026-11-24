@@ -27,9 +27,11 @@ import {
   inWords,
   isConnection,
   lapsedSinceStored,
+  lapsedWords,
   microsoftConnection,
   modelAccess,
   modelAccessAfter,
+  NO_CONNECTIONS,
   needsPerson,
   OFFERED_OPTIONAL,
   ON_REQUEST,
@@ -406,7 +408,7 @@ describe("connections", () => {
   it("should say the last sign-in failed when it did and nothing is stored", () => {
     const [row] = list(["atlassian"], [], [login("atlassian", "failed")]);
 
-    expect(row).toMatchObject({ state: "failed", detail: "Last sign-in failed" });
+    expect(row).toMatchObject({ state: "failed", detail: "Sign-in did not work" });
   });
 
   // A credential outlives the sign-in that failed to replace it, so being stored is not on its own a sign-in that
@@ -456,7 +458,7 @@ describe("connections", () => {
  */
 describe("connectorFor", () => {
   it("should say the Azure sign-in is what their agents reach Claude on when the person is on the gateway route", () => {
-    expect(connectorFor("azure", "gateway").desc).toBe("Your HMCTS account, which your agents reach Claude on, as well as your pipelines and environments");
+    expect(connectorFor("azure", "gateway").desc).toBe("Your HMCTS account. Your assistant uses it to reach Claude, and for pipelines and environments");
   });
 
   it("should call the Azure sign-in optional when the person's agents run on their own Claude licence", () => {
@@ -584,7 +586,7 @@ describe("modelAccess", () => {
     expect(modelAccess("gateway", gatewayRows([status("azure", true)]))).toEqual({
       name: "Claude",
       initial: "C",
-      desc: "Through the HMCTS AI Gateway, on your Azure sign-in",
+      desc: "Through the HMCTS AI Gateway, using your Azure sign-in",
       state: "connected",
       detail: "Connected"
     });
@@ -630,7 +632,7 @@ describe("modelAccess", () => {
 
     expect(modelAccess("gateway", rows)).toMatchObject({ name: "Claude", detail: "Waiting for you" });
     expect(signInPrompt(rows)?.message).toBe("Your assistant is waiting for you to sign in to Azure.");
-    expect(connectionsWarning(rows)).toBe("Azure needs your attention");
+    expect(connectionsWarning(rows)).toBe("Azure needs you to sign in");
   });
 
   /**
@@ -680,7 +682,7 @@ describe("connectionsWarning", () => {
   it.each(["expired", "failed"] as const)("should warn about an Azure sign-in that %s on the gateway route, where Claude is reached through it", (state) => {
     const rows = rowsFor("gateway", [status("github", true), status("azure", true)], [lapsed("azure", state)]);
 
-    expect(connectionsWarning(rows)).toBe("Azure needs your attention");
+    expect(connectionsWarning(rows)).toBe("Azure needs you to sign in");
   });
 
   it.each(["expired", "failed"] as const)("should leave an Azure sign-in that %s to settings on the own-licence route", (state) => {
@@ -692,7 +694,7 @@ describe("connectionsWarning", () => {
   it("should warn about an Azure code the person asked for while it is live", () => {
     const rows = list(["github", "azure"], [status("github", true)], [login("azure", "pending")]);
 
-    expect(connectionsWarning(rows)).toBe("Azure needs your attention");
+    expect(connectionsWarning(rows)).toBe("Azure needs you to sign in");
   });
 
   it("should be nothing when there are no sign-ins to report on", () => {
@@ -702,13 +704,13 @@ describe("connectionsWarning", () => {
   it("should name GitHub when it alone is not connected", () => {
     const rows = list(["github", "azure", "atlassian"], [status("atlassian", true)]);
 
-    expect(connectionsWarning(rows)).toBe(`${CONNECTORS.github.name} needs your attention`);
+    expect(connectionsWarning(rows)).toBe(`${CONNECTORS.github.name} needs you to sign in`);
   });
 
   it("should name both when GitHub is not connected and the optional one has lapsed", () => {
     const rows = list(["github", "azure", "atlassian"], [], [login("atlassian", "expired")]);
 
-    expect(connectionsWarning(rows)).toBe("GitHub and Atlassian need your attention");
+    expect(connectionsWarning(rows)).toBe("GitHub and Atlassian need you to sign in");
   });
 
   // The badge the lapsed-sign-in rule exists to raise: everything is stored, so nothing else on any surface says
@@ -720,13 +722,13 @@ describe("connectionsWarning", () => {
       [lapsed("atlassian", "failed")]
     );
 
-    expect(connectionsWarning(rows)).toBe("Atlassian needs your attention");
+    expect(connectionsWarning(rows)).toBe("Atlassian needs you to sign in");
   });
 
   it("should warn when a needed sign-in is still waiting for the person", () => {
     const rows = list(["github", "azure", "atlassian"], [status("azure", true), status("atlassian", true)], [login("github", "pending")]);
 
-    expect(connectionsWarning(rows)).toBe("GitHub needs your attention");
+    expect(connectionsWarning(rows)).toBe("GitHub needs you to sign in");
   });
 
   // A relayed code is a wait on the person whatever is stored behind it: nobody but them can enter it, and a pod's
@@ -734,7 +736,7 @@ describe("connectionsWarning", () => {
   it("should warn about a sign-in relayed behind one that is already stored", () => {
     const rows = list(["github", "azure", "atlassian"], [status("github", true), status("azure", true)], [login("github", "pending")]);
 
-    expect(connectionsWarning(rows)).toBe("GitHub needs your attention");
+    expect(connectionsWarning(rows)).toBe("GitHub needs you to sign in");
   });
 
   it("should not warn about an optional sign-in nobody ever set up", () => {
@@ -746,7 +748,7 @@ describe("connectionsWarning", () => {
   it.each(["expired", "failed"] as const)("should warn about an optional sign-in once it has %s", (state) => {
     const rows = list(["github", "azure", "atlassian"], [status("github", true), status("azure", true)], [login("atlassian", state)]);
 
-    expect(connectionsWarning(rows)).toBe("Atlassian needs your attention");
+    expect(connectionsWarning(rows)).toBe("Atlassian needs you to sign in");
   });
 
   it("should warn about an optional sign-in their assistant has relayed a code for", () => {
@@ -756,7 +758,7 @@ describe("connectionsWarning", () => {
       [login("atlassian", "pending")]
     );
 
-    expect(connectionsWarning(rows)).toBe("Atlassian needs your attention");
+    expect(connectionsWarning(rows)).toBe("Atlassian needs you to sign in");
   });
 
   it("should not warn about an optional sign-in that is over and done with", () => {
@@ -822,7 +824,7 @@ describe("signInPrompt", () => {
   // a sentence that read the same for both would be read out once and then not again when the thing to do changed.
   it("should say the sign-in could not be made when a stored credential is the one it lapsed over", () => {
     expect(signInPrompt(list(["github", "azure", "atlassian"], CONNECTED, [lapsed("atlassian")]))?.message).toBe(
-      "Your assistant could not sign in to Atlassian, and is not asking again by itself."
+      "Signing in to Atlassian did not finish. Get a new code to connect it."
     );
   });
 
@@ -847,7 +849,7 @@ describe("signInPrompt", () => {
   it.each(["expired", "failed"] as const)("should ask for an Azure sign-in that %s on the gateway route, where Claude is reached through it", (state) => {
     const rows = rowsFor("gateway", [status("github", true), status("azure", true)], [lapsed("azure", state)]);
 
-    expect(signInPrompt(rows)?.message).toBe("Your assistant could not sign in to Azure, and is not asking again by itself.");
+    expect(signInPrompt(rows)?.message).toBe("Signing in to Azure did not finish. Get a new code to connect it.");
   });
 
   it.each(["expired", "failed"] as const)("should say nothing of an Azure sign-in that %s on the own-licence route", (state) => {
@@ -1061,10 +1063,10 @@ describe("sign-ins made on request", () => {
     expect(offersConnect({ kind, state: "waiting" })).toBe(false);
   });
 
-  // A connected GitHub token can still lack a scope the hub asks for now, and nothing marks it lapsed, so signing in
-  // again from settings is the only way to the new one.
+  // A connected GitHub token that lacks the `project` scope is signed in to again from the Project search, where that
+  // is missed, so settings offers nothing beside "Connected".
   it.each([
-    ["connected", true],
+    ["connected", false],
     ["waiting", true],
     ["expired", true],
     ["failed", true],
@@ -1123,14 +1125,14 @@ describe("connectionsPrompt", () => {
     expect(connectionsPrompt("connect", ["claude_md"], NOTHING)?.message).toBe("Your assistant needs claude_md before it can work for you.");
   });
 
-  // The whole point of `unknown`: it must not read as "connect these", because as far as anyone knows they are
-  // connected and there is nothing the person can do about the hub not being able to see them.
-  it("should say the sign-ins cannot be checked, and name no connection, when the hub cannot read them", () => {
+  // The whole point of `unknown`: it must not read as "connect these", because a deployment that keeps no credentials
+  // has nothing anyone could connect, and saying so is all the person needs.
+  it("should say connections are not set up here, and name no connection, when the deployment keeps no credentials", () => {
     const prompt = connectionsPrompt("unknown", ["github", "azure", "claude"], NOTHING);
 
-    expect(prompt?.label).toBe("Your sign-ins cannot be checked");
-    expect(prompt?.message).toContain("still connected");
-    expect(prompt?.message).toContain("nothing for you to set up again");
+    expect(prompt?.label).toBe("Connections are not set up here");
+    expect(prompt?.message).toBe("This copy of CFT Workspace has nowhere to keep sign-ins, so nothing can be connected here.");
+    expect(prompt?.action).toBe("Show details");
     expect(prompt?.message).not.toContain("needs");
     for (const name of ["GitHub", "Azure", "Claude"]) {
       expect(prompt?.message).not.toContain(name);
@@ -1250,5 +1252,35 @@ describe("stillNeededLine", () => {
 
   it("should name a kind with no wording of its own by its kind", () => {
     expect(stillNeededLine(["claude_md"], new Set<CredentialKind>())).toBe("Connect claude_md to start.");
+  });
+});
+
+describe("lapsedWords", () => {
+  it("should say the code ran out, and to get a new one, when nothing is saved and the sign-in expired", () => {
+    expect(lapsedWords("Atlassian", false, "expired")).toBe("The Atlassian sign-in code ran out before it was used. Get a new code to try again.");
+  });
+
+  it("should say the sign-in did not work when nothing is saved and it failed", () => {
+    expect(lapsedWords("Azure", false, "failed")).toBe("Signing in to Azure did not work. Get a new code to try again.");
+  });
+
+  it("should say the saved sign-in has stopped working when one is saved, whatever became of the code", () => {
+    for (const state of ["expired", "failed"] as const) {
+      expect(lapsedWords("GitHub", true, state)).toBe("Your saved GitHub sign-in has stopped working. Sign in again to reconnect GitHub.");
+    }
+  });
+});
+
+describe("NO_CONNECTIONS", () => {
+  it("should say nothing can be connected, that it is not the person's accounts, and who to tell", () => {
+    expect(NO_CONNECTIONS.body).toContain("cannot connect GitHub, Azure, Claude");
+    expect(NO_CONNECTIONS.body).toContain("not a problem with your accounts");
+    expect(NO_CONNECTIONS.body).toContain("tell the people who run it");
+  });
+
+  it("should give the backend's reason as a detail, as a sentence", () => {
+    expect(NO_CONNECTIONS.detail("set SESSION_SECRET to keep credentials in the local encrypted store")).toBe(
+      "Technical detail: set SESSION_SECRET to keep credentials in the local encrypted store."
+    );
   });
 });

@@ -6,6 +6,7 @@ import { useLayoutEffect } from "react";
 import { hydrateRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { NO_CONNECTIONS } from "@/assistant/connections";
 import { readiness, stoppedLine } from "@/assistant/onboarding";
 import type { AssistantSummary } from "@/assistant/views";
 import { WAITING_COOKIE, waitingCookie, waitingDismissed } from "@/assistant/waiting";
@@ -233,7 +234,8 @@ describe("WarmingUp", () => {
   it("should say the assistant is unavailable when the page says so", () => {
     render(<WarmingUp assistant={assistant()} unavailable="Virtual agents are not available here" theme="dark" onDismiss={() => undefined} />);
 
-    expect(screen.getByText("Virtual agents are not available here")).toBeTruthy();
+    expect(screen.getByText("Technical detail: Virtual agents are not available here.")).toBeTruthy();
+    expect(screen.getByText(NO_CONNECTIONS.short)).toBeTruthy();
   });
 });
 
