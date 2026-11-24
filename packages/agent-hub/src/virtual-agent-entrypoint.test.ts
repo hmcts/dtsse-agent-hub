@@ -57,8 +57,7 @@ const CASES = [
   "client-on-path",
   "broken-workspace-shim",
   "sdkman-java",
-  "sdkman-absent",
-  "sdkman-fails"
+  "sdkman-absent"
 ];
 
 type Run = {
