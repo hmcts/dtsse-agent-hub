@@ -141,8 +141,10 @@ describe("folders made and deleted at once", () => {
       await new Promise((resolve) => setTimeout(resolve, 200));
       await other.query("COMMIT");
 
-      await expect(moving).rejects.toMatchObject({ status: 404, message: "no such folder" });
-      await expect(starting).rejects.toMatchObject({ status: 404, message: "no such folder" });
+      // Settled together: both reject at once, and awaiting one at a time leaves the other unhandled meanwhile.
+      const [moved, started] = await Promise.allSettled([moving, starting]);
+      expect(moved).toMatchObject({ status: "rejected", reason: { status: 404, message: "no such folder" } });
+      expect(started).toMatchObject({ status: "rejected", reason: { status: 404, message: "no such folder" } });
     } finally {
       await other.end();
     }
