@@ -17,7 +17,7 @@ import {
   warmConversation
 } from "@/app/_actions/assistant";
 import { removeDeck, restoreDeckVersion, saveDeck } from "@/app/_actions/decks";
-import { moveConversationToFolder } from "@/app/_actions/folders";
+import { createFolder, moveConversationToFolder } from "@/app/_actions/folders";
 import { offerChatFork, withdrawChatFork } from "@/app/_actions/forks";
 import { answerAgentQuestion } from "@/app/_actions/questions";
 import { shareChat, unshareChat } from "@/app/_actions/shares";
@@ -42,6 +42,7 @@ const ACTIONS: ChatActions = {
   pin: pinConversation,
   remove: deleteConversation,
   move: moveConversationToFolder,
+  createFolder,
   answerQuestion: answerAgentQuestion,
   removeArtefact,
   removeDeck,

@@ -39,6 +39,7 @@ import type { RestoreDeckAction } from "@/components/assistant/DeckHistory";
 import { DeckPanel, type SlideAsk } from "@/components/assistant/DeckPanel";
 import { DocmosisPanel, type LoadSettled, useTemplateLoad } from "@/components/assistant/DocmosisPanel";
 import { ticketsOffered } from "@/components/assistant/ExportFooter";
+import { type CreateFolderAction, createAndMoveInto, type MoveToFolderAction } from "@/components/assistant/FolderList";
 import { ForkedThread } from "@/components/assistant/ForkedThread";
 import { type StartAssistantAction, StartButton } from "@/components/assistant/GettingReady";
 import type { ExportToGithubAction } from "@/components/assistant/GithubExport";
@@ -73,7 +74,9 @@ export interface ChatActions {
   pin: (input: { conversationId: unknown; pinned: unknown }) => Promise<ActionResult>;
   remove: (input: { conversationId: unknown }) => Promise<ActionResult>;
   /** Puts the chat in one of the person's folders, or in none; without it, and `folders`, the menu has no Move to folder. */
-  move?: (input: { conversationId: unknown; folderId: unknown }) => Promise<ActionResult>;
+  move?: MoveToFolderAction;
+  /** Makes a folder from the Move to folder pane, which the chat is then moved into; without it there is no New folder. */
+  createFolder?: CreateFolderAction;
   /** The person's answer to a question the assistant asked with its own question tool. */
   answerQuestion: AnswerQuestionAction;
   saveArtefact: SaveArtefactAction;
@@ -1241,8 +1244,9 @@ export function ChatView({
     router.refresh();
   }
 
-  // Read once, so the menu's handler sees the action the check below found.
+  // Read once, so the menu's handlers see the actions the checks below found.
   const move = actions.move;
+  const createFolder = actions.createFolder;
   return (
     <div className="flex min-h-0 flex-1">
       <div className="flex min-w-0 flex-1 flex-col">
@@ -1299,6 +1303,16 @@ export function ChatView({
                   : {
                       folders,
                       current: view.folderId ?? null,
+                      onCreate:
+                        createFolder === undefined
+                          ? undefined
+                          : async (name) => {
+                              const refusal = await createAndMoveInto(createFolder, move, view.id, name);
+                              if (refusal === null) {
+                                router.refresh();
+                              }
+                              return refusal;
+                            },
                       onMove: async (folderId) => {
                         const result = await move({ conversationId: view.id, folderId });
                         setError(result.ok ? null : result.error);

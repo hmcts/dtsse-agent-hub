@@ -11,9 +11,10 @@ const TRIGGER = "flex h-[34px] w-[34px] items-center justify-center rounded-[9px
 
 /**
  * A generous allowance for the panel's height, used to decide which way it opens before it is rendered and can be
- * measured. Its tallest pane, a laptop chat's delete confirmation carrying a refusal, comes to about 210px.
+ * measured. Its tallest pane, Move to folder with its folders scrolling at their most and Remove from folder below,
+ * comes to about 330px.
  */
-const PANEL_HEIGHT = 250;
+const PANEL_HEIGHT = 360;
 
 /** How wide the panel is wherever there is room for it; the sidebar can be dragged narrower than this. */
 const PANEL_WIDTH = 240;
@@ -128,7 +129,16 @@ export function ChatMenu({
    * The person's folders and the one the chat is in, null for none, and how to move it. Without it there is no Move to
    * folder item.
    */
-  move?: { folders: readonly MoveTarget[]; current: string | null; onMove: (folderId: string | null) => Promise<void> };
+  move?: {
+    folders: readonly MoveTarget[];
+    current: string | null;
+    onMove: (folderId: string | null) => Promise<void>;
+    /**
+     * Makes a folder of the name typed and moves the chat into it, answering a refusal to show in the pane, or null once
+     * it is done. Without it there is no New folder item.
+     */
+    onCreate?: (name: string) => Promise<string | null>;
+  };
 }) {
   const [open, setOpen] = useState<"closed" | "menu" | "rename" | "delete" | "move">("closed");
   const [draft, setDraft] = useState(title);
@@ -141,6 +151,10 @@ export function ChatMenu({
   const menu = useRef<HTMLDivElement>(null);
   const keepChat = useRef<HTMLButtonElement>(null);
   const moveList = useRef<HTMLDivElement>(null);
+  const folderBox = useRef<HTMLInputElement>(null);
+  // Whether the Move to folder pane is asking for a new folder's name, and the name typed so far.
+  const [naming, setNaming] = useState(false);
+  const [folderDraft, setFolderDraft] = useState("");
   const [running, setRunning] = useState(false);
   // Read as well as shown: two presses before the next render both see `running` false.
   const busy = useRef(false);
@@ -163,9 +177,15 @@ export function ChatMenu({
     } else if (open === "delete") {
       keepChat.current?.focus();
     } else if (open === "move") {
-      moveList.current?.querySelector<HTMLElement>("button:not(:disabled)")?.focus();
+      moveList.current?.querySelector<HTMLElement>("[data-folder]:not(:disabled), [data-new-folder]")?.focus();
     }
   }, [open]);
+
+  useEffect(() => {
+    if (naming) {
+      folderBox.current?.focus();
+    }
+  }, [naming]);
 
   /** The menu's keys, as every menu in the Assistant answers them. */
   function moveInMenu(event: React.KeyboardEvent<HTMLDivElement>): void {
@@ -177,7 +197,33 @@ export function ChatMenu({
   /** Opens a pane, forgetting whatever the last attempt reported. */
   function show(next: "menu" | "rename" | "delete" | "move"): void {
     setProblem(null);
+    setNaming(false);
+    setFolderDraft("");
     setOpen(next);
+  }
+
+  /** Makes the folder typed and moves the chat into it; a refusal stays in the pane, beside the name, to be corrected. */
+  async function createAndMove(create: (name: string) => Promise<string | null>): Promise<void> {
+    if (busy.current) {
+      return;
+    }
+    busy.current = true;
+    setProblem(null);
+    setRunning(true);
+    try {
+      const refusal = await create(folderDraft);
+      if (refusal !== null) {
+        setProblem(refusal);
+        return;
+      }
+    } catch (error) {
+      setProblem(actionThrew(error, UNREACHABLE("new folder")));
+      return;
+    } finally {
+      busy.current = false;
+      setRunning(false);
+    }
+    close();
   }
 
   function toggle(): void {
@@ -275,18 +321,75 @@ export function ChatMenu({
             </div>
           ) : open === "move" && move !== undefined ? (
             <div ref={moveList} role="group" aria-label="Move to folder" className="flex flex-col gap-0.5">
-              <p className="px-2.5 pb-1 pt-1.5 text-xs text-asst-faint">Move to folder</p>
-              {move.folders.length === 0 ? (
-                <p className="px-2.5 pb-1.5 text-sm text-asst-muted">You have no folders yet. Make one with the + beside Folders.</p>
-              ) : (
-                <div className="flex max-h-[200px] flex-col gap-0.5 overflow-y-auto">
-                  {move.folders.map((folder) => (
-                    <MoveButton
-                      key={folder.id}
-                      label={folder.name}
-                      chosen={move.current === folder.id}
-                      onPick={() => void run("move", () => move.onMove(folder.id))}
+              <div className="flex items-center gap-1 pb-0.5">
+                <button
+                  type="button"
+                  aria-label="Back to chat options"
+                  title="Back"
+                  onClick={() => show("menu")}
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-asst-muted hover:bg-asst-active hover:text-asst-text"
+                >
+                  <span aria-hidden="true">←</span>
+                </button>
+                <p className="text-xs text-asst-faint">Move to folder</p>
+              </div>
+              {move.onCreate === undefined ? null : naming ? (
+                <form
+                  method="post"
+                  className="flex flex-col gap-1.5 px-1 pb-1"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    if (move.onCreate !== undefined) {
+                      void createAndMove(move.onCreate);
+                    }
+                  }}
+                >
+                  <label className="flex flex-col gap-1">
+                    <span className="sr-only">New folder name</span>
+                    <input
+                      ref={folderBox}
+                      value={folderDraft}
+                      maxLength={FOLDER_NAME_MAX}
+                      placeholder="Folder name"
+                      onChange={(event) => setFolderDraft(event.target.value)}
+                      className="rounded-lg border border-asst-strong bg-asst-field px-2.5 py-1.5 text-sm outline-hidden focus:border-asst-accent-line"
                     />
+                  </label>
+                  <button
+                    type="submit"
+                    disabled={running}
+                    className="self-end rounded-lg bg-asst-accent px-3 py-1 text-sm font-semibold text-asst-ink disabled:opacity-60"
+                  >
+                    {running ? "Creating…" : "Create and move"}
+                  </button>
+                </form>
+              ) : (
+                <button
+                  type="button"
+                  data-new-folder=""
+                  onClick={() => {
+                    setProblem(null);
+                    setNaming(true);
+                  }}
+                  className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-asst-active"
+                >
+                  <span aria-hidden="true" className="w-3 text-center text-asst-accent">
+                    +
+                  </span>
+                  New folder
+                </button>
+              )}
+              {move.folders.length === 0 ? (
+                move.onCreate === undefined ? (
+                  <p className="px-2.5 pb-1.5 text-sm text-asst-muted">You have no folders yet. Make one with the + beside Folders.</p>
+                ) : null
+              ) : (
+                // Scrolls once there are more folders than fit, so the pane keeps to the room the menu was placed in.
+                <div aria-label="Folders" role="list" className="flex max-h-[180px] flex-col gap-0.5 overflow-y-auto overscroll-contain">
+                  {move.folders.map((folder) => (
+                    <div role="listitem" key={folder.id}>
+                      <MoveButton label={folder.name} chosen={move.current === folder.id} onPick={() => void run("move", () => move.onMove(folder.id))} />
+                    </div>
                   ))}
                 </div>
               )}
@@ -352,10 +455,11 @@ function MoveButton({ label, chosen, onPick }: { label: string; chosen: boolean;
   return (
     <button
       type="button"
+      data-folder=""
       aria-pressed={chosen}
       disabled={chosen}
       onClick={onPick}
-      className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-asst-active disabled:hover:bg-transparent"
+      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-asst-active disabled:hover:bg-transparent"
     >
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {chosen ? <span className="shrink-0 text-xs text-asst-muted">Current</span> : null}

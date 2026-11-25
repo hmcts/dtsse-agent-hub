@@ -1688,6 +1688,59 @@ describe("ChatView menu", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
+  it("should make a new folder from the open chat's Move to folder and move the chat into it", async () => {
+    const move = ok();
+    const createFolder = vi.fn(async () => ({ ok: true as const, id: "made" }));
+    render(
+      <ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions({ move, createFolder })} folders={FOLDERS} />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move to folder" }));
+    fireEvent.click(screen.getByRole("button", { name: /New folder/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: "New folder name" }), { target: { value: "Hearings" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Create and move" }));
+    });
+
+    expect(createFolder).toHaveBeenCalledWith({ name: "Hearings" });
+    expect(move).toHaveBeenCalledWith({ conversationId: CONVERSATION, folderId: "made" });
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it("should keep a refused new folder's refusal in the pane and not refresh", async () => {
+    const createFolder = vi.fn(async () => ({ ok: false as const, error: "you can have up to 100 folders; delete one to make another" }));
+    render(
+      <ChatView
+        jira={NO_JIRA}
+        viewerOid={VIEWER}
+        view={conversation()}
+        templates={TEMPLATES}
+        actions={actions({ move: ok(), createFolder })}
+        folders={FOLDERS}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move to folder" }));
+    fireEvent.click(screen.getByRole("button", { name: /New folder/ }));
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("textbox", { name: "New folder name" }));
+    });
+
+    expect(screen.getByRole("alert").textContent).toContain("up to 100 folders");
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("should offer no New folder without the action to make one", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions({ move: ok() })} folders={FOLDERS} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move to folder" }));
+
+    expect(screen.queryByRole("button", { name: /New folder/ })).toBeNull();
+  });
+
   it("should offer no Move to folder without the person's folders or the action", () => {
     const { rerender } = render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions({ move: ok() })} />);
     fireEvent.click(screen.getByRole("button", { name: "Chat options" }));

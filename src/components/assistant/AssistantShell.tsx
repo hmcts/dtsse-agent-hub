@@ -19,7 +19,7 @@ import { ConversationSearch } from "@/components/assistant/ConversationSearch";
 import type { AssistantExportDefaults } from "@/components/assistant/ExportSettings";
 import { FeedbackMenu } from "@/components/assistant/FeedbackMenu";
 import type { AssistantFiles } from "@/components/assistant/FileSettings";
-import { FolderList, type SidebarFolders } from "@/components/assistant/FolderList";
+import { createAndMoveInto, FolderList, type SidebarFolders } from "@/components/assistant/FolderList";
 import type { AssistantGitIdentity } from "@/components/assistant/GitIdentitySettings";
 import { LiveLocalSessions } from "@/components/assistant/LiveLocalSessions";
 import { besideSidebar, SIDEBAR_DRAWER_MAX_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH } from "@/components/assistant/layout";
@@ -474,6 +474,13 @@ export function AssistantShell({
                                       : {
                                           folders: folders.list,
                                           current: item.folderId ?? null,
+                                          onCreate: async (name) => {
+                                            const refusal = await createAndMoveInto(folders.create, folders.move, item.id, name);
+                                            if (refusal === null) {
+                                              router.refresh();
+                                            }
+                                            return refusal;
+                                          },
                                           onMove: async (folderId) => {
                                             const result = await folders.move({ conversationId: item.id, folderId });
                                             report(result);
