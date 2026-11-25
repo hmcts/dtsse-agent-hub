@@ -8,6 +8,7 @@ import { AssistantShell, type ConversationActions } from "@/components/assistant
 import { ChatMenu } from "@/components/assistant/ChatMenu";
 import { EmptyChat, type EmptyChatActions, type EmptyFolder, folderDraftId } from "@/components/assistant/EmptyChat";
 import { createAndMoveInto, FolderList, type SidebarFolders } from "@/components/assistant/FolderList";
+import { stubWideWindow } from "./wide-window";
 
 const VIEWER = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 const FOLDER = "11111111-1111-1111-1111-111111111111";
@@ -29,20 +30,7 @@ vi.mock("@/components/live/HubStream", () => ({
 }));
 
 beforeEach(() => {
-  Object.defineProperty(window, "matchMedia", {
-    configurable: true,
-    writable: true,
-    value: () => ({ matches: false, addEventListener: () => undefined, removeEventListener: () => undefined })
-  });
-  Object.defineProperty(globalThis, "ResizeObserver", {
-    configurable: true,
-    writable: true,
-    value: class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-  });
+  stubWideWindow();
 });
 
 afterEach(() => {
@@ -470,8 +458,8 @@ describe("AssistantShell with folders", () => {
     expect(refresh).toHaveBeenCalled();
   });
 
-  it("should make a new folder from a row's Move to folder and move the chat into it", async () => {
-    const folders = sidebarFolders({ create: vi.fn(async () => ({ ok: true as const, id: "made" })) });
+  /** The sidebar with one chat, "Event help", whose row's Move to folder pane is open. */
+  function openRowMove(folders: SidebarFolders): void {
     render(
       <AssistantShell
         now={Date.now()}
@@ -484,10 +472,19 @@ describe("AssistantShell with folders", () => {
         <p>page</p>
       </AssistantShell>
     );
-
     fireEvent.click(screen.getByRole("button", { name: "Options for Event help" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Move to folder" }));
+  }
+
+  /** Opens New folder in the open Move to folder pane. */
+  function startNewFolder(): void {
     fireEvent.click(within(screen.getByRole("group", { name: "Move to folder" })).getByRole("button", { name: /New folder/ }));
+  }
+
+  it("should make a new folder from a row's Move to folder and move the chat into it", async () => {
+    const folders = sidebarFolders({ create: vi.fn(async () => ({ ok: true as const, id: "made" })) });
+    openRowMove(folders);
+    startNewFolder();
     fireEvent.change(screen.getByRole("textbox", { name: "New folder name" }), { target: { value: "Hearings" } });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Create and move" }));
@@ -500,22 +497,8 @@ describe("AssistantShell with folders", () => {
 
   it("should keep a refused new folder's refusal in the pane and not refresh", async () => {
     const folders = sidebarFolders({ create: vi.fn(async () => ({ ok: false as const, error: "a folder name is 1 to 80 characters" })) });
-    render(
-      <AssistantShell
-        now={Date.now()}
-        viewerName="Alice Smith"
-        groups={[{ label: "Today", items: [link("a", "Event help")] }]}
-        activeId={null}
-        actions={actions()}
-        folders={folders}
-      >
-        <p>page</p>
-      </AssistantShell>
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Options for Event help" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Move to folder" }));
-    fireEvent.click(within(screen.getByRole("group", { name: "Move to folder" })).getByRole("button", { name: /New folder/ }));
+    openRowMove(folders);
+    startNewFolder();
     await act(async () => {
       fireEvent.submit(screen.getByRole("textbox", { name: "New folder name" }));
     });
@@ -526,21 +509,7 @@ describe("AssistantShell with folders", () => {
 
   it("should show the refusal under the row when the move is refused", async () => {
     const folders = sidebarFolders({ move: vi.fn(async () => ({ ok: false as const, error: "no such folder" })) });
-    render(
-      <AssistantShell
-        now={Date.now()}
-        viewerName="Alice Smith"
-        groups={[{ label: "Today", items: [link("a", "Event help")] }]}
-        activeId={null}
-        actions={actions()}
-        folders={folders}
-      >
-        <p>page</p>
-      </AssistantShell>
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Options for Event help" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Move to folder" }));
+    openRowMove(folders);
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Possession claims" }));
     });

@@ -13,6 +13,7 @@ import type { CredentialStatus } from "@/credentials/store";
 import type { ThreadMessage } from "@/messages/direct-thread";
 import { neededCredentials, OPTIONAL_CREDENTIALS } from "@/virtual-agents/views";
 import type { AssistantHome } from "@/web/data";
+import { stubWideWindow } from "./wide-window";
 
 const AGENT = "11111111-1111-1111-1111-111111111111";
 const CONVERSATION = "22222222-2222-2222-2222-222222222222";
@@ -34,20 +35,7 @@ vi.mock("@/app/_actions/credentials", () => ({ saveCredential: vi.fn() }));
 vi.mock("@/app/_actions/virtual-agents", () => ({ pasteLoginCode: vi.fn(), reconnectSignIn: vi.fn(), startAssistant: vi.fn() }));
 
 beforeEach(() => {
-  Object.defineProperty(window, "matchMedia", {
-    configurable: true,
-    writable: true,
-    value: () => ({ matches: false, addEventListener: () => undefined, removeEventListener: () => undefined })
-  });
-  Object.defineProperty(globalThis, "ResizeObserver", {
-    configurable: true,
-    writable: true,
-    value: class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-  });
+  stubWideWindow();
 });
 
 afterEach(() => {

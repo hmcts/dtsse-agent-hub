@@ -12,6 +12,7 @@ import { NO_LONGER_HELD, STILL_HELD } from "@/components/assistant/MessageAttach
 import type { UploadRequest } from "@/components/assistant/uploadClient";
 import type { ThreadMessage } from "@/messages/direct-thread";
 import type { ConversationPage } from "@/transcripts/conversation";
+import { stubWideWindow } from "./wide-window";
 
 /**
  * The network is stubbed at the `uploadClient` seam: what a part is and how it is carried is covered in
@@ -54,21 +55,7 @@ vi.mock("@/components/live/HubStream", () => ({
 }));
 
 beforeEach(() => {
-  Object.defineProperty(window, "matchMedia", {
-    configurable: true,
-    writable: true,
-    value: () => ({ matches: false, addEventListener: () => undefined, removeEventListener: () => undefined })
-  });
-  // The message box watches its own width, which jsdom has neither an observer nor a layout for.
-  Object.defineProperty(globalThis, "ResizeObserver", {
-    configurable: true,
-    writable: true,
-    value: class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-  });
+  stubWideWindow();
 });
 
 afterEach(() => {
