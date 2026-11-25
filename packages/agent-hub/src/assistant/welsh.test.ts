@@ -19,6 +19,7 @@ import {
 
 const JOB = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const FILE = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+const FILE_2 = "9b2d6b1e-4c7a-4f3e-8a55-2f1d0c9e7a10";
 const WS = "/workspace/cft-workspace";
 const paths = welshPaths("/tmp/j", { file_name: "return.xlsx" });
 
@@ -62,6 +63,24 @@ describe("parseWelshFrame", () => {
     expect(parseWelshFrame({ job_id: JOB, kind: "import", product: "cath", args: { file_id: FILE }, file_name: "Ymateb Hydref.xlsx" })?.file_name).toBe(
       "Ymateb Hydref.xlsx"
     );
+  });
+
+  it("should take a setup's repo and its uploads under the names the hub sent, and refuse anything else", () => {
+    const setup = (args: Record<string, unknown>, file_names: unknown = { [FILE]: "Old catalogue.xlsx", [FILE_2]: "copy.json" }) =>
+      parseWelshFrame({ job_id: JOB, kind: "setup", product: "pcs", args, file_names });
+    expect(setup({ repo: "apps/pcs/pcs-frontend", file_ids: [FILE, FILE_2] })?.sources).toEqual([
+      { file_id: FILE, name: "Old catalogue.xlsx" },
+      { file_id: FILE_2, name: "copy.json" }
+    ]);
+    expect(setup({ repo: "apps/pcs/pcs-frontend" })?.sources).toEqual([]);
+    expect(setup({ file_ids: [FILE] })).toBeNull();
+    expect(setup({ repo: "apps/cath/cath-service", file_ids: [FILE] })).toBeNull();
+    expect(setup({ repo: "apps/pcs/pcs-frontend", file_ids: [FILE, FILE] })).toBeNull();
+    expect(setup({ repo: "apps/pcs/pcs-frontend", file_ids: "x" })).toBeNull();
+    expect(setup({ repo: "apps/pcs/pcs-frontend", file_ids: ["not-a-uuid"] }, { "not-a-uuid": "a.xlsx" })).toBeNull();
+    expect(setup({ repo: "apps/pcs/pcs-frontend", file_ids: [FILE] }, { [FILE]: "../a.xlsx" })).toBeNull();
+    expect(setup({ repo: "apps/pcs/pcs-frontend", file_ids: [FILE] }, { [FILE]: "notes.txt" })).toBeNull();
+    expect(setup({ repo: "apps/pcs/pcs-frontend", file_ids: [FILE] }, null)).toBeNull();
   });
 
   it("should take a story preview's strings and choices, and refuse a string carrying a line break", () => {
@@ -188,6 +207,28 @@ describe("welshArgs", () => {
     expect(welshArgs(frame("info", {}), WS, paths)).toEqual(["info", "--service", "cath"]);
   });
 
+  it("should set up from each upload, read as a spreadsheet or JSON by its name, with the repo as a workspace path", () => {
+    const extra = { file_names: { [FILE]: "Old.xlsx", [FILE_2]: "copy.json" } };
+    const check = frame("setup_check", { repo: "apps/cath/cath-service", file_ids: [FILE, FILE_2] }, extra);
+    const setupPaths = welshPaths("/tmp/j", check);
+    expect(setupPaths.sources).toEqual(["/tmp/j/sources/0/Old.xlsx", "/tmp/j/sources/1/copy.json"]);
+    expect(welshArgs(check, WS, setupPaths)).toEqual([
+      "setup",
+      "--service",
+      "cath",
+      "--repo",
+      "apps/cath/cath-service",
+      "--xlsx",
+      "/tmp/j/sources/0/Old.xlsx",
+      "--json",
+      "/tmp/j/sources/1/copy.json",
+      "--dry-run"
+    ]);
+    const setup = frame("setup", { repo: "apps/cath/cath-service", file_ids: [] });
+    expect(welshArgs(setup, WS, welshPaths("/tmp/j", setup))).toEqual(["setup", "--service", "cath", "--repo", "apps/cath/cath-service", "--pr"]);
+    expect(welshOutputs(setup, paths, "2026-11-25")).toEqual([]);
+  });
+
   it("should name each spreadsheet for the person downloading it", () => {
     expect(welshOutputs(frame("request", {}), paths, "2026-10-29")).toEqual([{ path: "/tmp/j/request.xlsx", name: "cath-welsh-request-2026-10-29.xlsx" }]);
     expect(welshOutputs(frame("scan", {}), paths, "2026-10-29")).toEqual([]);
@@ -292,6 +333,36 @@ describe("runWelsh", () => {
     expect(api.welshFile).toHaveBeenCalledWith("va", FILE);
     expect(seen).toBe("PK-return");
     expect(answers[0]?.body).toEqual({ result: { message: "" } });
+  });
+
+  it("should fetch every upload a setup reads into a folder of its own before running the script", async () => {
+    // Arrange
+    const seen: string[] = [];
+    const { d, api } = deps({
+      run: vi.fn(async (_cmd: string, args: string[]) => {
+        for (const [i, arg] of args.entries()) {
+          if (args[i - 1] === "--xlsx" || args[i - 1] === "--json") {
+            seen.push(readFileSync(arg, "utf8"));
+          }
+        }
+        return { code: 0, stdout: "{}", stderr: "" };
+      })
+    });
+    const frame = parseWelshFrame({
+      job_id: JOB,
+      kind: "setup_check",
+      product: "cath",
+      args: { repo: "apps/cath/cath-service", file_ids: [FILE, FILE_2] },
+      file_names: { [FILE]: "same.xlsx", [FILE_2]: "same.json" }
+    });
+
+    // Act
+    await runWelsh(d, frame as NonNullable<typeof frame>);
+
+    // Assert
+    expect(api.welshFile).toHaveBeenCalledWith("va", FILE);
+    expect(api.welshFile).toHaveBeenCalledWith("va", FILE_2);
+    expect(seen).toEqual(["PK-return", "PK-return"]);
   });
 
   it("should answer signed_out for a missing sign-in and failed with the script's message otherwise", async () => {

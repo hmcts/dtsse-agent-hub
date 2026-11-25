@@ -33,8 +33,8 @@ export interface JobState {
   unsure?: boolean;
 }
 
-/** The kinds that write somewhere outside the page: a pull request, a Jira story, or the service's catalogue. */
-const WRITING_KINDS: readonly WelshKind[] = ["apply", "story_write", "import", "keep_english"];
+/** The kinds that write somewhere outside the page: a pull request, a Jira story, or the service's catalogue, or set it up. */
+const WRITING_KINDS: readonly WelshKind[] = ["apply", "story_write", "import", "keep_english", "setup"];
 
 /** One job at a time per section: starting another abandons the one before, whose answer then changes nothing. */
 export function useWelshJob(client: WelshClient) {

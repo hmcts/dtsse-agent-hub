@@ -8,6 +8,7 @@ import { doneResult, FIELD, JobStatus, LINK, plural, ReportStepsTotal, Step, Ste
 import { WelshReturn } from "@/components/assistant/WelshReturn";
 import { WelshScan } from "@/components/assistant/WelshScan";
 import { WelshSearch } from "@/components/assistant/WelshSearch";
+import { SETUP_STEPS, WelshSetup } from "@/components/assistant/WelshSetup";
 import { WelshStory } from "@/components/assistant/WelshStory";
 import { type WelshClient, welshClient } from "@/components/assistant/welshClient";
 
@@ -108,9 +109,9 @@ export function WelshPage({ products, initialProduct = null, initialTask = null,
         <div role="note" className="flex flex-col gap-1 rounded-[10px] border-l-4 border-asst-accent bg-asst-field px-4 py-3 text-[13px]">
           <p className="font-semibold text-asst-text">Before you start</p>
           <p className="text-asst-body">
-            The service needs to be set up for Welsh first: a Welsh catalogue of the translations the Welsh Language Unit has approved for it, and a list of its
-            repos, kept in a welsh folder in the service's own repo. A developer sets this up. You will see in the first step whether the service you pick is
-            ready.
+            The service needs to be set up for Welsh first: a Welsh catalogue of the translations the Welsh Language Unit has approved for it, kept in a welsh
+            folder in the service's own repo. You will see in the first step whether the service you pick is ready. If it is not, you can set it up there, from
+            any spreadsheets or JSON files of Welsh the team already has.
           </p>
         </div>
         <ul className="grid gap-3 sm:grid-cols-2">
@@ -145,7 +146,7 @@ export function WelshPage({ products, initialProduct = null, initialTask = null,
         </h2>
         <p className="text-[13px] text-asst-muted">{chosen.description}</p>
       </div>
-      <Steps label={chosen.title} total={stepsIn(chosen.id) ?? reported}>
+      <Steps label={chosen.title} total={view !== null && !view.initialised ? SETUP_STEPS : (stepsIn(chosen.id) ?? reported)}>
         <Step n={1} title="Service" done={ready} summary={ready ? label : undefined}>
           {product === null || changing ? (
             <label className="flex flex-col gap-1 text-[13px]">
@@ -212,8 +213,7 @@ function ServiceFacts({ info }: Readonly<{ info: WelshInfo }>) {
   if (!info.initialised) {
     return (
       <span className="text-asst-warn">
-        This service is not set up for Welsh yet: it has no Welsh catalogue, so there is nothing approved to search or fill from. Ask a developer to set it up
-        in the service's own repo.
+        This service is not set up for Welsh yet: it has no Welsh catalogue, so there is nothing approved to search or fill from. Set it up below first.
       </span>
     );
   }
@@ -227,6 +227,9 @@ function ServiceFacts({ info }: Readonly<{ info: WelshInfo }>) {
 }
 
 function TaskSteps({ task, product, info, client }: Readonly<{ task: WelshTask; product: string; info: WelshInfo; client: WelshClient }>) {
+  if (!info.initialised) {
+    return <WelshSetup product={product} candidates={info.candidates} openPr={info.setupPr} client={client} />;
+  }
   const repos = info.repos;
   switch (task) {
     case "search":

@@ -440,10 +440,15 @@ describe("WelshPage, the less common paths", () => {
     expect(screen.getByText(/1 place need a developer/)).toBeTruthy();
   });
 
-  it("should say when a service has no repos or no catalogue yet", async () => {
-    await open("scan", { ...ANSWERS, info: done("info", { initialised: false, repos: [] }) });
-    expect(screen.getByText(/This service is not set up for Welsh yet/)).toBeTruthy();
+  it("should say when a service has no repos yet", async () => {
+    await open("scan", { ...ANSWERS, info: done("info", { initialised: true, repos: [], catalogue: { approved: 1 } }) });
     expect(screen.getByText(/No code repositories are set up for this service yet/)).toBeTruthy();
+  });
+
+  it("should say when a service has no catalogue and nowhere to keep one", async () => {
+    await open("scan", { ...ANSWERS, info: done("info", { initialised: false, repos: [], candidates: [] }) });
+    expect(screen.getByText(/This service is not set up for Welsh yet/)).toBeTruthy();
+    expect(screen.getByText(/no repos in the CFT Workspace/)).toBeTruthy();
   });
 
   it("should put a return into the repo chosen after it is added, and start again with another spreadsheet", async () => {
@@ -694,6 +699,106 @@ describe("WelshPage, getting through a task", () => {
     expect(screen.getByRole("heading", { name: "The Welsh unit sent translations back" })).toBeTruthy();
     expect(screen.getByText(SET_UP)).toBeTruthy();
     expect(new URLSearchParams(window.location.search).get("task")).toBe("return");
+  });
+});
+
+describe("WelshPage, setting a service up", () => {
+  const notSetUp = (extra: Record<string, unknown> = {}) =>
+    done("info", { initialised: false, repos: [], candidates: ["apps/cath/cath-frontend", "apps/cath/cath-service"], setupPr: null, ...extra });
+  const checked = done("setup_check", {
+    sources: 2,
+    read: 120,
+    added: 110,
+    needsReview: 4,
+    overriddenCopies: 3,
+    conflicts: 1,
+    conflictExamples: [
+      {
+        english: "Back",
+        context: "",
+        options: [
+          { welsh: "Yn ôl", where: "legacy:old.xlsx row 3" },
+          { welsh: "Nôl", where: "legacy:copy.json" }
+        ]
+      }
+    ],
+    unreadable: [],
+    repo: "apps/cath/cath-service",
+    dryRun: true
+  });
+  const SETUP = {
+    ...ANSWERS,
+    info: notSetUp(),
+    setup_check: checked,
+    setup: done("setup", { ...(checked.status === "done" ? checked.result : {}), pr: "https://github.com/hmcts/cath-service/pull/77" })
+  };
+  const ids = ["aaaaaaaa-1111-4111-8111-111111111111", "bbbbbbbb-2222-4222-8222-222222222222", "cccccccc-3333-4333-8333-333333333333"];
+
+  async function addFiles(fake: WelshClient, names: string[]) {
+    for (const id of ids.slice(0, names.length)) {
+      vi.mocked(fake.upload).mockResolvedValueOnce({ file_id: id });
+    }
+    fireEvent.change(screen.getByLabelText(/Spreadsheets \(.xlsx\) or JSON files/), { target: { files: names.map((n) => new File(["PK"], n)) } });
+    await screen.findByText(names.at(-1) as string, { selector: ".break-all" });
+  }
+
+  it("should set a service up from several earlier files in the repo chosen, checked first and opened only once confirmed", async () => {
+    // Arrange
+    const { fake, requests } = await open("search", SETUP);
+    expect(screen.getByRole("list", { name: "Look up a translation" }).textContent).toMatch(/Step 1 of 5/);
+
+    // Act
+    fireEvent.change(screen.getByLabelText("Which repo keeps the service's Welsh"), { target: { value: "apps/cath/cath-service" } });
+    await addFiles(fake, ["old.xlsx", "copy.json", "second.xlsx"]);
+    fireEvent.click(screen.getByRole("button", { name: "Remove second.xlsx" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check them" }));
+    await screen.findByText(/120 translations read from 2 files: 110 catalogue rows, 4 of them needing review/);
+    fireEvent.click(screen.getByRole("button", { name: "Set up Welsh for this service" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open the pull request" }));
+
+    // Assert
+    expect(await screen.findByRole("link", { name: /cath-service\/pull\/77/ })).toBeTruthy();
+    const setups = requests.filter((r) => r.kind.startsWith("setup"));
+    expect(setups.map((r) => r.kind)).toEqual(["setup_check", "setup"]);
+    expect(setups[1]?.args).toEqual({ repo: "apps/cath/cath-service", file_ids: [ids[0], ids[1]] });
+    expect(screen.getByText(/3 JSON entries left out/)).toBeTruthy();
+    expect(screen.getByText(/“Back”: “Yn ôl” in legacy:old.xlsx row 3; “Nôl” in legacy:copy.json/)).toBeTruthy();
+  });
+
+  it("should set up with an empty catalogue when the team has no earlier translations", async () => {
+    const empty = done("setup_check", { sources: 0, read: 0, added: 0, needsReview: 0, conflicts: 0, unreadable: [] });
+    const { requests } = await open("story", { ...SETUP, setup_check: empty });
+    fireEvent.click(screen.getByRole("button", { name: "Carry on with no earlier translations" }));
+    expect(await screen.findByText("No earlier translations: the catalogue starts empty.")).toBeTruthy();
+    expect(requests.find((r) => r.kind === "setup_check")?.args).toEqual({ repo: "apps/cath/cath-frontend", file_ids: [] });
+  });
+
+  it("should name a file that could not be read, offer no setup until it is removed, and check again once it is", async () => {
+    // Arrange
+    const unreadable = done("setup_check", {
+      ...(checked.status === "done" ? checked.result : {}),
+      unreadable: [{ file: "notes.xlsx", problem: "no sheet has both an English and a Welsh header" }]
+    });
+    const { fake } = await open("search", { ...SETUP, setup_check: unreadable });
+
+    // Act
+    await addFiles(fake, ["notes.xlsx"]);
+    vi.mocked(fake.upload).mockResolvedValueOnce({ error: "That is not a JSON file of English to Welsh." });
+    fireEvent.change(screen.getByLabelText(/Spreadsheets \(.xlsx\) or JSON files/), { target: { files: [new File(["["], "bad.json")] } });
+    await screen.findByText(/bad.json: That is not a JSON file/);
+    fireEvent.click(screen.getByRole("button", { name: "Check them" }));
+
+    // Assert
+    expect(await screen.findByText(/notes.xlsx: no sheet has both/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Set up Welsh for this service" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Remove notes.xlsx" }));
+    expect(screen.getByRole("button", { name: "Carry on with no earlier translations" })).toBeTruthy();
+  });
+
+  it("should link to a setup already open rather than offer another", async () => {
+    await open("search", { ...SETUP, info: notSetUp({ setupPr: "https://github.com/hmcts/cath-service/pull/70" }) });
+    expect(screen.getByRole("link", { name: /cath-service\/pull\/70/ })).toBeTruthy();
+    expect(screen.queryByLabelText(/Spreadsheets/)).toBeNull();
   });
 });
 

@@ -10,12 +10,17 @@ import { importLegacyCmd, infoCmd, init, searchCmd } from "./commands/catalogue.
 import { importCmd } from "./commands/import.ts";
 import { keepEnglishCmd } from "./commands/keep.ts";
 import { scanCmd } from "./commands/scan.ts";
+import { setupCmd } from "./commands/setup.ts";
 import { storyCmd } from "./commands/story.ts";
 import { verifyCmd } from "./commands/verify.ts";
 import { say, UsageError } from "./io.ts";
 
 const COMMANDS: Record<string, { usage: string; run: (argv: string[]) => Promise<unknown> }> = {
   init: { usage: "init --service <product>", run: init },
+  setup: {
+    usage: "setup --service <product> --repo apps/<product>/<repo> [--xlsx <file>]... [--json <file>]... [--received YYYY-MM-DD] [--dry-run | --pr]",
+    run: setupCmd
+  },
   info: { usage: "info --service <product>", run: infoCmd },
   search: { usage: "search <text> --service <product> [--exact|--fuzzy] [--all]", run: searchCmd },
   "import-legacy": {

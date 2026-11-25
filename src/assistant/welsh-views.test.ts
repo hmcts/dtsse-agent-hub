@@ -9,6 +9,7 @@ import {
   safeLink,
   scanView,
   searchView,
+  setupView,
   storyCandidatesView,
   storyPreviewView,
   storyWriteView
@@ -23,8 +24,74 @@ describe("the Welsh page's views", () => {
         catalogue: { approved: 1123, needsReview: 94 },
         shared: { approved: 2 }
       })
-    ).toEqual({ initialised: true, repos: ["apps/cath/cath-service"], skipsStaffPages: true, approved: 1123, needsReview: 94, sharedApproved: 2 });
-    expect(infoView({})).toEqual({ initialised: false, repos: [], skipsStaffPages: false, approved: 0, needsReview: 0, sharedApproved: 0 });
+    ).toEqual({
+      initialised: true,
+      repos: ["apps/cath/cath-service"],
+      skipsStaffPages: true,
+      approved: 1123,
+      needsReview: 94,
+      sharedApproved: 2,
+      candidates: [],
+      setupPr: null
+    });
+    expect(infoView({})).toEqual({
+      initialised: false,
+      repos: [],
+      skipsStaffPages: false,
+      approved: 0,
+      needsReview: 0,
+      sharedApproved: 0,
+      candidates: [],
+      setupPr: null
+    });
+  });
+
+  it("should read where a service not yet set up could keep its Welsh, and a setup already open", () => {
+    const view = infoView({
+      initialised: false,
+      candidates: ["apps/pcs/pcs-api", 4, "apps/pcs/pcs-frontend"],
+      setupPr: "https://github.com/hmcts/pcs-api/pull/9"
+    });
+    expect(view.candidates).toEqual(["apps/pcs/pcs-api", "apps/pcs/pcs-frontend"]);
+    expect(view.setupPr).toBe("https://github.com/hmcts/pcs-api/pull/9");
+  });
+
+  it("should read a setup's check and its pull request, and show nothing for fields it does not have", () => {
+    expect(
+      setupView({
+        sources: 3,
+        read: 120,
+        added: 110,
+        needsReview: 4,
+        overriddenCopies: 2,
+        conflicts: 1,
+        conflictExamples: [{ english: "Back", context: "", options: [{ welsh: "Yn ôl", where: "legacy:a.xlsx row 3" }, { welsh: "Nôl" }] }],
+        unreadable: [{ file: "notes.xlsx", problem: "no sheet has both" }],
+        repo: "apps/pcs/pcs-frontend",
+        pr: "https://github.com/hmcts/pcs-frontend/pull/1"
+      })
+    ).toEqual({
+      sources: 3,
+      read: 120,
+      added: 110,
+      needsReview: 4,
+      copiesDropped: 2,
+      conflicts: 1,
+      conflictExamples: [
+        {
+          english: "Back",
+          context: "",
+          options: [
+            { welsh: "Yn ôl", where: "legacy:a.xlsx row 3" },
+            { welsh: "Nôl", where: "" }
+          ]
+        }
+      ],
+      unreadable: [{ file: "notes.xlsx", problem: "no sheet has both" }],
+      repo: "apps/pcs/pcs-frontend",
+      pr: "https://github.com/hmcts/pcs-frontend/pull/1"
+    });
+    expect(setupView({}).pr).toBeNull();
   });
 
   it("should read search hits with their Welsh exactly as the catalogue has it", () => {

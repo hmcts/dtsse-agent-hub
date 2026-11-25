@@ -9,8 +9,10 @@ import { findAssistant, findAssistantWithClaims } from "./assistant-store.ts";
 import {
   fileIdsOf,
   hasWelshPlugin,
+  isSetupKind,
   MAX_WELSH_FILE_BYTES,
   MAX_WELSH_FILES_PER_JOB,
+  MAX_WELSH_UPLOADS,
   resultFits,
   WELSH_JOB_TIMEOUT_MS,
   WELSH_NOT_TURNED_ON,
@@ -56,10 +58,14 @@ export async function askWelsh(prisma: PrismaClient, question: WelshQuestion, no
     throw new HttpError(409, WELSH_NOT_TURNED_ON);
   }
   const files = await Promise.all(
-    fileIdsOf(question.args).map((id) => prisma.assistantWelshFile.findUnique({ where: { id }, select: { ownerOid: true, jobId: true } }))
+    fileIdsOf(question.args).map((id) => prisma.assistantWelshFile.findUnique({ where: { id }, select: { ownerOid: true, jobId: true, name: true } }))
   );
   if (files.some((file) => file === null || !isOwner(question.viewerOid, file) || file.jobId !== null)) {
-    throw new HttpError(404, "that spreadsheet is not there any more; upload it again");
+    throw new HttpError(404, "that file is not there any more; upload it again");
+  }
+  // Only a setup reads a JSON copy; every other job reads a Welsh Language Unit spreadsheet.
+  if (!isSetupKind(question.kind) && files.some((file) => file !== null && /\.json$/i.test(file.name))) {
+    throw new HttpError(400, "that needs the Excel spreadsheet (.xlsx), not a JSON file");
   }
   const ready = await podReady(prisma, question.viewerOid, found, welshFeature(question.kind), now);
   if (ready !== "ok") {
@@ -268,11 +274,7 @@ export async function saveUpload(prisma: PrismaClient, viewerOid: string, name: 
   });
 }
 
-/**
- * How many uploaded spreadsheets one assistant may hold at once, within the week they are kept: a return a week is the
- * Welsh Language Unit's pace, so this is generous, and it bounds the 5 MB rows one person can leave in Postgres.
- */
-export const MAX_WELSH_UPLOADS = 50;
+export { MAX_WELSH_UPLOADS };
 
 /** One of the viewer's own Welsh files, uploaded or made by one of their jobs, or `undefined`. */
 export async function ownerFile(db: Database, viewerOid: string, fileId: string): Promise<{ name: string; bytes: Uint8Array } | undefined> {
@@ -304,6 +306,8 @@ export interface WelshFrame {
   args: unknown;
   /** The uploaded file's name when `args.file_id` names one: the batch a return is recorded under. */
   file_name?: string;
+  /** Each upload's name when `args.file_ids` lists them, by id: a setup reads each by its extension and records it as a row's source. */
+  file_names?: Record<string, string>;
 }
 
 /**
@@ -320,7 +324,17 @@ export async function pendingWelsh(db: Database, virtualAgentId: string, jobId: 
   if (row === null || row.virtualAgentId !== virtualAgentId || row.status !== "pending" || now.getTime() - row.createdAt.getTime() > WELSH_JOB_TIMEOUT_MS) {
     return undefined;
   }
-  const fileId = (row.args as { file_id?: unknown } | null)?.file_id;
+  const args = row.args as { file_id?: unknown; file_ids?: unknown } | null;
+  const fileId = args?.file_id;
   const file = typeof fileId === "string" && isUuid(fileId) ? await db.assistantWelshFile.findUnique({ where: { id: fileId }, select: { name: true } }) : null;
-  return { job_id: jobId, kind: row.kind, product: row.product, args: row.args, ...(file === null ? {} : { file_name: file.name }) };
+  const listed = Array.isArray(args?.file_ids) ? args.file_ids.filter((id): id is string => typeof id === "string" && isUuid(id)) : [];
+  const named = listed.length > 0 ? await db.assistantWelshFile.findMany({ where: { id: { in: listed } }, select: { id: true, name: true } }) : [];
+  return {
+    job_id: jobId,
+    kind: row.kind,
+    product: row.product,
+    args: row.args,
+    ...(file === null ? {} : { file_name: file.name }),
+    ...(Array.isArray(args?.file_ids) ? { file_names: Object.fromEntries(named.map((f) => [f.id, f.name])) } : {})
+  };
 }

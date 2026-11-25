@@ -3,9 +3,9 @@
 // again here and passed as its own argument, never through a shell, and the only program run is that script. No job
 // goes through a model, and none generates Welsh — the script takes it from the catalogue or a Welsh Language Unit
 // return and refuses anything else. See "Welsh translation jobs" in dtsse-agent-hub's docs/agent-api.md.
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { Api } from "../api.ts";
 import type { Env } from "../env.ts";
 import { withRetry } from "../retry.ts";
@@ -25,7 +25,9 @@ export const WELSH_KINDS = [
   "story_candidates",
   "story_preview",
   "story_write",
-  "keep_english"
+  "keep_english",
+  "setup_check",
+  "setup"
 ] as const;
 export type WelshKind = (typeof WELSH_KINDS)[number];
 
@@ -46,7 +48,9 @@ const TIMEOUT_MS: Record<WelshKind, number> = {
   story_candidates: 2 * 60_000,
   story_preview: 2 * 60_000,
   story_write: 3 * 60_000,
-  keep_english: 5 * 60_000
+  keep_english: 5 * 60_000,
+  setup_check: 5 * 60_000,
+  setup: 10 * 60_000
 };
 
 const MAX_DETAIL = 500;
@@ -68,8 +72,11 @@ const KEY_RE = /^[A-Z][A-Z\d_]{1,9}-\d{1,7}$/;
 const REF_RE = /^CY-[\dA-F]{8}$/;
 const ROW_ID_RE = /^[\da-f]{10}$/;
 const FILE_NAME_RE = /^[\p{L}\p{N} ._()-]{1,195}\.xlsx$/iu;
+/** An earlier translations file a setup reads: a WLU spreadsheet or a JSON copy. */
+const SOURCE_NAME_RE = /^[\p{L}\p{N} ._()-]{1,195}\.(xlsx|json)$/iu;
 
 export type WelshChoice = { ref: string; row_id: string };
+export type WelshSource = { file_id: string; name: string };
 
 /** A job as the sessions stream sends it, once every value has been checked. */
 export type WelshFrame = {
@@ -81,6 +88,8 @@ export type WelshFrame = {
   repo?: string;
   file_id?: string;
   file_name?: string;
+  /** The earlier translations a setup seeds the catalogue from, each under the name it was uploaded with. */
+  sources?: WelshSource[];
   key?: string;
   strings?: string[];
   choices?: WelshChoice[];
@@ -168,6 +177,31 @@ const leaveOutArg: ArgReader = (args) => {
   return { leave_out: refs };
 };
 
+/** The repo a setup puts welsh/ in: one of the product's, and needed. */
+const setupRepoArg: ArgReader = (args, _raw, product) => (isRepoOf(product, args.repo) ? { repo: args.repo } : null);
+
+/**
+ * The uploads a setup reads, with the names the hub sends beside them in `file_names`. Any number, none included: the
+ * hub bounds how many one person holds. A name that is not one is refused rather than guessed, since its extension says
+ * how the file is read.
+ */
+const sourcesArg: ArgReader = (args, raw) => {
+  const ids = args.file_ids ?? [];
+  const names = asRecord(raw.file_names) ?? {};
+  if (!Array.isArray(ids) || new Set(ids).size !== ids.length) {
+    return null;
+  }
+  const sources: WelshSource[] = [];
+  for (const id of ids) {
+    const name = typeof id === "string" ? names[id] : undefined;
+    if (typeof id !== "string" || !UUID_RE.test(id) || typeof name !== "string" || !SOURCE_NAME_RE.test(name)) {
+      return null;
+    }
+    sources.push({ file_id: id, name });
+  }
+  return { sources };
+};
+
 const keyArg: ArgReader = (args) => (typeof args.key === "string" && KEY_RE.test(args.key) ? { key: args.key } : null);
 
 const stringsArg: ArgReader = (args) => {
@@ -207,7 +241,15 @@ const KIND_ARGS: Record<WelshKind, [readonly string[], ArgReader][]> = {
     [["choices"], choicesArg]
   ],
   story_write: [[["key"], keyArg]],
-  keep_english: [[["strings"], stringsArg]]
+  keep_english: [[["strings"], stringsArg]],
+  setup_check: [
+    [["repo"], setupRepoArg],
+    [["file_ids"], sourcesArg]
+  ],
+  setup: [
+    [["repo"], setupRepoArg],
+    [["file_ids"], sourcesArg]
+  ]
 };
 
 /**
@@ -243,15 +285,18 @@ export function parseWelshFrame(value: unknown): WelshFrame | null {
 const MODE_FLAG: Record<NonNullable<WelshFrame["mode"]>, string[]> = { contains: [], exact: ["--exact"], fuzzy: ["--fuzzy"] };
 
 /** Where a job's files go: the uploaded return it reads, and the spreadsheets it may make. */
-export type WelshPaths = { dir: string; input: string; request: string; queries: string; strings: string };
+export type WelshPaths = { dir: string; input: string; request: string; queries: string; strings: string; sources: string[] };
 
-export function welshPaths(dir: string, frame: Pick<WelshFrame, "file_name">): WelshPaths {
+export function welshPaths(dir: string, frame: Pick<WelshFrame, "file_name" | "sources">): WelshPaths {
   return {
     dir,
     input: join(dir, frame.file_name ?? "welsh-return.xlsx"),
     request: join(dir, "request.xlsx"),
     queries: join(dir, "queries.xlsx"),
-    strings: join(dir, "strings.txt")
+    strings: join(dir, "strings.txt"),
+    // A folder each, so two uploads with one name do not overwrite each other, and each keeps its name: the catalogue
+    // records it as the row's source.
+    sources: (frame.sources ?? []).map((source, i) => join(dir, "sources", String(i), source.name))
   };
 }
 
@@ -265,6 +310,14 @@ export function welshArgs(frame: WelshFrame, workspace: string, paths: WelshPath
   const repo = frame.repo ? ["--repo", join(workspace, frame.repo)] : [];
   const choices = (frame.choices ?? []).flatMap((c) => ["--choose", `${c.ref}=${c.row_id}`]);
   const from = ["--from", frame.file_id ? paths.input : "catalogue"];
+  // The plugin checks a setup's repo against the service's workspace.yaml entries, which are workspace paths.
+  const setup = () => [
+    "setup",
+    ...service,
+    "--repo",
+    frame.repo ?? "",
+    ...(frame.sources ?? []).flatMap((source, i) => [/\.json$/i.test(source.name) ? "--json" : "--xlsx", paths.sources[i] ?? ""])
+  ];
   switch (frame.kind) {
     case "info":
       return ["info", ...service];
@@ -291,6 +344,10 @@ export function welshArgs(frame: WelshFrame, workspace: string, paths: WelshPath
       return ["story", ...service, "--write", "--out", paths.request, "--", frame.key ?? ""];
     case "keep_english":
       return ["keep-english", ...service, "--pr", "--", ...(frame.strings ?? [])];
+    case "setup_check":
+      return [...setup(), "--dry-run"];
+    case "setup":
+      return [...setup(), "--pr"];
   }
 }
 
@@ -417,6 +474,11 @@ async function runIn(deps: WelshDeps, frame: WelshFrame, paths: WelshPaths, time
   const env: NodeJS.ProcessEnv = { ...deps.env, CFT_WELSH_WORKSPACE: deps.workspace };
   if (frame.file_id) {
     writeFileSync(paths.input, await deps.api.welshFile(deps.id, frame.file_id));
+  }
+  for (const [i, source] of (frame.sources ?? []).entries()) {
+    const path = paths.sources[i] as string;
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, await deps.api.welshFile(deps.id, source.file_id));
   }
   if (frame.strings) {
     writeFileSync(paths.strings, `${frame.strings.join("\n")}\n`);

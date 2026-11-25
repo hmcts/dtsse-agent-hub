@@ -20,6 +20,9 @@ export interface WelshInfo {
   approved: number;
   needsReview: number;
   sharedApproved: number;
+  /** For a service not set up yet: the repos its welsh/ folder could go in, and a setup pull request still open. */
+  candidates: string[];
+  setupPr: string | null;
 }
 
 export function infoView(result: Json): WelshInfo {
@@ -32,7 +35,47 @@ export function infoView(result: Json): WelshInfo {
     skipsStaffPages: list(result.repos).some((r) => Array.isArray(r.staffOnly) && r.staffOnly.length > 0),
     approved: num(catalogue.approved),
     needsReview: num(catalogue.needsReview),
-    sharedApproved: num(rec(result.shared).approved)
+    sharedApproved: num(rec(result.shared).approved),
+    candidates: (Array.isArray(result.candidates) ? result.candidates : []).map(str).filter(Boolean),
+    setupPr: nullable(result.setupPr)
+  };
+}
+
+/** What setting a service up found, or did: the check (`setup_check`) and the pull request (`setup`) read alike. */
+export interface SetupView {
+  /** Files read into the catalogue. */
+  sources: number;
+  /** Entries read from them, and catalogue rows they make. */
+  read: number;
+  added: number;
+  needsReview: number;
+  /** JSON entries dropped because a spreadsheet had the same English. */
+  copiesDropped: number;
+  /** English with more than one Welsh, up to the first 50: every one is in `welsh/needs-review.md`. */
+  conflicts: number;
+  conflictExamples: { english: string; context: string; options: { welsh: string; where: string }[] }[];
+  /** Files that could not be read, which the check leaves out and the setup refuses. */
+  unreadable: { file: string; problem: string }[];
+  repo: string;
+  pr: string | null;
+}
+
+export function setupView(result: Json): SetupView {
+  return {
+    sources: num(result.sources),
+    read: num(result.read),
+    added: num(result.added),
+    needsReview: num(result.needsReview),
+    copiesDropped: num(result.overriddenCopies),
+    conflicts: num(result.conflicts),
+    conflictExamples: list(result.conflictExamples).map((c) => ({
+      english: str(c.english),
+      context: str(c.context),
+      options: list(c.options).map((o) => ({ welsh: str(o.welsh), where: str(o.where) }))
+    })),
+    unreadable: list(result.unreadable).map((u) => ({ file: str(u.file), problem: str(u.problem) })),
+    repo: str(result.repo),
+    pr: nullable(result.pr)
   };
 }
 

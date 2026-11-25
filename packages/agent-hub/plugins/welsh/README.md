@@ -86,14 +86,19 @@ on stderr. The first run installs the script's dependencies.
 ### Set a service up
 
 ```bash
-$WELSH init --service <product> --repo apps/<product>/<repo> --pr
+$WELSH setup --service <product> --repo apps/<product>/<repo> [--xlsx <file>]... [--json <file>]... --dry-run
+$WELSH setup --service <product> --repo apps/<product>/<repo> [--xlsx <file>]... [--json <file>]... --pr
 ```
 
-This opens a draft PR in that repo adding `welsh/`, with an empty `catalogue.csv`, a `config.yaml` and a `returns/`
-folder. In `config.yaml`, list the repos to scan and the adapter for each; `.` is the home repo itself. The service is
-ready once the PR is merged.
+This opens one draft PR in that repo adding `welsh/`: a `catalogue.csv` seeded from the team's earlier translations, as
+many WLU spreadsheets and JSON copies as they have, or empty with none, plus `needs-review.md`, a `config.yaml` and a
+`returns/` folder. `--dry-run` reads the same files and reports what the catalogue would hold, naming any file it cannot
+read, and commits nothing. Setup refuses a service already set up, and one with a setup PR still open. In `config.yaml`,
+list the repos to scan and the adapter for each; `.` is the home repo itself. The service is ready once the PR is
+merged. This is what the CFT Workspace's Welsh page runs when a service has no catalogue yet.
 
-If the team already has a WLU spreadsheet or a JSON catalogue, seed the catalogue from it:
+`$WELSH init --service <product> --repo apps/<product>/<repo> --pr` does the same with an empty catalogue. To add more
+earlier translations to a catalogue that already exists:
 
 ```bash
 $WELSH import-legacy --service <product> --xlsx "<catalogue>.xlsx" [--json <copy>.json] --pr
