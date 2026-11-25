@@ -7,7 +7,8 @@ import type { ConversationLink } from "@/assistant/views";
 import { AssistantShell, type ConversationActions } from "@/components/assistant/AssistantShell";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
 import { EmptyChat, type EmptyChatActions, type EmptyFolder, folderDraftId } from "@/components/assistant/EmptyChat";
-import { FolderList, type SidebarFolders } from "@/components/assistant/FolderList";
+import { createAndMoveInto, FolderList, type SidebarFolders } from "@/components/assistant/FolderList";
+import { stubWideWindow } from "./wide-window";
 
 const VIEWER = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 const FOLDER = "11111111-1111-1111-1111-111111111111";
@@ -29,20 +30,7 @@ vi.mock("@/components/live/HubStream", () => ({
 }));
 
 beforeEach(() => {
-  Object.defineProperty(window, "matchMedia", {
-    configurable: true,
-    writable: true,
-    value: () => ({ matches: false, addEventListener: () => undefined, removeEventListener: () => undefined })
-  });
-  Object.defineProperty(globalThis, "ResizeObserver", {
-    configurable: true,
-    writable: true,
-    value: class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-  });
+  stubWideWindow();
 });
 
 afterEach(() => {
@@ -117,6 +105,20 @@ describe("FolderList", () => {
 
     fireEvent.click(collapse);
     expect(screen.queryByRole("list", { name: "Chats in Possession claims" })).toBeNull();
+  });
+
+  it("should expand the folder the open chat is moved into", () => {
+    const before = sidebarFolders();
+    const { rerender } = render(<FolderList folders={before} activeId="c9" />);
+    expect(screen.queryByRole("list", { name: "Chats in Welsh" })).toBeNull();
+
+    const after = sidebarFolders({
+      list: [before.list[0]!, { id: OTHER_FOLDER, name: "Welsh", chats: [{ id: "c9", title: "Sprint notes" }] }]
+    });
+    rerender(<FolderList folders={after} activeId="c9" />);
+
+    const current = within(screen.getByRole("list", { name: "Chats in Welsh" })).getByRole("link", { name: "Sprint notes" });
+    expect(current.getAttribute("aria-current")).toBe("page");
   });
 
   it("should say an expanded folder has no chats when it is empty", () => {
@@ -238,8 +240,126 @@ describe("FolderList", () => {
   });
 });
 
+describe("createAndMoveInto", () => {
+  it("should make the folder and move the chat into it, answering null", async () => {
+    const create = vi.fn(async () => ({ ok: true as const, id: "new" }));
+    const move = ok();
+
+    expect(await createAndMoveInto(create, move, "c1", "Hearings")).toBeNull();
+    expect(create).toHaveBeenCalledWith({ name: "Hearings" });
+    expect(move).toHaveBeenCalledWith({ conversationId: "c1", folderId: "new" });
+  });
+
+  it("should answer the refusal of whichever step refused, moving nothing when the folder is not made", async () => {
+    const move = ok();
+    expect(await createAndMoveInto(async () => ({ ok: false as const, error: "a folder name is 1 to 80 characters" }), move, "c1", "")).toBe(
+      "a folder name is 1 to 80 characters"
+    );
+    expect(move).not.toHaveBeenCalled();
+
+    expect(
+      await createAndMoveInto(
+        async () => ({ ok: true as const, id: "new" }),
+        async () => ({ ok: false as const, error: "no such conversation" }),
+        "c1",
+        "x"
+      )
+    ).toBe("no such conversation");
+  });
+});
+
 describe("ChatMenu's Move to folder", () => {
-  function menu(move: { folders: { id: string; name: string }[]; current: string | null; onMove: (id: string | null) => Promise<void> }) {
+  it("should go back to the chat's options from the arrow at the top of the pane", () => {
+    menu({ folders: [{ id: FOLDER, name: "Possession claims" }], current: null, onMove: vi.fn() });
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to chat options" }));
+
+    expect(screen.queryByRole("group", { name: "Move to folder" })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "Pin" }));
+  });
+
+  it("should offer New folder first, then the folders in a list that scrolls", () => {
+    menu({ folders: [{ id: FOLDER, name: "Possession claims" }], current: null, onMove: vi.fn(), onCreate: vi.fn() });
+
+    const pane = screen.getByRole("group", { name: "Move to folder" });
+    const options = within(pane)
+      .getAllByRole("button")
+      .map((button) => button.textContent?.trim());
+    expect(options).toEqual(["←", "+New folder", "Possession claims"]);
+    expect(document.activeElement).toBe(within(pane).getByRole("button", { name: /New folder/ }));
+    expect(within(pane).getByRole("list", { name: "Folders" }).className).toContain("overflow-y-auto");
+  });
+
+  it("should make a folder of the name typed and move the chat into it, then close", async () => {
+    const onCreate = vi.fn(async () => null);
+    menu({ folders: [], current: null, onMove: vi.fn(), onCreate });
+
+    expect(screen.queryByText(/You have no folders yet/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /New folder/ }));
+    const box = screen.getByRole("textbox", { name: "New folder name" });
+    expect(document.activeElement).toBe(box);
+    fireEvent.change(box, { target: { value: "Hearings" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Create and move" }));
+    });
+
+    expect(onCreate).toHaveBeenCalledWith("Hearings");
+    expect(screen.queryByRole("group", { name: "Move to folder" })).toBeNull();
+  });
+
+  it("should keep the name and show the refusal in the pane when the folder cannot be made", async () => {
+    menu({ folders: [], current: null, onMove: vi.fn(), onCreate: async () => "a folder name is 1 to 80 characters" });
+
+    fireEvent.click(screen.getByRole("button", { name: /New folder/ }));
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("textbox", { name: "New folder name" }));
+    });
+
+    expect(screen.getByRole("alert").textContent).toBe("a folder name is 1 to 80 characters");
+    expect(screen.getByRole("textbox", { name: "New folder name" })).toBeTruthy();
+  });
+
+  it("should say the folder could not be sent when the request never answers", async () => {
+    menu({
+      folders: [],
+      current: null,
+      onMove: vi.fn(),
+      onCreate: async () => {
+        throw new TypeError("fetch failed");
+      }
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /New folder/ }));
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("textbox", { name: "New folder name" }));
+    });
+
+    expect(screen.getByRole("alert").textContent).toContain("could not be sent");
+  });
+
+  it("should make one folder however many times Create is pressed while it is going", async () => {
+    let answer: (value: string | null) => void = () => undefined;
+    const onCreate = vi.fn(() => new Promise<string | null>((resolve) => (answer = resolve)));
+    menu({ folders: [], current: null, onMove: vi.fn(), onCreate });
+
+    fireEvent.click(screen.getByRole("button", { name: /New folder/ }));
+    const box = screen.getByRole("textbox", { name: "New folder name" });
+    fireEvent.submit(box);
+    expect(screen.getByRole("button", { name: "Creating…" })).toBeTruthy();
+    fireEvent.submit(box);
+    await act(async () => {
+      answer(null);
+    });
+
+    expect(onCreate).toHaveBeenCalledTimes(1);
+  });
+
+  function menu(move: {
+    folders: { id: string; name: string }[];
+    current: string | null;
+    onMove: (id: string | null) => Promise<void>;
+    onCreate?: (name: string) => Promise<string | null>;
+  }) {
     render(
       <ChatMenu title="Event help" pinned={false} onPin={async () => undefined} onRename={async () => undefined} onDelete={async () => undefined} move={move} />
     );
@@ -338,8 +458,8 @@ describe("AssistantShell with folders", () => {
     expect(refresh).toHaveBeenCalled();
   });
 
-  it("should show the refusal under the row when the move is refused", async () => {
-    const folders = sidebarFolders({ move: vi.fn(async () => ({ ok: false as const, error: "no such folder" })) });
+  /** The sidebar with one chat, "Event help", whose row's Move to folder pane is open. */
+  function openRowMove(folders: SidebarFolders): void {
     render(
       <AssistantShell
         now={Date.now()}
@@ -352,9 +472,44 @@ describe("AssistantShell with folders", () => {
         <p>page</p>
       </AssistantShell>
     );
-
     fireEvent.click(screen.getByRole("button", { name: "Options for Event help" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Move to folder" }));
+  }
+
+  /** Opens New folder in the open Move to folder pane. */
+  function startNewFolder(): void {
+    fireEvent.click(within(screen.getByRole("group", { name: "Move to folder" })).getByRole("button", { name: /New folder/ }));
+  }
+
+  it("should make a new folder from a row's Move to folder and move the chat into it", async () => {
+    const folders = sidebarFolders({ create: vi.fn(async () => ({ ok: true as const, id: "made" })) });
+    openRowMove(folders);
+    startNewFolder();
+    fireEvent.change(screen.getByRole("textbox", { name: "New folder name" }), { target: { value: "Hearings" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Create and move" }));
+    });
+
+    expect(folders.create).toHaveBeenCalledWith({ name: "Hearings" });
+    expect(folders.move).toHaveBeenCalledWith({ conversationId: "a", folderId: "made" });
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it("should keep a refused new folder's refusal in the pane and not refresh", async () => {
+    const folders = sidebarFolders({ create: vi.fn(async () => ({ ok: false as const, error: "a folder name is 1 to 80 characters" })) });
+    openRowMove(folders);
+    startNewFolder();
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("textbox", { name: "New folder name" }));
+    });
+
+    expect(screen.getByRole("alert").textContent).toBe("a folder name is 1 to 80 characters");
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("should show the refusal under the row when the move is refused", async () => {
+    const folders = sidebarFolders({ move: vi.fn(async () => ({ ok: false as const, error: "no such folder" })) });
+    openRowMove(folders);
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Possession claims" }));
     });

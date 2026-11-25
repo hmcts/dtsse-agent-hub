@@ -29,7 +29,7 @@ import { ArtefactPanel, type SaveArtefactAction, type UnsavedDraft } from "@/com
 import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
 import { AssistantModal } from "@/components/assistant/AssistantModal";
 import { Mark, SidebarToggle } from "@/components/assistant/AssistantShell";
-import { ChatMenu } from "@/components/assistant/ChatMenu";
+import { ChatMenu, type MoveTarget } from "@/components/assistant/ChatMenu";
 import { Composer } from "@/components/assistant/Composer";
 import type { ExportToConfluenceAction } from "@/components/assistant/ConfluenceExport";
 import { CopyButton } from "@/components/assistant/CopyButton";
@@ -39,6 +39,7 @@ import type { RestoreDeckAction } from "@/components/assistant/DeckHistory";
 import { DeckPanel, type SlideAsk } from "@/components/assistant/DeckPanel";
 import { DocmosisPanel, type LoadSettled, useTemplateLoad } from "@/components/assistant/DocmosisPanel";
 import { ticketsOffered } from "@/components/assistant/ExportFooter";
+import { type CreateFolderAction, createAndMoveInto, type MoveToFolderAction } from "@/components/assistant/FolderList";
 import { ForkedThread } from "@/components/assistant/ForkedThread";
 import { type StartAssistantAction, StartButton } from "@/components/assistant/GettingReady";
 import type { ExportToGithubAction } from "@/components/assistant/GithubExport";
@@ -72,6 +73,10 @@ export interface ChatActions {
   rename: (input: { conversationId: unknown; title: unknown }) => Promise<ActionResult>;
   pin: (input: { conversationId: unknown; pinned: unknown }) => Promise<ActionResult>;
   remove: (input: { conversationId: unknown }) => Promise<ActionResult>;
+  /** Puts the chat in one of the person's folders, or in none; without it, and `folders`, the menu has no Move to folder. */
+  move?: MoveToFolderAction;
+  /** Makes a folder from the Move to folder pane, which the chat is then moved into; without it there is no New folder. */
+  createFolder?: CreateFolderAction;
   /** The person's answer to a question the assistant asked with its own question tool. */
   answerQuestion: AnswerQuestionAction;
   saveArtefact: SaveArtefactAction;
@@ -489,7 +494,8 @@ export function ChatView({
   viewerOid,
   actions,
   jira,
-  defaults = NO_DEFAULTS
+  defaults = NO_DEFAULTS,
+  folders
 }: {
   view: ConversationView;
   templates: readonly Template[];
@@ -500,6 +506,8 @@ export function ChatView({
   jira: JiraAccess;
   /** Where the person's documents go by default, which the exports start from. */
   defaults?: ExportDefaults;
+  /** The person's folders, which the chat's options menu moves it between with `actions.move`. */
+  folders?: readonly MoveTarget[];
 }) {
   const router = useRouter();
   const arrivals = useAnnouncer("replies");
@@ -1236,6 +1244,9 @@ export function ChatView({
     router.refresh();
   }
 
+  // Read once, so the menu's handlers see the actions the checks below found.
+  const move = actions.move;
+  const createFolder = actions.createFolder;
   return (
     <div className="flex min-h-0 flex-1">
       <div className="flex min-w-0 flex-1 flex-col">
@@ -1286,6 +1297,32 @@ export function ChatView({
                 setError(result.ok ? null : result.error);
                 router.refresh();
               }}
+              move={
+                folders === undefined || move === undefined
+                  ? undefined
+                  : {
+                      folders,
+                      current: view.folderId ?? null,
+                      onCreate:
+                        createFolder === undefined
+                          ? undefined
+                          : async (name) => {
+                              const refusal = await createAndMoveInto(createFolder, move, view.id, name);
+                              if (refusal === null) {
+                                router.refresh();
+                              }
+                              return refusal;
+                            },
+                      onMove: async (folderId) => {
+                        const result = await move({ conversationId: view.id, folderId });
+                        setError(result.ok ? null : result.error);
+                        // A refusal stays in the header; a refresh would redraw it away.
+                        if (result.ok) {
+                          router.refresh();
+                        }
+                      }
+                    }
+              }
               onRename={async (title) => {
                 const result = await actions.rename({ conversationId: view.id, title });
                 setError(result.ok ? null : result.error);

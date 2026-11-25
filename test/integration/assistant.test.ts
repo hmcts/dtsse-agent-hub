@@ -377,9 +377,11 @@ describe("folders", () => {
 
     expect(await folderActions.moveConversationToFolder({ conversationId: chat.id, folderId: folder.id })).toEqual({ ok: true });
     expect((await assistantFolder(VIEWER, folder.id))?.chats.map((row) => row.id)).toEqual([chat.id]);
+    expect((await assistantConversation(VIEWER, chat.id))?.folderId).toBe(folder.id);
 
     expect(await folderActions.moveConversationToFolder({ conversationId: chat.id, folderId: null })).toEqual({ ok: true });
     expect((await assistantFolder(VIEWER, folder.id))?.chats).toEqual([]);
+    expect((await assistantConversation(VIEWER, chat.id))?.folderId).toBeNull();
   });
 
   it("should hand a folder's new chat back only the file opened in that folder", async () => {

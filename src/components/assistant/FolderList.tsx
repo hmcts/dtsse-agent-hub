@@ -18,8 +18,28 @@ export interface SidebarFolder {
 /** The viewer's folders and what the sidebar does with them: make one, and move a chat into one. */
 export interface SidebarFolders {
   list: readonly SidebarFolder[];
-  create: (input: { name: unknown }) => Promise<ActionResult<{ id: string }>>;
-  move: (input: { conversationId: unknown; folderId: unknown }) => Promise<ActionResult>;
+  create: CreateFolderAction;
+  move: MoveToFolderAction;
+}
+
+/** Makes a folder of a chat's options menu. */
+export type CreateFolderAction = (input: { name: unknown }) => Promise<ActionResult<{ id: string }>>;
+
+/** Moves a chat into a folder, or out of any with null. */
+export type MoveToFolderAction = (input: { conversationId: unknown; folderId: unknown }) => Promise<ActionResult>;
+
+/**
+ * What a chat's Move to folder pane does with a new folder's name: makes the folder, then moves the chat into it,
+ * answering the refusal of whichever step refused, or null once both are done. A folder made and then not moved into
+ * is kept: it is the folder the person asked for, and the move can be tried again from the list.
+ */
+export async function createAndMoveInto(create: CreateFolderAction, move: MoveToFolderAction, conversationId: string, name: string): Promise<string | null> {
+  const made = await create({ name });
+  if (!made.ok) {
+    return made.error;
+  }
+  const moved = await move({ conversationId, folderId: made.id });
+  return moved.ok ? null : moved.error;
 }
 
 /** The outline of a folder, for a folder's row. Decorative: the row is named by the folder's name beside it. */
@@ -67,15 +87,14 @@ export function FolderList({ folders, activeId }: { folders: SidebarFolders; act
   const plus = useRef<HTMLButtonElement>(null);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set(holding(folders.list, activeId)));
 
-  // Opening a chat that is in a folder shows where it is. Keyed on what is open alone, so a folder the person closed
-  // stays closed while they stay on the same page.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: expanding on navigation is the point, so the list is read but not watched
+  // Opening a chat that is in a folder, or moving the open chat into one, shows where it is. Keyed on which folders
+  // hold what is open, not on the list, so a folder the person closed stays closed while nothing moves.
+  const holdingOpen = holding(folders.list, activeId).join(" ");
   useEffect(() => {
-    const opened = holding(folders.list, activeId);
-    if (opened.length > 0) {
-      setExpanded((current) => new Set([...current, ...opened]));
+    if (holdingOpen !== "") {
+      setExpanded((current) => new Set([...current, ...holdingOpen.split(" ")]));
     }
-  }, [activeId]);
+  }, [holdingOpen]);
 
   function toggle(id: string): void {
     setExpanded((current) => {

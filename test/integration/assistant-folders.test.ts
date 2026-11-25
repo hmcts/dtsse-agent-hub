@@ -135,14 +135,17 @@ describe("folders made and deleted at once", () => {
     try {
       await other.query("BEGIN");
       await other.query("DELETE FROM assistant_folder WHERE id = $1", [folder.id]);
-      const moving = moveConversation(prisma, ALICE.oid, conversation, folder.id);
-      const starting = createConversation(prisma, ALICE.oid, { product: "pcs", folderId: folder.id });
+      // Handled from the start: both reject the moment the delete commits, which can be before this test hears its own
+      // COMMIT answered, so a handler attached after that await would leave them unhandled for that moment.
+      const settled = Promise.allSettled([
+        moveConversation(prisma, ALICE.oid, conversation, folder.id),
+        createConversation(prisma, ALICE.oid, { product: "pcs", folderId: folder.id })
+      ]);
       // Let both reach the folder's row lock before the delete commits.
       await new Promise((resolve) => setTimeout(resolve, 200));
       await other.query("COMMIT");
 
-      // Settled together: both reject at once, and awaiting one at a time leaves the other unhandled meanwhile.
-      const [moved, started] = await Promise.allSettled([moving, starting]);
+      const [moved, started] = await settled;
       expect(moved).toMatchObject({ status: "rejected", reason: { status: 404, message: "no such folder" } });
       expect(started).toMatchObject({ status: "rejected", reason: { status: 404, message: "no such folder" } });
     } finally {

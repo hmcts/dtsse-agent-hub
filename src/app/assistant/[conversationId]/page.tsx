@@ -17,6 +17,7 @@ import {
   warmConversation
 } from "@/app/_actions/assistant";
 import { removeDeck, restoreDeckVersion, saveDeck } from "@/app/_actions/decks";
+import { createFolder, moveConversationToFolder } from "@/app/_actions/folders";
 import { offerChatFork, withdrawChatFork } from "@/app/_actions/forks";
 import { answerAgentQuestion } from "@/app/_actions/questions";
 import { shareChat, unshareChat } from "@/app/_actions/shares";
@@ -40,6 +41,8 @@ const ACTIONS: ChatActions = {
   rename: renameConversation,
   pin: pinConversation,
   remove: deleteConversation,
+  move: moveConversationToFolder,
+  createFolder,
   answerQuestion: answerAgentQuestion,
   removeArtefact,
   removeDeck,
@@ -89,7 +92,16 @@ export default async function ConversationPage({
       {/* `local` so a chat on the person's own computer is not held behind credentials only a pod needs. */}
       <AssistantGate home={home} waiting={frame.waiting} theme={theme} local={view.local}>
         {/* Keyed on the agent, which a /clear in the session replaces, so the thread starts again from its page. */}
-        <ChatView key={view.agentId} view={view} templates={offeredTemplates(mine)} viewerOid={viewer.oid} actions={ACTIONS} jira={jira} defaults={defaults} />
+        <ChatView
+          key={view.agentId}
+          view={view}
+          templates={offeredTemplates(mine)}
+          viewerOid={viewer.oid}
+          actions={ACTIONS}
+          jira={jira}
+          defaults={defaults}
+          folders={home.folders}
+        />
       </AssistantGate>
       <ShareGate conversationId={view.id} open={sharing} people={shares ?? []} share={shareChat} unshare={unshareChat} />
       <ShareGate mode="fork" conversationId={view.id} open={forking} people={forks ?? []} share={offerChatFork} unshare={withdrawChatFork} />

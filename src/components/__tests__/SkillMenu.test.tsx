@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Skill } from "@/agents/skills";
 import { TEMPLATES } from "@/assistant/starters";
 import { Composer } from "@/components/assistant/Composer";
+import { stubWideWindow } from "./wide-window";
 
 /**
  * `useSkillMenu`'s ranking and keyboard, through the composer that themes it. The cases the Assistant's own composer
@@ -25,20 +26,7 @@ const SKILLS: Skill[] = [
 ];
 
 beforeEach(() => {
-  Object.defineProperty(window, "matchMedia", {
-    configurable: true,
-    writable: true,
-    value: () => ({ matches: false, addEventListener: () => undefined, removeEventListener: () => undefined })
-  });
-  Object.defineProperty(globalThis, "ResizeObserver", {
-    configurable: true,
-    writable: true,
-    value: class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-  });
+  stubWideWindow();
 });
 
 afterEach(() => {
