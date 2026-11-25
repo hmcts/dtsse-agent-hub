@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { FOLDER_NAME_MAX } from "@/assistant/folders";
 import { useDismiss } from "@/components/assistant/useDismiss";
 import { moveFocusInMenu } from "@/components/assistant/useMenuButton";
 import { actionThrew } from "@/web/action-fault";
@@ -58,6 +59,19 @@ export function panelPlacement(trigger: HTMLElement | null): { above: boolean; w
   };
 }
 
+/** A folder the chat can be moved into, as the Move to folder pane lists it. */
+export interface MoveTarget {
+  id: string;
+  name: string;
+}
+
+/** What the rename box and the delete question say of each kind of item. */
+const NOUNS = {
+  chat: { field: "Chat name", ask: "Delete this chat and its document? This cannot be undone.", max: 200 },
+  form: { field: "Form name", ask: "Delete this form and all its versions? This cannot be undone.", max: 200 },
+  folder: { field: "Folder name", ask: "Delete this folder? The chats in it are kept.", max: FOLDER_NAME_MAX }
+} as const;
+
 const LOCAL_DELETE_NOTE = "The session on your computer will not come back to your chats, even if you resume it. A new session starts a new chat.";
 
 /**
@@ -84,19 +98,20 @@ export function ChatMenu({
   onOpen,
   local = false,
   label = "Chat options",
-  triggerClassName = TRIGGER
+  triggerClassName = TRIGGER,
+  move
 }: {
   title: string;
   /** Where the share dialog for this chat is. A thing that cannot be shared has no Share item. */
   shareHref?: string;
   /** Where the dialog offering this chat to be forked is. Without it there is no Fork item. */
   forkHref?: string;
-  /** What the item is called in the rename box and the delete question: a chat, or a form. */
-  noun?: "chat" | "form";
+  /** What the item is called in the rename box and the delete question: a chat, a form or a folder. */
+  noun?: keyof typeof NOUNS;
   /** Whether the chat is pinned, which makes the item Unpin. */
-  pinned: boolean;
-  /** Called with the state the person asked for: true to pin, false to unpin. */
-  onPin: (pinned: boolean) => Promise<void>;
+  pinned?: boolean;
+  /** Called with the state the person asked for: true to pin, false to unpin. A thing that cannot be pinned has no Pin item. */
+  onPin?: (pinned: boolean) => Promise<void>;
   onRename: (title: string) => Promise<void>;
   onDelete: () => Promise<void>;
   /** Called as the menu opens, so whatever is shown about the last attempt can be dropped. */
@@ -109,8 +124,13 @@ export function ChatMenu({
   /** The accessible name of the trigger and of the menu. Name the chat wherever more than one menu is on the page. */
   label?: string;
   triggerClassName?: string;
+  /**
+   * The person's folders and the one the chat is in, null for none, and how to move it. Without it there is no Move to
+   * folder item.
+   */
+  move?: { folders: readonly MoveTarget[]; current: string | null; onMove: (folderId: string | null) => Promise<void> };
 }) {
-  const [open, setOpen] = useState<"closed" | "menu" | "rename" | "delete">("closed");
+  const [open, setOpen] = useState<"closed" | "menu" | "rename" | "delete" | "move">("closed");
   const [draft, setDraft] = useState(title);
   const [problem, setProblem] = useState<string | null>(null);
   const [above, setAbove] = useState(false);
@@ -120,6 +140,7 @@ export function ChatMenu({
   const titleBox = useRef<HTMLInputElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const keepChat = useRef<HTMLButtonElement>(null);
+  const moveList = useRef<HTMLDivElement>(null);
   const [running, setRunning] = useState(false);
   // Read as well as shown: two presses before the next render both see `running` false.
   const busy = useRef(false);
@@ -141,6 +162,8 @@ export function ChatMenu({
       titleBox.current?.focus();
     } else if (open === "delete") {
       keepChat.current?.focus();
+    } else if (open === "move") {
+      moveList.current?.querySelector<HTMLElement>("button:not(:disabled)")?.focus();
     }
   }, [open]);
 
@@ -152,7 +175,7 @@ export function ChatMenu({
   useDismiss(open !== "closed", ref, close);
 
   /** Opens a pane, forgetting whatever the last attempt reported. */
-  function show(next: "menu" | "rename" | "delete"): void {
+  function show(next: "menu" | "rename" | "delete" | "move"): void {
     setProblem(null);
     setOpen(next);
   }
@@ -225,9 +248,16 @@ export function ChatMenu({
                   Fork
                 </Link>
               )}
-              <button type="button" role="menuitem" className={item} onClick={() => void run(pinned ? "unpin" : "pin", () => onPin(!pinned))}>
-                {pinned ? "Unpin" : "Pin"}
-              </button>
+              {onPin === undefined ? null : (
+                <button type="button" role="menuitem" className={item} onClick={() => void run(pinned ? "unpin" : "pin", () => onPin(!pinned))}>
+                  {pinned ? "Unpin" : "Pin"}
+                </button>
+              )}
+              {move === undefined ? null : (
+                <button type="button" role="menuitem" className={item} onClick={() => show("move")}>
+                  Move to folder
+                </button>
+              )}
               <button
                 type="button"
                 role="menuitem"
@@ -243,6 +273,25 @@ export function ChatMenu({
                 Delete {noun}
               </button>
             </div>
+          ) : open === "move" && move !== undefined ? (
+            <div ref={moveList} role="group" aria-label="Move to folder" className="flex flex-col gap-0.5">
+              <p className="px-2.5 pb-1 pt-1.5 text-xs text-asst-faint">Move to folder</p>
+              {move.folders.length === 0 ? (
+                <p className="px-2.5 pb-1.5 text-sm text-asst-muted">You have no folders yet. Make one with the + beside Folders.</p>
+              ) : (
+                <div className="flex max-h-[200px] flex-col gap-0.5 overflow-y-auto">
+                  {move.folders.map((folder) => (
+                    <MoveButton
+                      key={folder.id}
+                      label={folder.name}
+                      chosen={move.current === folder.id}
+                      onPick={() => void run("move", () => move.onMove(folder.id))}
+                    />
+                  ))}
+                </div>
+              )}
+              {move.current === null ? null : <MoveButton label="Remove from folder" chosen={false} onPick={() => void run("move", () => move.onMove(null))} />}
+            </div>
           ) : open === "rename" ? (
             <form
               method="post"
@@ -254,11 +303,11 @@ export function ChatMenu({
             >
               {/* The box is inside its label, so nothing has to be unique to the one menu that is open. */}
               <label className="flex flex-col gap-2">
-                <span className="text-xs text-asst-faint">{noun === "form" ? "Form name" : "Chat name"}</span>
+                <span className="text-xs text-asst-faint">{NOUNS[noun].field}</span>
                 <input
                   ref={titleBox}
                   value={draft}
-                  maxLength={200}
+                  maxLength={NOUNS[noun].max}
                   onChange={(event) => setDraft(event.target.value)}
                   className="rounded-lg border border-asst-strong bg-asst-field px-2.5 py-1.5 text-sm outline-hidden focus:border-asst-accent-line"
                 />
@@ -269,11 +318,7 @@ export function ChatMenu({
             </form>
           ) : (
             <div className="flex flex-col gap-2 p-1">
-              <p className="text-sm">
-                {noun === "form"
-                  ? "Delete this form and all its versions? This cannot be undone."
-                  : "Delete this chat and its document? This cannot be undone."}
-              </p>
+              <p className="text-sm">{NOUNS[noun].ask}</p>
               {local ? <p className="text-sm">{LOCAL_DELETE_NOTE}</p> : null}
               <div className="flex justify-end gap-2">
                 <button ref={keepChat} type="button" onClick={() => close()} className="rounded-lg border border-asst-strong px-3 py-1.5 text-sm">
@@ -299,5 +344,21 @@ export function ChatMenu({
         </div>
       )}
     </div>
+  );
+}
+
+/** One folder in the Move to folder pane; the one the chat is in already is shown as chosen. */
+function MoveButton({ label, chosen, onPick }: { label: string; chosen: boolean; onPick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={chosen}
+      disabled={chosen}
+      onClick={onPick}
+      className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-asst-active disabled:hover:bg-transparent"
+    >
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {chosen ? <span className="shrink-0 text-xs text-asst-muted">Current</span> : null}
+    </button>
   );
 }

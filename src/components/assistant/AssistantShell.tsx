@@ -19,6 +19,7 @@ import { ConversationSearch } from "@/components/assistant/ConversationSearch";
 import type { AssistantExportDefaults } from "@/components/assistant/ExportSettings";
 import { FeedbackMenu } from "@/components/assistant/FeedbackMenu";
 import type { AssistantFiles } from "@/components/assistant/FileSettings";
+import { FolderList, type SidebarFolders } from "@/components/assistant/FolderList";
 import type { AssistantGitIdentity } from "@/components/assistant/GitIdentitySettings";
 import { LiveLocalSessions } from "@/components/assistant/LiveLocalSessions";
 import { besideSidebar, SIDEBAR_DRAWER_MAX_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH } from "@/components/assistant/layout";
@@ -148,6 +149,7 @@ export function AssistantShell({
   schedule,
   tokens,
   actions,
+  folders,
   children
 }: {
   viewerName: string;
@@ -203,6 +205,8 @@ export function AssistantShell({
   tokens?: AssistantTokens;
   /** Given, every row offers an options menu; left out, the rows are links alone. */
   actions?: ConversationActions;
+  /** The viewer's folders, which the sidebar lists and each chat's options menu moves it into; left out, neither is shown. */
+  folders?: SidebarFolders;
   children: React.ReactNode;
 }) {
   const router = useRouter();
@@ -368,6 +372,7 @@ export function AssistantShell({
           )}
           <LiveLocalSessions served={served}>
             <ConversationSearch>
+              {folders === undefined ? null : <FolderList folders={folders} activeId={activeId} />}
               {groups.length === 0 ? <p className="px-2.5 text-[13px] text-asst-faint">Your chats appear here.</p> : null}
               {groups.map((group) => (
                 <div key={group.label} className="flex flex-col gap-0.5">
@@ -463,6 +468,18 @@ export function AssistantShell({
                                   shareHref={`/assistant/${item.id}?share=1`}
                                   local={item.kind === "local"}
                                   forkHref={`/assistant/${item.id}?fork=1`}
+                                  move={
+                                    folders === undefined
+                                      ? undefined
+                                      : {
+                                          folders: folders.list,
+                                          current: item.folderId ?? null,
+                                          onMove: async (folderId) => {
+                                            report(await folders.move({ conversationId: item.id, folderId }));
+                                            router.refresh();
+                                          }
+                                        }
+                                  }
                                   label={`Options for ${item.title}`}
                                   triggerClassName={triggerClassName}
                                   pinned={item.pinnedAt !== null}

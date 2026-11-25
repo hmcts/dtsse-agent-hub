@@ -5,6 +5,7 @@ import type { AgentStatus } from "../realtime/events.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { findAssistant } from "./assistant-store.ts";
 import { announce, ConversationNotFound, type ConversationRow, SELECT, toRow } from "./conversation-row.ts";
+import { ownedFolderId } from "./folder-store.ts";
 import { detachLocalSessions, markChatRemoved } from "./local-chat-store.ts";
 import { hasPod } from "./pods.ts";
 import { DEFAULT_PRODUCT, isProduct } from "./products.ts";
@@ -40,6 +41,8 @@ export async function findConversation(db: Database, ownerOid: string, id: strin
 export interface ConversationListRow extends ConversationRow {
   /** The status of the conversation's current agent; `offline` when it has no agent yet, as its own page reads it. */
   agentStatus: AgentStatus;
+  /** The owner's folder the chat is in; null for none. */
+  folderId: string | null;
 }
 
 /**
@@ -79,11 +82,27 @@ export async function sidebarConversations(
   return { pinned, recent };
 }
 
+/** How many of a folder's chats its page lists. */
+export const FOLDER_CHATS_LIMIT = 200;
+
+/** The owner's chats in one of their folders, most recently active first, pinned or not. */
+export async function folderConversations(db: Database, ownerOid: string, folderId: string, limit = FOLDER_CHATS_LIMIT): Promise<ConversationListRow[]> {
+  return await listed(db, { ownerOid, folderId }, [{ lastActiveAt: "desc" }, { id: "asc" }], limit);
+}
+
+/** How many chats in folders the sidebar reads, across all of a person's folders; far more than anyone files, so it only bounds the read. */
+export const FOLDERED_LIMIT = 500;
+
+/** The owner's chats that are in any of their folders, most recently active first, for the sidebar's expanded folders. */
+export async function folderedConversations(db: Database, ownerOid: string, limit = FOLDERED_LIMIT): Promise<ConversationListRow[]> {
+  return await listed(db, { ownerOid, folderId: { not: null } }, [{ lastActiveAt: "desc" }, { id: "asc" }], limit);
+}
+
 type ListedOrder = { lastActiveAt: "desc" } | { pinnedAt: "desc" } | { id: "asc" };
 
 async function listed(
   db: Database,
-  filter: { ownerOid: string; virtualAgentId?: string; pinnedAt?: null | { not: null } },
+  filter: { ownerOid: string; virtualAgentId?: string; pinnedAt?: null | { not: null }; folderId?: string | { not: null } },
   orderBy: ListedOrder[],
   take: number
 ): Promise<ConversationListRow[]> {
@@ -93,11 +112,11 @@ async function listed(
       firstContentAt: { not: null },
       OR: [{ virtualAgentId: null }, { virtualAgent: { desired: { not: "deleted" } } }]
     },
-    select: { ...SELECT, agent: { select: { status: true } } },
+    select: { ...SELECT, folderId: true, agent: { select: { status: true } } },
     orderBy,
     take
   });
-  return rows.map(({ agent, ...row }) => ({ ...toRow(row), agentStatus: agent?.status ?? "offline" }));
+  return rows.map(({ agent, folderId, ...row }) => ({ ...toRow(row), agentStatus: agent?.status ?? "offline", folderId }));
 }
 
 /**
@@ -136,11 +155,13 @@ export async function sidebarKinds(db: Database, ownerOid: string, formKnown = f
  * Any conversation of the owner's, with or without a pod, however old. `state = 'stored'` rather than any unclaimed
  * upload, because a half-uploaded file cannot be sent and there is nothing to hand back.
  */
-export async function unsentConversation(db: Database, ownerOid: string): Promise<ConversationRow | undefined> {
+export async function unsentConversation(db: Database, ownerOid: string, folderId: string | null = null): Promise<ConversationRow | undefined> {
+  // Only the one started from the same screen: a folder's new chat hands back what was opened in that folder alone.
   const [row] = await db.$queryRaw<{ id: string }[]>`
     SELECT c.id::text AS id
       FROM assistant_conversation c
      WHERE c.owner_oid = ${ownerOid}
+       AND c.folder_id IS NOT DISTINCT FROM ${folderId}::uuid
        AND NOT EXISTS (SELECT 1 FROM assistant_document d WHERE d.conversation_id = c.id AND d.version > 0)
        AND c.forked_at IS NULL
        AND EXISTS (
@@ -196,7 +217,7 @@ export async function createConversationAgent(db: Database, conversation: Pick<C
 export async function createConversation(
   prisma: PrismaClient,
   ownerOid: string,
-  request: { product?: unknown; title?: string | null }
+  request: { product?: unknown; title?: string | null; folderId?: string | null }
 ): Promise<ConversationRow> {
   const product = request.product === undefined ? DEFAULT_PRODUCT : request.product;
   if (!isProduct(product)) {
@@ -207,9 +228,10 @@ export async function createConversation(
     throw new HttpError(409, "open the CFT Workspace first, so it can be set up");
   }
   const title = messageTitle(request.title ?? "");
+  const folderId = await ownedFolderId(prisma, ownerOid, request.folderId ?? null);
   return await prisma.$transaction(async (tx) => {
     const created = await tx.assistantConversation.create({
-      data: { ownerOid, virtualAgentId: assistant.id, product, title },
+      data: { ownerOid, virtualAgentId: assistant.id, product, title, folderId },
       select: SELECT
     });
     const agentId = await createConversationAgent(tx, created);

@@ -171,6 +171,7 @@ describe("migrate", () => {
       "assistant_docmosis_version",
       "assistant_document",
       "assistant_export_default",
+      "assistant_folder",
       "assistant_lookup",
       "assistant_model_choice",
       "assistant_notify",

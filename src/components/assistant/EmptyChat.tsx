@@ -1,18 +1,21 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import type { Skill } from "@/agents/skills";
+import { dayLabel } from "@/assistant/grouping";
 import { DEFAULT_PRODUCT, isProduct } from "@/assistant/products";
 import { fillWith, type Starter, type Template } from "@/assistant/starters";
-import type { UnsentChat } from "@/assistant/views";
+import type { ConversationLink, UnsentChat } from "@/assistant/views";
 import { SidebarToggle } from "@/components/assistant/AssistantShell";
+import { ChatMenu } from "@/components/assistant/ChatMenu";
 import { Composer, type ComposerFiller } from "@/components/assistant/Composer";
 import { ProductSelect } from "@/components/assistant/ProductSelect";
 import type { ActionResult } from "@/web/action";
 
-type StartAction = (input: { product: unknown; body: unknown }) => Promise<ActionResult<{ id: string }>>;
-type OpenAction = (input: { product: unknown }) => Promise<ActionResult<{ id: string }>>;
+type StartAction = (input: { product: unknown; body: unknown; folderId?: unknown }) => Promise<ActionResult<{ id: string }>>;
+type OpenAction = (input: { product: unknown; folderId?: unknown }) => Promise<ActionResult<{ id: string }>>;
 type SendAction = (input: { conversationId: unknown; body: unknown; uploadIds: unknown }) => Promise<ActionResult>;
 type ProductAction = (input: { conversationId: unknown; product: unknown }) => Promise<ActionResult>;
 
@@ -32,6 +35,20 @@ export interface EmptyChatActions {
  * and a conversation id is a UUID, so this can never be mistaken for one.
  */
 export const NEW_CHAT_DRAFT = "new";
+
+/** What a folder's new chat keeps its draft under, apart from the plain new chat's and every other folder's. */
+export function folderDraftId(folderId: string): string {
+  return `${NEW_CHAT_DRAFT}:${folderId}`;
+}
+
+/** The folder a new chat is started in: its name, its chats, and its options for the header. */
+export interface EmptyFolder {
+  id: string;
+  name: string;
+  chats: readonly ConversationLink[];
+  rename: (input: { folderId: unknown; name: unknown }) => Promise<ActionResult>;
+  remove: (input: { folderId: unknown }) => Promise<ActionResult>;
+}
 
 /** Where the new chat's product choice is remembered, scoped to the viewer as the drafts are and for the same reason. */
 const PRODUCT_KEY = "agent-hub:assistant-product:";
@@ -88,7 +105,8 @@ export function EmptyChat({
   skills,
   viewerOid,
   unsent,
-  actions
+  actions,
+  folder
 }: {
   starters: readonly Starter[];
   templates: readonly Template[];
@@ -99,6 +117,8 @@ export function EmptyChat({
   /** The conversation this screen already opened for a file and never sent, if there is one. */
   unsent?: UnsentChat;
   actions: EmptyChatActions;
+  /** The folder the chat is started in, whose name heads the screen and whose chats are listed under the starters. */
+  folder?: EmptyFolder;
 }) {
   const router = useRouter();
   // The conversation's own product wins: it is what the file was attached under, and what the session will be told.
@@ -118,7 +138,7 @@ export function EmptyChat({
     }
     opening.current ??= (async () => {
       try {
-        const result = await actions.open({ product });
+        const result = await actions.open({ product, folderId: folder?.id });
         if (!result.ok) {
           throw new Error(result.error);
         }
@@ -151,7 +171,7 @@ export function EmptyChat({
   async function begin(body: string, uploadIds: string[] = []): Promise<string | null> {
     const conversation = opened.current;
     if (conversation === null) {
-      const result = await actions.start({ product, body });
+      const result = await actions.start({ product, body, folderId: folder?.id });
       if (!result.ok) {
         return result.error;
       }
@@ -180,11 +200,36 @@ export function EmptyChat({
     <>
       <header className="flex h-14 shrink-0 items-center gap-3 border-b border-asst-field px-4">
         <SidebarToggle />
-        <h1 className="truncate text-[15px] font-medium">New chat</h1>
+        <h1 className="min-w-0 truncate text-[15px] font-medium">{folder === undefined ? "New chat" : folder.name}</h1>
+        {folder === undefined ? null : (
+          <div className="ml-auto">
+            <ChatMenu
+              title={folder.name}
+              noun="folder"
+              label="Folder options"
+              onOpen={() => setError(null)}
+              onRename={async (name) => {
+                const result = await folder.rename({ folderId: folder.id, name });
+                setError(result.ok ? null : result.error);
+                router.refresh();
+              }}
+              onDelete={async () => {
+                const result = await folder.remove({ folderId: folder.id });
+                if (result.ok) {
+                  router.push("/assistant");
+                } else {
+                  setError(result.error);
+                }
+              }}
+            />
+          </div>
+        )}
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="flex min-h-full flex-col items-center justify-center gap-7 px-5 py-10">
-          <h2 className="text-balance text-center text-[28px] font-medium tracking-tight">What are you working on?</h2>
+          <h2 className="text-balance text-center text-[28px] font-medium tracking-tight">
+            {folder === undefined ? "What are you working on?" : `New chat in ${folder.name}`}
+          </h2>
           <ul aria-label="Starters" className="grid w-full max-w-[640px] grid-cols-1 gap-2.5 sm:grid-cols-2">
             {starters.map((card) => (
               <li key={card.title}>
@@ -205,6 +250,7 @@ export function EmptyChat({
               {error}
             </p>
           )}
+          {folder === undefined ? null : <FolderChats chats={folder.chats} />}
         </div>
       </div>
       <div className="shrink-0 px-4 pb-3.5">
@@ -216,7 +262,7 @@ export function EmptyChat({
             templates={templates}
             skills={skills}
             viewerOid={viewerOid}
-            draftId={NEW_CHAT_DRAFT}
+            draftId={folder === undefined ? NEW_CHAT_DRAFT : folderDraftId(folder.id)}
             onSend={begin}
             filler={composer}
             openConversation={openConversation}
@@ -225,5 +271,31 @@ export function EmptyChat({
         </div>
       </div>
     </>
+  );
+}
+
+/** A folder's chats, most recently active first, each a link to the chat with the day it was last active. */
+function FolderChats({ chats }: { chats: readonly ConversationLink[] }) {
+  const now = new Date();
+  return (
+    <section aria-labelledby="folder-chats" className="flex w-full max-w-[640px] flex-col gap-2">
+      <h3 id="folder-chats" className="text-sm font-medium text-asst-muted">
+        Chats in this folder
+      </h3>
+      {chats.length === 0 ? (
+        <p className="text-[13px] text-asst-faint">None yet. Start one above, or move a chat here from its options menu.</p>
+      ) : (
+        <ul className="flex flex-col divide-y divide-asst-line rounded-xl border border-asst-line">
+          {chats.map((chat) => (
+            <li key={chat.id}>
+              <Link href={`/assistant/${chat.id}`} className="flex items-center gap-3 px-4 py-3 text-sm hover:bg-asst-hover">
+                <span className="min-w-0 flex-1 truncate">{chat.title}</span>
+                <span className="shrink-0 text-xs text-asst-faint">{dayLabel(new Date(chat.lastActiveAt), now)}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
