@@ -1650,6 +1650,53 @@ describe("ChatView menu", () => {
     expect(refresh).toHaveBeenCalled();
   });
 
+  const FOLDERS = [
+    { id: "f1", name: "Possession claims" },
+    { id: "f2", name: "Welsh" }
+  ];
+
+  it("should move the open chat into a folder from its options menu, showing the folder it is in", async () => {
+    const move = ok();
+    render(
+      <ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ folderId: "f2" })} templates={TEMPLATES} actions={actions({ move })} folders={FOLDERS} />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move to folder" }));
+    const pane = screen.getByRole("group", { name: "Move to folder" });
+    expect(within(pane).getByRole("button", { name: /Welsh/ }).getAttribute("aria-pressed")).toBe("true");
+    await act(async () => {
+      fireEvent.click(within(pane).getByRole("button", { name: "Possession claims" }));
+    });
+
+    expect(move).toHaveBeenCalledWith({ conversationId: CONVERSATION, folderId: "f1" });
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it("should show the refusal and not refresh when the move is refused", async () => {
+    const move = vi.fn(async () => ({ ok: false as const, error: "no such folder" }));
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions({ move })} folders={FOLDERS} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move to folder" }));
+    expect(within(screen.getByRole("group", { name: "Move to folder" })).queryByRole("button", { name: "Remove from folder" })).toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Possession claims" }));
+    });
+
+    expect(screen.getByText("no such folder")).toBeTruthy();
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("should offer no Move to folder without the person's folders or the action", () => {
+    const { rerender } = render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions({ move: ok() })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Chat options" }));
+    expect(screen.queryByRole("menuitem", { name: "Move to folder" })).toBeNull();
+
+    rerender(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} folders={FOLDERS} />);
+    expect(screen.queryByRole("menuitem", { name: "Move to folder" })).toBeNull();
+  });
+
   it("should offer Unpin and unpin the chat when it is pinned", async () => {
     const pin = ok();
     render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ pinned: true })} templates={TEMPLATES} actions={actions({ pin })} />);

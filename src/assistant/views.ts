@@ -440,6 +440,8 @@ export interface ConversationView {
   productLabel: string;
   /** Whether the owner pinned it, so its options menu offers Unpin rather than Pin. */
   pinned: boolean;
+  /** The owner's folder the chat is in, which its options menu shows as chosen; null for none. */
+  folderId?: string | null;
   productHistory: ProductChange[];
   /** Every answer the person stopped, so the thread shows where each one was cut off. */
   stopHistory: StopMark[];
@@ -543,21 +545,22 @@ export async function conversationView(db: Database, conversation: ConversationR
   // The ref carries the agent's id and its owner and nothing else, because that is all either read asks of it: the
   // literals are not a claim about the agent that some rule elsewhere has to keep agreeing with.
   const agent = { id: agentId, ownerOid: conversation.ownerOid };
-  // The fork's, the deck's and the two templates' columns are one read, and only the .pptx probe waits for it.
+  // The fork's, the video's and the folder's columns are one read, and only the .pptx probe waits for it.
   const forkDeckAndDocmosis = async () => {
     const row = await db.assistantConversation.findUnique({
       where: { id: conversation.id },
-      select: { ...FORKED_SELECT, ...VIDEO_SELECT }
+      select: { ...FORKED_SELECT, ...VIDEO_SELECT, folderId: true }
     });
     return {
       fork: row,
+      folderId: row?.folderId ?? null,
       decks: await listDeckSummaries(db, conversation.id),
       docmosisTemplates: await listDocmosisSummaries(db, conversation.id),
       notifyTemplates: await listNotifySummaries(db, conversation.id),
       video: row === null ? null : videoSummary(row)
     };
   };
-  const [current, documents, { fork, decks, docmosisTemplates, notifyTemplates, video }, page, questions, pod] = await Promise.all([
+  const [current, documents, { fork, folderId, decks, docmosisTemplates, notifyTemplates, video }, page, questions, pod] = await Promise.all([
     db.agent.findUnique({ where: { id: agentId }, select: { status: true, skills: true, clientFeatures: true, repo: true, branch: true } }),
     documentViews(db, conversation.id),
     forkDeckAndDocmosis(),
@@ -574,6 +577,7 @@ export async function conversationView(db: Database, conversation: ConversationR
     product: conversation.product,
     productLabel: productLabel(conversation.product),
     pinned: conversation.pinnedAt !== null,
+    folderId,
     productHistory: conversation.productHistory,
     stopHistory: conversation.stopHistory,
     local: !hasPod(conversation),
