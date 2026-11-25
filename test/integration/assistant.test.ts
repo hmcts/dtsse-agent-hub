@@ -33,6 +33,7 @@ import {
 } from "../../src/assistant/conversation-store.ts";
 import { ITEMS_CREATE_REFUSED, ITEMS_EXPORT_REFUSED } from "../../src/assistant/documents.ts";
 import { readExportDefaults, saveExportDefaults } from "../../src/assistant/export-default-store.ts";
+import { createFolder } from "../../src/assistant/folder-store.ts";
 import { assistantFrame } from "../../src/assistant/frame.ts";
 import { GITHUB_EXPORT_TIMEOUT_MS } from "../../src/assistant/github.ts";
 import { JIRA_EXPORT_TIMEOUT_MS } from "../../src/assistant/jira.ts";
@@ -69,7 +70,10 @@ vi.mock("next/cache", async () => {
 
 const { actAs } = await import("./web-session.ts");
 const actions = await import("../../src/app/_actions/assistant.ts");
-const { agentAddress, assistantConversation, assistantModel, openAssistant } = await import("../../src/web/data.ts");
+const folderActions = await import("../../src/app/_actions/folders.ts");
+const { agentAddress, assistantConversation, assistantFolder, assistantFolderName, assistantModel, openAssistant, unsentNewChat } = await import(
+  "../../src/web/data.ts"
+);
 
 const ALICE: Person = { oid: "dev-alice", name: "Dev alice (sign-in disabled)", email: "alice@dev.invalid" };
 const BOB: Person = { oid: "dev-bob", name: "Dev bob (sign-in disabled)", email: "bob@dev.invalid" };
@@ -348,6 +352,72 @@ describe("the person's assistant", () => {
   });
 });
 
+describe("folders", () => {
+  it("should make, list, rename and delete the viewer's folders, revalidating the sidebar each time", async () => {
+    await startedAssistant();
+
+    const created = await folderActions.createFolder({ name: "PCS" });
+    expect(created).toMatchObject({ ok: true });
+    const id = (created as { id: string }).id;
+    expect((await openAssistant(VIEWER)).folders).toEqual([{ id, name: "PCS", chats: [] }]);
+
+    expect(await folderActions.renameFolder({ folderId: id, name: "Possession" })).toEqual({ ok: true });
+    expect((await assistantFolder(VIEWER, id))?.name).toBe("Possession");
+    expect(await assistantFolderName(VIEWER, id)).toBe("Possession");
+
+    expect(await folderActions.deleteFolder({ folderId: id })).toEqual({ ok: true });
+    expect(await assistantFolder(VIEWER, id)).toBeUndefined();
+    expect(await assistantFolderName(VIEWER, id)).toBeUndefined();
+  });
+
+  it("should move the viewer's chat into a folder and out again", async () => {
+    await startedAssistant();
+    const folder = (await folderActions.createFolder({ name: "PCS" })) as { id: string };
+    const chat = (await actions.startConversation({ product: "pcs", body: "hi" })) as { id: string };
+
+    expect(await folderActions.moveConversationToFolder({ conversationId: chat.id, folderId: folder.id })).toEqual({ ok: true });
+    expect((await assistantFolder(VIEWER, folder.id))?.chats.map((row) => row.id)).toEqual([chat.id]);
+
+    expect(await folderActions.moveConversationToFolder({ conversationId: chat.id, folderId: null })).toEqual({ ok: true });
+    expect((await assistantFolder(VIEWER, folder.id))?.chats).toEqual([]);
+  });
+
+  it("should hand a folder's new chat back only the file opened in that folder", async () => {
+    await startedAssistant();
+    const folder = (await folderActions.createFolder({ name: "PCS" })) as { id: string };
+    const opened = (await actions.openConversation({ product: "pcs", folderId: folder.id })) as { id: string };
+    await prisma.assistantUpload.create({
+      data: { conversationId: opened.id, ownerOid: ALICE.oid, fileName: "a.pdf", storedName: "a.pdf", mediaType: "application/pdf", bytes: 1n, state: "stored" }
+    });
+
+    expect((await unsentNewChat(VIEWER, folder.id))?.id).toBe(opened.id);
+    expect(await unsentNewChat(VIEWER)).toBeUndefined();
+  });
+
+  it("should answer a refusal as the person's sentence", async () => {
+    await startedAssistant();
+
+    expect(await folderActions.createFolder({ name: " " })).toEqual({ ok: false, error: "a folder name is 1 to 80 characters" });
+    expect(await folderActions.renameFolder({ folderId: randomUUID(), name: "x" })).toEqual({ ok: false, error: "no such folder" });
+    expect(await folderActions.deleteFolder({ folderId: 42 })).toEqual({ ok: false, error: "no such folder" });
+    expect(await folderActions.moveConversationToFolder({ conversationId: randomUUID(), folderId: null })).toEqual({
+      ok: false,
+      error: "no such conversation"
+    });
+  });
+
+  it("should refuse every folder action while the CFT Workspace is off", async () => {
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "false");
+    const off = { ok: false, error: "the CFT Workspace is not available on this deployment" };
+
+    expect(await folderActions.createFolder({ name: "PCS" })).toEqual(off);
+    expect(await folderActions.renameFolder({ folderId: randomUUID(), name: "x" })).toEqual(off);
+    expect(await folderActions.deleteFolder({ folderId: randomUUID() })).toEqual(off);
+    expect(await folderActions.moveConversationToFolder({ conversationId: randomUUID(), folderId: null })).toEqual(off);
+    expect(await prisma.assistantFolder.count()).toBe(0);
+  });
+});
+
 describe("conversations", () => {
   it("should start a conversation with its first message queued for an agent that waits for a session", async () => {
     await startedAssistant();
@@ -361,6 +431,29 @@ describe("conversations", () => {
     const agent = await prisma.agent.findUniqueOrThrow({ where: { id: conversation.agentId! } });
     expect(agent).toMatchObject({ status: "offline", assistantConversationId: id, virtualAgentId: conversation.virtualAgentId, name: "assistant" });
     expect(await prisma.delivery.count({ where: { agentId: agent.id, state: "queued" } })).toBe(1);
+  });
+
+  it("should start or open a conversation in one of the viewer's folders when one is named", async () => {
+    await startedAssistant();
+    const folder = await createFolder(prisma, ALICE.oid, "PCS");
+
+    const started = (await actions.startConversation({ product: "pcs", body: "hi", folderId: folder.id })) as { id: string };
+    const opened = (await actions.openConversation({ product: "pcs", folderId: folder.id })) as { id: string };
+    const plain = (await actions.startConversation({ product: "pcs", body: "hi", folderId: "" })) as { id: string };
+
+    const folderOf = async (id: string) => (await prisma.assistantConversation.findUniqueOrThrow({ where: { id } })).folderId;
+    expect(await folderOf(started.id)).toBe(folder.id);
+    expect(await folderOf(opened.id)).toBe(folder.id);
+    expect(await folderOf(plain.id)).toBeNull();
+  });
+
+  it("should refuse to start a conversation in a folder that is not the viewer's", async () => {
+    await startedAssistant();
+    await insertUser(BOB);
+    const bobs = await createFolder(prisma, BOB.oid, "Bob's");
+
+    expect(await actions.startConversation({ product: "pcs", body: "hi", folderId: bobs.id })).toEqual({ ok: false, error: "no such folder" });
+    expect(await actions.openConversation({ product: "pcs", folderId: bobs.id })).toEqual({ ok: false, error: "no such folder" });
   });
 
   it("should refuse a product it does not offer when starting a conversation", async () => {

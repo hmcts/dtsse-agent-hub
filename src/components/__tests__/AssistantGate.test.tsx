@@ -99,6 +99,7 @@ function home(chat: AssistantHome["chat"], stored: CredentialStatus[] = [], over
     briefing: false,
     skills: [],
     mentions: null,
+    folders: [],
     chat
   };
 }

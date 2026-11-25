@@ -21,10 +21,20 @@ import { neededCredentials, optionalCredentials } from "../virtual-agents/views.
 import { type Artefact, DOCUMENT_SELECT, OLDEST_FIRST, toDocument } from "./artefact-store.ts";
 import { CONFLUENCE_SELECT, type ConfluenceExportView, confluenceExportView } from "./confluence.ts";
 import type { ConversationRow, ProductChange, SessionState, StopMark } from "./conversation-row.ts";
-import { type ConversationListRow, listConversations, sidebarConversations, sidebarKinds, unsentConversation } from "./conversation-store.ts";
+import {
+  type ConversationListRow,
+  folderConversations,
+  folderedConversations,
+  listConversations,
+  sidebarConversations,
+  sidebarKinds,
+  unsentConversation
+} from "./conversation-store.ts";
 import { type DeckSummary, listDeckSummaries } from "./deck-store.ts";
 import { type DocmosisSummary, listDocmosisSummaries } from "./docmosis-store.ts";
 import type { DocumentKind } from "./documents.ts";
+import { findFolder, listFolders } from "./folder-store.ts";
+import { withChats } from "./folders.ts";
 import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
 import { GITHUB_SELECT, type GithubExportView, githubExportView } from "./github.ts";
 import { bySidebarOrder, groupForSidebar, type SidebarGroup } from "./grouping.ts";
@@ -138,6 +148,8 @@ export interface ConversationLink {
   /** When the owner pinned it, which puts it in the sidebar's Pinned section; null while it is not pinned. */
   pinnedAt: string | null;
   mark: ConversationMark;
+  /** The owner's folder the chat is in, which its options menu shows as chosen; null for none. Absent from a row built without it. */
+  folderId?: string | null;
 }
 
 /** A feedback project the viewer owns or is on the team of, as a sidebar row. */
@@ -252,7 +264,7 @@ function toLink(row: LinkRow, marked: boolean): Omit<ConversationLink, "pinnedAt
 }
 
 function listLink(row: ConversationListRow, marked: boolean): ConversationLink {
-  return { ...toLink(row, marked), pinnedAt: row.pinnedAt?.toISOString() ?? null };
+  return { ...toLink(row, marked), pinnedAt: row.pinnedAt?.toISOString() ?? null, folderId: row.folderId };
 }
 
 function projectLink(row: NavProjectRow, marked: boolean): FeedbackProjectLink {
@@ -308,8 +320,45 @@ export async function sidebarGroups(db: Database, ownerOid: string, now: Date = 
   );
 }
 
+/** A folder's own page: its name and its chats, most recently active first. */
+export interface FolderView {
+  id: string;
+  name: string;
+  chats: ConversationLink[];
+}
+
+/** The owner's folder and its chats, or `undefined` when it is not theirs or not there. */
+export async function folderView(db: Database, ownerOid: string, folderId: string): Promise<FolderView | undefined> {
+  const folder = await findFolder(db, ownerOid, folderId);
+  if (folder === undefined) {
+    return undefined;
+  }
+  const [rows, marked] = await Promise.all([folderConversations(db, ownerOid, folder.id), listMarked(db, ownerOid)]);
+  return { ...folder, chats: rows.map((row) => listLink(row, marked)) };
+}
+
+/** A chat as an expanded folder in the sidebar lists it: a link by its title. */
+export interface FolderChatLink {
+  id: string;
+  title: string;
+}
+
+/** A folder as the sidebar lists it: its name, and its chats, most recently active first, for when it is expanded. */
+export interface SidebarFolderView {
+  id: string;
+  name: string;
+  chats: FolderChatLink[];
+}
+
+/** The owner's folders, by name, each with its chats as its own page lists them, however long ago they were active. */
+export async function sidebarFolders(db: Database, ownerOid: string): Promise<SidebarFolderView[]> {
+  const [folders, rows] = await Promise.all([listFolders(db, ownerOid), folderedConversations(db, ownerOid)]);
+  const chats = rows.map((row) => ({ id: row.id, title: row.title ?? UNTITLED, folderId: row.folderId }));
+  return withChats(folders, chats).map((folder) => ({ ...folder, chats: folder.chats.map(({ id, title }) => ({ id, title })) }));
+}
+
 /** A chat found by the sidebar's search, which says nothing of pinning: the results are one list in order of activity. */
-export interface ConversationMatch extends Omit<ConversationLink, "pinnedAt"> {
+export interface ConversationMatch extends Omit<ConversationLink, "pinnedAt" | "folderId"> {
   /** Why the chat matched, when its title does not already show it: the words around the match in one message. */
   snippet: string | null;
 }
@@ -372,8 +421,8 @@ export interface UnsentChat {
  * `undefined` once a message has been sent in it, which is the same moment the new chat's draft is discarded — so the
  * text and the files it belongs with always come back together, or not at all.
  */
-export async function unsentChat(db: Database, ownerOid: string): Promise<UnsentChat | undefined> {
-  const conversation = await unsentConversation(db, ownerOid);
+export async function unsentChat(db: Database, ownerOid: string, folderId: string | null = null): Promise<UnsentChat | undefined> {
+  const conversation = await unsentConversation(db, ownerOid, folderId);
   if (conversation === undefined) {
     return undefined;
   }

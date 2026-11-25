@@ -172,12 +172,22 @@ async function send(
   });
 }
 
+/** The folder a new chat goes in: one of the viewer's, checked by the store, or none. */
+function folderOf(value: unknown): string | null {
+  return typeof value === "string" && value !== "" ? value : null;
+}
+
 /**
  * A new conversation, started with its first message: a starter card's prompt, what the person typed, or a workflow's
  * prompt such as the morning briefing's. `title` names it where the first message would make a poor name, as a
  * skill's invocation does; left out, the first message names it.
  */
-export async function startConversation(input: { product: unknown; body: unknown; title?: unknown }): Promise<ActionResult<{ id: string }>> {
+export async function startConversation(input: {
+  product: unknown;
+  body: unknown;
+  title?: unknown;
+  folderId?: unknown;
+}): Promise<ActionResult<{ id: string }>> {
   return await runAction<{ id: string }>("start conversation", async () => {
     if (!virtualAgentsEnabled()) {
       return OFF;
@@ -190,7 +200,11 @@ export async function startConversation(input: { product: unknown; body: unknown
     if (typeof body !== "string") {
       return body;
     }
-    const conversation = await createConversation(prisma, viewer.oid, { product: input.product, title: text(input.title) });
+    const conversation = await createConversation(prisma, viewer.oid, {
+      product: input.product,
+      title: text(input.title),
+      folderId: folderOf(input.folderId)
+    });
     await send(viewer.oid, conversation, body);
     revalidatePath("/assistant");
     return { ok: true, id: conversation.id };
@@ -284,7 +298,7 @@ export async function handToAssistant(form: FormData): Promise<ActionResult<{ id
  * It leaves an empty conversation behind if they attach and walk away. `sweepUploads` removes one whose only content
  * was an attachment nobody ever sent, a few hours later — see the note there for why it is swept rather than left.
  */
-export async function openConversation(input: { product: unknown }): Promise<ActionResult<{ id: string }>> {
+export async function openConversation(input: { product: unknown; folderId?: unknown }): Promise<ActionResult<{ id: string }>> {
   return await runAction<{ id: string }>("open conversation", async () => {
     if (!virtualAgentsEnabled()) {
       return OFF;
@@ -293,7 +307,7 @@ export async function openConversation(input: { product: unknown }): Promise<Act
     if ((await assistantChatGate(viewer)) === "blocked") {
       return BLOCKED;
     }
-    const conversation = await createConversation(prisma, viewer.oid, { product: input.product });
+    const conversation = await createConversation(prisma, viewer.oid, { product: input.product, folderId: folderOf(input.folderId) });
     revalidatePath("/assistant");
     return { ok: true, id: conversation.id };
   });

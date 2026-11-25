@@ -85,6 +85,7 @@ export default defineConfig({
         "src/assistant/docmosis-library-store.ts",
         "src/assistant/assistant-store.ts",
         "src/assistant/conversation-store.ts",
+        "src/assistant/folder-store.ts",
         "src/assistant/first-content.ts",
         "src/assistant/frame.ts",
         "src/assistant/local-chat-store.ts",

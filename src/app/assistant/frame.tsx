@@ -6,6 +6,7 @@ import { pinBulkScanSpec, removeBulkScanSpec, renameBulkScanSpec } from "@/app/_
 import { clearGitIdentity, removeCredential, resetClaudeMd, saveClaudeMd, saveCredential, saveGitIdentity } from "@/app/_actions/credentials";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
 import { archiveFeedbackProject, pinFeedbackProject } from "@/app/_actions/feedback";
+import { createFolder, moveConversationToFolder } from "@/app/_actions/folders";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
 import { pasteLoginCode, reconnectSignIn, restartVirtualAgent, saveVirtualAgentPod } from "@/app/_actions/virtual-agents";
 import { SHARING_SETTINGS } from "@/app/assistant/sharing";
@@ -81,6 +82,7 @@ export function AssistantShellFrame({
       theme={frame.theme}
       collapsed={frame.collapsed}
       actions={ROW_ACTIONS}
+      folders={{ list: home.folders, create: createFolder, move: moveConversationToFolder }}
       connections={connectionsData(home.assistant, home.credentials)}
       viewerRoute={home.credentials.modelRoute}
       connect={{ assistantId: home.assistant.id, running: home.assistant.desired === "running", reconnect: reconnectSignIn, paste: pasteLoginCode }}

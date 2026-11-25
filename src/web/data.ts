@@ -23,6 +23,7 @@ import { type DeckAsset, type DeckView, deckView, holdsDeckAsset, readDeckAsset 
 import { docmosisView, listDocmosisVersions, readDocmosisPdf } from "../assistant/docmosis-store.ts";
 import { readExportDefaults } from "../assistant/export-default-store.ts";
 import type { ExportDefaults } from "../assistant/export-defaults.ts";
+import { findFolder } from "../assistant/folder-store.ts";
 import { conversationsForkableBy, conversationsOfferedBy, forkChoice, forkRecipients } from "../assistant/fork-store.ts";
 import type { SidebarGroup } from "../assistant/grouping.ts";
 import { type AssistantMemory, assistantMemory } from "../assistant/memory.ts";
@@ -52,8 +53,12 @@ import {
   assistantSummary,
   type ConversationView,
   conversationView,
+  type FolderView,
+  folderView,
   podSkills,
+  type SidebarFolderView,
   type SidebarItem,
+  sidebarFolders,
   sidebarGroups,
   type UnsentChat,
   unsentChat
@@ -278,6 +283,8 @@ export interface AssistantHome {
   assistant: AssistantSummary;
   credentials: CredentialSettings;
   conversations: { label: SidebarGroup; items: SidebarItem[] }[];
+  /** The viewer's folders, by name, with their chats, which the sidebar lists and every chat's options menu moves a chat into. */
+  folders: SidebarFolderView[];
   /**
    * The workspace plugins this hub offers, and the ones the viewer's assistant loads; `null` when the configuration
    * cannot be read, which is not the same as its offering nothing.
@@ -343,9 +350,10 @@ function pluginSettings(assistant: { plugins: string[] }): AssistantHome["plugin
  */
 export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
   const { assistant, claims } = await ensureAssistantWithClaims(prisma, viewer);
-  const [credentials, conversations, skills, mentions] = await Promise.all([
+  const [credentials, conversations, folders, skills, mentions] = await Promise.all([
     credentialSettings(viewer),
     sidebarGroups(prisma, viewer.oid),
+    sidebarFolders(prisma, viewer.oid),
     podSkills(prisma, assistant),
     feedbackEnabled() ? mentionsBadge(prisma, viewer.oid) : null
   ]);
@@ -355,6 +363,7 @@ export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
     assistant: summary,
     credentials,
     conversations,
+    folders,
     plugins: pluginSettings(assistant),
     welsh: hasWelshPlugin(assistant),
     briefing: canConnectMicrosoft(viewer.modelRoute) && offersBriefing(stored, claims),
@@ -383,8 +392,18 @@ export async function assistantChatGate(viewer: Viewer): Promise<ChatGate> {
  * Its own read rather than part of `openAssistant`, because every other page that renders the sidebar has no use for
  * it and should not pay for the query.
  */
-export async function unsentNewChat(viewer: Viewer): Promise<UnsentChat | undefined> {
-  return await unsentChat(prisma, viewer.oid);
+export async function unsentNewChat(viewer: Viewer, folderId: string | null = null): Promise<UnsentChat | undefined> {
+  return await unsentChat(prisma, viewer.oid, folderId);
+}
+
+/** What one of the viewer's folders is called, for its page's title; `undefined` for one that is not theirs. */
+export async function assistantFolderName(viewer: Viewer, folderId: string): Promise<string | undefined> {
+  return (await findFolder(prisma, viewer.oid, folderId))?.name;
+}
+
+/** One of the viewer's folders and its chats, for its page; `undefined` for one that is not theirs. */
+export async function assistantFolder(viewer: Viewer, folderId: string): Promise<FolderView | undefined> {
+  return await folderView(prisma, viewer.oid, folderId);
 }
 
 /**
