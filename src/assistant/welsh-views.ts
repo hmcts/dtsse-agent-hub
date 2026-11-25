@@ -71,7 +71,8 @@ export function setupView(result: Json): SetupView {
     conflictExamples: list(result.conflictExamples).map((c) => ({
       english: str(c.english),
       context: str(c.context),
-      options: list(c.options).map((o) => ({ welsh: str(o.welsh), where: str(o.where) }))
+      // Where each came from, by file and row: the plugin's `legacy:` prefix says only that it is an earlier file.
+      options: list(c.options).map((o) => ({ welsh: str(o.welsh), where: str(o.where).replace(/^legacy:/, "") }))
     })),
     unreadable: list(result.unreadable).map((u) => ({ file: str(u.file), problem: str(u.problem) })),
     repo: str(result.repo),

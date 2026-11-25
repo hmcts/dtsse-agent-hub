@@ -230,8 +230,8 @@ function CheckSummary({ view, result }: Readonly<{ view: SetupView; result: Reco
       {view.conflicts > 0 ? (
         <details>
           <summary className="cursor-pointer text-asst-warn">
-            {plural(view.conflicts, "English phrase")} have more than one Welsh. They are added as needing review, and not used until someone confirms which is
-            right.
+            {plural(view.conflicts, "English phrase")} {view.conflicts === 1 ? "has" : "have"} more than one Welsh. They are added as needing review, and not
+            used until someone confirms which is right.
           </summary>
           <ul className="mt-1 list-disc pl-5 text-xs text-asst-muted">
             {view.conflictExamples.map((c) => (

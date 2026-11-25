@@ -82,7 +82,7 @@ describe("the Welsh page's views", () => {
           english: "Back",
           context: "",
           options: [
-            { welsh: "Yn ôl", where: "legacy:a.xlsx row 3" },
+            { welsh: "Yn ôl", where: "a.xlsx row 3" },
             { welsh: "Nôl", where: "" }
           ]
         }

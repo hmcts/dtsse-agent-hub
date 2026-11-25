@@ -762,7 +762,7 @@ describe("WelshPage, setting a service up", () => {
     expect(setups.map((r) => r.kind)).toEqual(["setup_check", "setup"]);
     expect(setups[1]?.args).toEqual({ repo: "apps/cath/cath-service", file_ids: [ids[0], ids[1]] });
     expect(screen.getByText(/3 JSON entries left out/)).toBeTruthy();
-    expect(screen.getByText(/“Back”: “Yn ôl” in legacy:old.xlsx row 3; “Nôl” in legacy:copy.json/)).toBeTruthy();
+    expect(screen.getByText(/“Back”: “Yn ôl” in old.xlsx row 3; “Nôl” in copy.json/)).toBeTruthy();
   });
 
   it("should set up with an empty catalogue when the team has no earlier translations", async () => {
