@@ -9,7 +9,7 @@ import { offeredTemplates } from "@/assistant/templates";
 import { AssistantGate } from "@/components/assistant/AssistantGate";
 import { EmptyChat, type EmptyChatActions } from "@/components/assistant/EmptyChat";
 import { requireViewer } from "@/viewer/current";
-import { assistantFolder, unsentNewChat } from "@/web/data";
+import { assistantFolder, assistantFolderName, unsentNewChat } from "@/web/data";
 
 export const dynamic = "force-dynamic";
 
@@ -21,8 +21,7 @@ const CHAT_ACTIONS: EmptyChatActions = {
 };
 
 export async function generateMetadata({ params }: Readonly<{ params: Promise<{ folderId: string }> }>): Promise<Metadata> {
-  const folder = await assistantFolder(await requireViewer(), (await params).folderId);
-  return { title: folder?.name ?? "Folder" };
+  return { title: (await assistantFolderName(await requireViewer(), (await params).folderId)) ?? "Folder" };
 }
 
 /**

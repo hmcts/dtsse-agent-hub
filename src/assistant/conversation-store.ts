@@ -90,19 +90,38 @@ export async function folderConversations(db: Database, ownerOid: string, folder
   return await listed(db, { ownerOid, folderId }, [{ lastActiveAt: "desc" }, { id: "asc" }], limit);
 }
 
-/** How many chats in folders the sidebar reads, across all of a person's folders; far more than anyone files, so it only bounds the read. */
-export const FOLDERED_LIMIT = 500;
+/** A chat as the sidebar's expanded folder lists it. */
+export interface FolderedChat {
+  id: string;
+  title: string | null;
+  folderId: string;
+}
 
-/** The owner's chats that are in any of their folders, most recently active first, for the sidebar's expanded folders. */
-export async function folderedConversations(db: Database, ownerOid: string, limit = FOLDERED_LIMIT): Promise<ConversationListRow[]> {
-  return await listed(db, { ownerOid, folderId: { not: null } }, [{ lastActiveAt: "desc" }, { id: "asc" }], limit);
+/**
+ * The owner's chats in each of their folders, up to `limit` a folder, most recently active first within each: the
+ * same chats, in the same order, as each folder's own page lists (`folderConversations`), read for every folder at once.
+ */
+export async function folderedConversations(db: Database, ownerOid: string, limit = FOLDER_CHATS_LIMIT): Promise<FolderedChat[]> {
+  return await db.$queryRaw<FolderedChat[]>`
+    SELECT id, title, "folderId"
+      FROM (SELECT c.id::text AS id, c.title, c.folder_id::text AS "folderId", c.last_active_at,
+                   row_number() OVER (PARTITION BY c.folder_id ORDER BY c.last_active_at DESC, c.id) AS place
+              FROM assistant_conversation c
+              LEFT JOIN virtual_agent v ON v.id = c.virtual_agent_id
+             WHERE c.owner_oid = ${ownerOid}
+               AND c.folder_id IS NOT NULL
+               AND c.first_content_at IS NOT NULL
+               AND (c.virtual_agent_id IS NULL OR v.desired <> 'deleted')) ranked
+     WHERE place <= ${limit}
+     ORDER BY last_active_at DESC, id
+  `;
 }
 
 type ListedOrder = { lastActiveAt: "desc" } | { pinnedAt: "desc" } | { id: "asc" };
 
 async function listed(
   db: Database,
-  filter: { ownerOid: string; virtualAgentId?: string; pinnedAt?: null | { not: null }; folderId?: string | { not: null } },
+  filter: { ownerOid: string; virtualAgentId?: string; pinnedAt?: null | { not: null }; folderId?: string },
   orderBy: ListedOrder[],
   take: number
 ): Promise<ConversationListRow[]> {
@@ -228,8 +247,8 @@ export async function createConversation(
     throw new HttpError(409, "open the CFT Workspace first, so it can be set up");
   }
   const title = messageTitle(request.title ?? "");
-  const folderId = await ownedFolderId(prisma, ownerOid, request.folderId ?? null);
   return await prisma.$transaction(async (tx) => {
+    const folderId = await ownedFolderId(tx, ownerOid, request.folderId ?? null);
     const created = await tx.assistantConversation.create({
       data: { ownerOid, virtualAgentId: assistant.id, product, title, folderId },
       select: SELECT

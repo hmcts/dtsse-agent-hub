@@ -38,8 +38,14 @@ export const FOLDER_NAME_RULE = `a folder name is 1 to ${FOLDER_NAME_MAX} charac
 export function withChats<F extends { id: string }, C extends { folderId: string | null }>(folders: readonly F[], chats: readonly C[]): (F & { chats: C[] })[] {
   const byFolder = new Map<string, C[]>();
   for (const chat of chats) {
-    if (chat.folderId !== null) {
-      byFolder.set(chat.folderId, [...(byFolder.get(chat.folderId) ?? []), chat]);
+    if (chat.folderId === null) {
+      continue;
+    }
+    const filed = byFolder.get(chat.folderId);
+    if (filed === undefined) {
+      byFolder.set(chat.folderId, [chat]);
+    } else {
+      filed.push(chat);
     }
   }
   return folders.map((folder) => ({ ...folder, chats: byFolder.get(folder.id) ?? [] }));

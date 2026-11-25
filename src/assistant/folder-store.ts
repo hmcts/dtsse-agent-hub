@@ -21,9 +21,14 @@ export class FolderNotFound extends HttpError {
   }
 }
 
-/** The owner's folders, by name. */
+/** The owner's folders, by name. Ordered before the limit too, so which folders come back never depends on the plan. */
 export async function listFolders(db: Database, ownerOid: string): Promise<Folder[]> {
-  const rows = await db.assistantFolder.findMany({ where: { ownerOid }, select: { id: true, name: true }, take: FOLDER_LIMIT });
+  const rows = await db.assistantFolder.findMany({
+    where: { ownerOid },
+    select: { id: true, name: true },
+    orderBy: [{ name: "asc" }, { id: "asc" }],
+    take: FOLDER_LIMIT
+  });
   return rows.sort(byFolderName);
 }
 
@@ -36,16 +41,25 @@ export async function findFolder(db: Database, ownerOid: string, id: string): Pr
   return row ?? undefined;
 }
 
-/** The folder's id once it is known to be the owner's; `null` stays null, for no folder. */
+/**
+ * The folder's id once it is known to be the owner's; `null` stays null, for no folder. Called inside the transaction
+ * that files a chat in it, whose `FOR SHARE` holds a concurrent delete of the folder until that transaction ends, so
+ * the chat is never filed in a folder that has just gone: either the delete waits, or this answers that it is missing.
+ */
 export async function ownedFolderId(db: Database, ownerOid: string, id: string | null): Promise<string | null> {
   if (id === null) {
     return null;
   }
-  const folder = await findFolder(db, ownerOid, id);
-  if (folder === undefined) {
+  if (!isUuid(id)) {
     throw new FolderNotFound();
   }
-  return folder.id;
+  const [row] = await db.$queryRaw<{ id: string }[]>`
+    SELECT id::text AS id FROM assistant_folder WHERE id = ${id}::uuid AND owner_oid = ${ownerOid} FOR SHARE
+  `;
+  if (row === undefined) {
+    throw new FolderNotFound();
+  }
+  return row.id;
 }
 
 function nameOf(value: unknown): string {
@@ -56,12 +70,19 @@ function nameOf(value: unknown): string {
   return name;
 }
 
-export async function createFolder(db: Database, ownerOid: string, name: unknown): Promise<Folder> {
+/**
+ * Makes a folder, unless the owner has as many as they may have. The count and the insert run under a lock on the owner
+ * for the transaction, so two made at once cannot both pass the count and take them past the limit.
+ */
+export async function createFolder(prisma: PrismaClient, ownerOid: string, name: unknown): Promise<Folder> {
   const checked = nameOf(name);
-  if ((await db.assistantFolder.count({ where: { ownerOid } })) >= FOLDER_LIMIT) {
-    throw new HttpError(409, `you can have up to ${FOLDER_LIMIT} folders; delete one to make another`);
-  }
-  return await db.assistantFolder.create({ data: { ownerOid, name: checked }, select: { id: true, name: true } });
+  return await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('assistant_folder'), hashtext(${ownerOid}))`;
+    if ((await tx.assistantFolder.count({ where: { ownerOid } })) >= FOLDER_LIMIT) {
+      throw new HttpError(409, `you can have up to ${FOLDER_LIMIT} folders; delete one to make another`);
+    }
+    return await tx.assistantFolder.create({ data: { ownerOid, name: checked }, select: { id: true, name: true } });
+  });
 }
 
 export async function renameFolder(db: Database, ownerOid: string, id: string, name: unknown): Promise<void> {
@@ -75,15 +96,24 @@ export async function renameFolder(db: Database, ownerOid: string, id: string, n
   }
 }
 
-/** Deletes the folder. Its chats are kept, out of any folder, which the foreign key's `ON DELETE SET NULL` does. */
-export async function deleteFolder(db: Database, ownerOid: string, id: string): Promise<void> {
+/**
+ * Deletes the folder. Its chats are kept, out of any folder, which the foreign key's `ON DELETE SET NULL` does, and
+ * each is announced, so the owner's other tabs stop listing it under the folder.
+ */
+export async function deleteFolder(prisma: PrismaClient, ownerOid: string, id: string): Promise<void> {
   if (!isUuid(id)) {
     throw new FolderNotFound();
   }
-  const { count } = await db.assistantFolder.deleteMany({ where: { id, ownerOid } });
-  if (count === 0) {
-    throw new FolderNotFound();
-  }
+  await prisma.$transaction(async (tx) => {
+    const chats = await tx.assistantConversation.findMany({ where: { folderId: id, ownerOid }, select: SELECT });
+    const { count } = await tx.assistantFolder.deleteMany({ where: { id, ownerOid } });
+    if (count === 0) {
+      throw new FolderNotFound();
+    }
+    for (const chat of chats) {
+      await announce(tx, toRow(chat));
+    }
+  });
 }
 
 /** Puts the owner's chat in one of their folders, or in none when `folderId` is null. */
@@ -91,12 +121,12 @@ export async function moveConversation(prisma: PrismaClient, ownerOid: string, c
   if (!isUuid(conversationId)) {
     throw new ConversationNotFound();
   }
-  const target = await ownedFolderId(prisma, ownerOid, folderId);
   await prisma.$transaction(async (tx) => {
     const row = await tx.assistantConversation.findFirst({ where: { id: conversationId, ownerOid }, select: SELECT });
     if (row === null) {
       throw new ConversationNotFound();
     }
+    const target = await ownedFolderId(tx, ownerOid, folderId);
     await tx.assistantConversation.update({ where: { id: conversationId }, data: { folderId: target, updatedAt: new Date() } });
     await announce(tx, toRow(row));
   });

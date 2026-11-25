@@ -71,7 +71,9 @@ vi.mock("next/cache", async () => {
 const { actAs } = await import("./web-session.ts");
 const actions = await import("../../src/app/_actions/assistant.ts");
 const folderActions = await import("../../src/app/_actions/folders.ts");
-const { agentAddress, assistantConversation, assistantFolder, assistantModel, openAssistant, unsentNewChat } = await import("../../src/web/data.ts");
+const { agentAddress, assistantConversation, assistantFolder, assistantFolderName, assistantModel, openAssistant, unsentNewChat } = await import(
+  "../../src/web/data.ts"
+);
 
 const ALICE: Person = { oid: "dev-alice", name: "Dev alice (sign-in disabled)", email: "alice@dev.invalid" };
 const BOB: Person = { oid: "dev-bob", name: "Dev bob (sign-in disabled)", email: "bob@dev.invalid" };
@@ -361,9 +363,11 @@ describe("folders", () => {
 
     expect(await folderActions.renameFolder({ folderId: id, name: "Possession" })).toEqual({ ok: true });
     expect((await assistantFolder(VIEWER, id))?.name).toBe("Possession");
+    expect(await assistantFolderName(VIEWER, id)).toBe("Possession");
 
     expect(await folderActions.deleteFolder({ folderId: id })).toEqual({ ok: true });
     expect(await assistantFolder(VIEWER, id)).toBeUndefined();
+    expect(await assistantFolderName(VIEWER, id)).toBeUndefined();
   });
 
   it("should move the viewer's chat into a folder and out again", async () => {

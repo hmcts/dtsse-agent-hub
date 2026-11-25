@@ -475,8 +475,12 @@ export function AssistantShell({
                                           folders: folders.list,
                                           current: item.folderId ?? null,
                                           onMove: async (folderId) => {
-                                            report(await folders.move({ conversationId: item.id, folderId }));
-                                            router.refresh();
+                                            const result = await folders.move({ conversationId: item.id, folderId });
+                                            report(result);
+                                            // A refusal stays under the row; a refresh would redraw it away.
+                                            if (result.ok) {
+                                              router.refresh();
+                                            }
                                           }
                                         }
                                   }

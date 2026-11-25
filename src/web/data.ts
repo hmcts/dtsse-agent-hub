@@ -23,6 +23,7 @@ import { type DeckAsset, type DeckView, deckView, holdsDeckAsset, readDeckAsset 
 import { docmosisView, listDocmosisVersions, readDocmosisPdf } from "../assistant/docmosis-store.ts";
 import { readExportDefaults } from "../assistant/export-default-store.ts";
 import type { ExportDefaults } from "../assistant/export-defaults.ts";
+import { findFolder } from "../assistant/folder-store.ts";
 import { conversationsForkableBy, conversationsOfferedBy, forkChoice, forkRecipients } from "../assistant/fork-store.ts";
 import type { SidebarGroup } from "../assistant/grouping.ts";
 import { type AssistantMemory, assistantMemory } from "../assistant/memory.ts";
@@ -393,6 +394,11 @@ export async function assistantChatGate(viewer: Viewer): Promise<ChatGate> {
  */
 export async function unsentNewChat(viewer: Viewer, folderId: string | null = null): Promise<UnsentChat | undefined> {
   return await unsentChat(prisma, viewer.oid, folderId);
+}
+
+/** What one of the viewer's folders is called, for its page's title; `undefined` for one that is not theirs. */
+export async function assistantFolderName(viewer: Viewer, folderId: string): Promise<string | undefined> {
+  return (await findFolder(prisma, viewer.oid, folderId))?.name;
 }
 
 /** One of the viewer's folders and its chats, for its page; `undefined` for one that is not theirs. */

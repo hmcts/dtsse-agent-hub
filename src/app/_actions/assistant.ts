@@ -172,16 +172,16 @@ async function send(
   });
 }
 
-/**
- * A new conversation, started with its first message: a starter card's prompt, what the person typed, or a workflow's
- * prompt such as the morning briefing's. `title` names it where the first message would make a poor name, as a
- * skill's invocation does; left out, the first message names it.
- */
 /** The folder a new chat goes in: one of the viewer's, checked by the store, or none. */
 function folderOf(value: unknown): string | null {
   return typeof value === "string" && value !== "" ? value : null;
 }
 
+/**
+ * A new conversation, started with its first message: a starter card's prompt, what the person typed, or a workflow's
+ * prompt such as the morning briefing's. `title` names it where the first message would make a poor name, as a
+ * skill's invocation does; left out, the first message names it.
+ */
 export async function startConversation(input: {
   product: unknown;
   body: unknown;

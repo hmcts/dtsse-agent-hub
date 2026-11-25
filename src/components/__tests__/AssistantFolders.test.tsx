@@ -360,6 +360,7 @@ describe("AssistantShell with folders", () => {
     });
 
     expect(screen.getByRole("alert").textContent).toBe("no such folder");
+    expect(refresh).not.toHaveBeenCalled();
   });
 
   it("should offer no Folders section or Move item when folders are left out", () => {

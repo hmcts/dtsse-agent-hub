@@ -1,10 +1,17 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
-import { createConversation, findConversation, folderConversations, unsentConversation } from "../../src/assistant/conversation-store.ts";
+import {
+  createConversation,
+  findConversation,
+  folderConversations,
+  folderedConversations,
+  unsentConversation
+} from "../../src/assistant/conversation-store.ts";
 import { createFolder, deleteFolder, findFolder, listFolders, moveConversation, ownedFolderId, renameFolder } from "../../src/assistant/folder-store.ts";
 import { FOLDER_LIMIT, FOLDER_NAME_MAX } from "../../src/assistant/folders.ts";
 import { folderView, sidebarFolders, sidebarGroups } from "../../src/assistant/views.ts";
-import { insertUser, person, prisma, resetDatabase } from "./database.ts";
+import { decodeEvent, HUB_CHANNEL } from "../../src/realtime/events.ts";
+import { connect, insertUser, person, prisma, resetDatabase } from "./database.ts";
 
 /** A person's folders: a label on their own chats, which nobody else's folder or chat can be given. */
 
@@ -91,7 +98,88 @@ describe("folders", () => {
   });
 });
 
+/** How many `assistant_conversation` announcements `act` makes, by conversation id. */
+async function announced(act: () => Promise<unknown>): Promise<string[]> {
+  const listener = await connect();
+  try {
+    const heard: string[] = [];
+    listener.on("notification", (notification) => {
+      const event = decodeEvent(notification.payload);
+      if (event?.type === "assistant_conversation") {
+        heard.push(event.conversation_id);
+      }
+    });
+    await listener.query(`LISTEN ${HUB_CHANNEL}`);
+    await act();
+    await listener.query("SELECT 1");
+    return heard;
+  } finally {
+    await listener.end();
+  }
+}
+
+describe("folders made and deleted at once", () => {
+  it("should not take the owner past the limit when two folders are made at the same moment", async () => {
+    await prisma.assistantFolder.createMany({ data: Array.from({ length: FOLDER_LIMIT - 1 }, (_, at) => ({ ownerOid: ALICE.oid, name: `P${at}` })) });
+
+    const results = await Promise.allSettled([createFolder(prisma, ALICE.oid, "One"), createFolder(prisma, ALICE.oid, "Two")]);
+
+    expect(results.map((result) => result.status).sort((a, b) => a.localeCompare(b))).toEqual(["fulfilled", "rejected"]);
+    expect(await prisma.assistantFolder.count({ where: { ownerOid: ALICE.oid } })).toBe(FOLDER_LIMIT);
+  });
+
+  it("should answer that the folder is missing when it is deleted while a chat is moved into it or started in it", async () => {
+    const folder = await createFolder(prisma, ALICE.oid, "Going");
+    const conversation = await chat(ALICE.oid);
+    const other = await connect();
+    try {
+      await other.query("BEGIN");
+      await other.query("DELETE FROM assistant_folder WHERE id = $1", [folder.id]);
+      const moving = moveConversation(prisma, ALICE.oid, conversation, folder.id);
+      const starting = createConversation(prisma, ALICE.oid, { product: "pcs", folderId: folder.id });
+      // Let both reach the folder's row lock before the delete commits.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await other.query("COMMIT");
+
+      await expect(moving).rejects.toMatchObject({ status: 404, message: "no such folder" });
+      await expect(starting).rejects.toMatchObject({ status: 404, message: "no such folder" });
+    } finally {
+      await other.end();
+    }
+    expect(await folderOf(conversation)).toBeNull();
+  });
+
+  it("should announce each chat a deleted folder held, so other tabs stop listing it there", async () => {
+    const folder = await createFolder(prisma, ALICE.oid, "Going");
+    const held = [await chat(ALICE.oid, folder.id), await chat(ALICE.oid, folder.id)];
+    await chat(ALICE.oid);
+
+    const heard = await announced(() => deleteFolder(prisma, ALICE.oid, folder.id));
+
+    expect(heard.sort((a, b) => a.localeCompare(b))).toEqual(held.sort((a, b) => a.localeCompare(b)));
+  });
+});
+
 describe("chats in folders", () => {
+  it("should read up to the limit of chats in each folder, the newest of each, rather than across them all", async () => {
+    const busy = await createFolder(prisma, ALICE.oid, "Busy");
+    const quiet = await createFolder(prisma, ALICE.oid, "Quiet");
+    const busyChats = [await chat(ALICE.oid, busy.id), await chat(ALICE.oid, busy.id), await chat(ALICE.oid, busy.id)];
+    const quietChat = await chat(ALICE.oid, quiet.id);
+    await prisma.assistantConversation.update({ where: { id: quietChat }, data: { lastActiveAt: new Date("2020-01-01T00:00:00Z") } });
+    for (const [at, id] of busyChats.entries()) {
+      await prisma.assistantConversation.update({ where: { id }, data: { lastActiveAt: new Date(Date.UTC(2026, 0, 1 + at)) } });
+    }
+
+    const rows = await folderedConversations(prisma, ALICE.oid, 2);
+
+    expect(rows.map((row) => [row.id, row.folderId])).toEqual([
+      [busyChats[2], busy.id],
+      [busyChats[1], busy.id],
+      [quietChat, quiet.id]
+    ]);
+  });
+
   it("should start a chat in the owner's folder, and refuse someone else's", async () => {
     const folder = await createFolder(prisma, ALICE.oid, "PCS");
     const conversation = await chat(ALICE.oid, folder.id);
@@ -120,6 +208,7 @@ describe("chats in folders", () => {
     await expect(moveConversation(prisma, ALICE.oid, conversation, bobs.id)).rejects.toMatchObject({ status: 404 });
     await expect(moveConversation(prisma, ALICE.oid, "nope", alices.id)).rejects.toMatchObject({ status: 404 });
     await expect(moveConversation(prisma, ALICE.oid, NO_SUCH, alices.id)).rejects.toMatchObject({ status: 404 });
+    await expect(moveConversation(prisma, ALICE.oid, conversation, "not-a-uuid")).rejects.toMatchObject({ status: 404, message: "no such folder" });
     expect(await folderOf(conversation)).toBeNull();
   });
 

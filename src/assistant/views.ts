@@ -350,7 +350,7 @@ export interface SidebarFolderView {
   chats: FolderChatLink[];
 }
 
-/** The owner's folders, by name, each with every chat in it, however long ago it was active. */
+/** The owner's folders, by name, each with its chats as its own page lists them, however long ago they were active. */
 export async function sidebarFolders(db: Database, ownerOid: string): Promise<SidebarFolderView[]> {
   const [folders, rows] = await Promise.all([listFolders(db, ownerOid), folderedConversations(db, ownerOid)]);
   const chats = rows.map((row) => ({ id: row.id, title: row.title ?? UNTITLED, folderId: row.folderId }));
