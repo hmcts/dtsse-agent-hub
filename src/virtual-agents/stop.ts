@@ -2,6 +2,8 @@ import { markConversationAgentsOffline } from "../agents/offline.ts";
 import { announce as announceConversation } from "../assistant/conversation-row.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database } from "../store/prisma.ts";
+import { diskExpiresAt } from "./cleanup.ts";
+import { diskTtlDays } from "./settings.ts";
 
 /**
  * The writes the sweep shares with the store, kept apart from it because `instrumentation.ts` reaches the sweep, and
@@ -26,6 +28,9 @@ export async function announce(db: Database, virtualAgentId: string, ownerOid: s
  * one already `stopped` keeps its status, its detail and when its status last changed. The pod's client-features
  * claim goes either way, since the next boot may run another client.
  *
+ * The disk's expiry starts here unless it already has one or its disk is gone, so a stop the orchestrator never sees
+ * settle, or one that finds the agent already `stopped`, still counts down to the disk's deletion.
+ *
  * The assistant's conversations lose their session state and have their current agents marked offline: no session
  * outlives the pod, and a `live` left behind would keep a message from asking for the wake that starts one.
  */
@@ -33,11 +38,13 @@ export async function stopVirtualAgents(db: Database, ids: readonly string[], re
   if (ids.length === 0) {
     return [];
   }
+  const expiresAt = diskExpiresAt(now, diskTtlDays());
   const stopped = await db.$queryRaw<{ id: string; owner_oid: string }[]>`
     UPDATE virtual_agent
        SET desired = 'stopped', stop_reason = ${reason}::virtual_agent_stop_reason, generation = generation + 1, pod_generation = pod_generation + 1,
            exposed_ports = '{}', local_only_ports = '{}', client_features = NULL,
            launch_token_hash = NULL, launch_token_issued_at = NULL, apply_failures = 0,
+           disk_expires_at = CASE WHEN disk_deleted_at IS NULL THEN COALESCE(disk_expires_at, ${expiresAt}) ELSE disk_expires_at END,
            status = CASE WHEN status = 'stopped' THEN status ELSE 'stopping' END,
            status_detail = CASE WHEN status = 'stopped' THEN status_detail ELSE NULL END,
            status_changed_at = CASE WHEN status = 'stopped' THEN status_changed_at ELSE ${now} END,

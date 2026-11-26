@@ -5,6 +5,7 @@ import type { Database, PrismaClient } from "../store/prisma.ts";
 import { conversationItems, mergeEntries, type TranscriptEntryView } from "../transcripts/conversation.ts";
 import { agentConversation } from "../transcripts/views.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
+import { virtualAgentsEnabled } from "../virtual-agents/settings.ts";
 import { OLDEST_FIRST } from "./artefact-store.ts";
 import { ensureAssistant, wakeAssistant } from "./assistant-store.ts";
 import { announce, ConversationNotFound, storedHistory, storedStops } from "./conversation-row.ts";
@@ -194,6 +195,9 @@ export async function acceptFork(prisma: PrismaClient, viewer: { oid: string; mo
   const earlier = forkedView(source);
   const { thread, cut } = forkThread([...(earlier?.thread ?? []), ...own.thread]);
   const earlierHidden = cut || own.earlierHidden || (earlier?.earlierHidden ?? false);
+  if (!virtualAgentsEnabled()) {
+    throw new ConversationNotFound();
+  }
   const assistant = await ensureAssistant(prisma, viewer);
   // Taking a copy is the person asking to carry on with it, so their assistant is started for it, warming while the
   // copy opens.

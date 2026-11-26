@@ -2,9 +2,10 @@ import { createHash } from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDocument, listDocuments, writeArtefact } from "../../src/assistant/artefact-store.ts";
 import { ensureAssistant, findAssistant } from "../../src/assistant/assistant-store.ts";
+import { ConversationNotFound } from "../../src/assistant/conversation-row.ts";
 import { docxRef } from "../../src/assistant/docmosis.ts";
 import { putDocmosisAsset, writeAgentDocmosis } from "../../src/assistant/docmosis-store.ts";
-import { forkRecipients } from "../../src/assistant/fork-store.ts";
+import { acceptFork, forkRecipients } from "../../src/assistant/fork-store.ts";
 import { FORK_CONTEXT_FILE_NAME } from "../../src/assistant/forks.ts";
 import { frameAttachments } from "../../src/assistant/upload-store.ts";
 import { sweepUploads } from "../../src/assistant/upload-sweep.ts";
@@ -321,6 +322,16 @@ describe("taking a copy", () => {
     actAs(who);
 
     expect(await forkActions.forkChat({ conversationId: id })).toEqual({ ok: false, error: "no such conversation" });
+    expect(await prisma.assistantConversation.count({ where: { forkedFromId: id } })).toBe(0);
+  });
+
+  it("should refuse a copy and create no virtual agent for the taker when virtual agents are off", async () => {
+    const { id } = await offered();
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "false");
+
+    await expect(acceptFork(prisma, viewerOf(BOB), id)).rejects.toBeInstanceOf(ConversationNotFound);
+
+    expect(await prisma.virtualAgent.count({ where: { ownerOid: BOB.oid } })).toBe(0);
     expect(await prisma.assistantConversation.count({ where: { forkedFromId: id } })).toBe(0);
   });
 

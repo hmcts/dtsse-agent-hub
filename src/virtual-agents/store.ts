@@ -260,7 +260,8 @@ export async function setDesired(
     }
     const settled = desired === "stopped" && row.status === "stopped";
     const stop = desired === "stopped" ? { stopReason: "user" as const } : {};
-    const data = { ...NO_TOKEN, ...NO_PORTS, ...noClientClaim(), ...stop, ...(settled ? {} : statusChange("stopping", now)) };
+    const expiry = desired === "stopped" && row.diskDeletedAt === null ? { diskExpiresAt: row.diskExpiresAt ?? diskExpiresAt(now, diskTtlDays()) } : {};
+    const data = { ...NO_TOKEN, ...NO_PORTS, ...noClientClaim(), ...stop, ...expiry, ...(settled ? {} : statusChange("stopping", now)) };
     const updated = toRow(
       await tx.virtualAgent.update({
         where: { id },
@@ -818,7 +819,7 @@ export async function observeVirtualAgent(prisma: PrismaClient, id: string, repo
     if ("refused" in outcome) {
       throw new HttpError(409, outcome.refused);
     }
-    const nowStopped = outcome.status === "stopped" && row.status !== "stopped";
+    const needsExpiry = outcome.status === "stopped" && row.diskExpiresAt === null && row.diskDeletedAt === null;
     const diskDeleted = report.diskDeleted === true && row.desired !== "running" && row.diskDeletedAt === null;
     const updated = toRow(
       await tx.virtualAgent.update({
@@ -831,7 +832,7 @@ export async function observeVirtualAgent(prisma: PrismaClient, id: string, repo
           status: outcome.status,
           ...(outcome.detail === undefined ? {} : { statusDetail: outcome.detail }),
           ...(outcome.status === row.status ? {} : { statusChangedAt: now }),
-          ...(nowStopped && row.diskDeletedAt === null ? { diskExpiresAt: diskExpiresAt(now, diskTtlDays()) } : {}),
+          ...(needsExpiry ? { diskExpiresAt: diskExpiresAt(now, diskTtlDays()) } : {}),
           ...(diskDeleted ? { diskDeletedAt: now } : {}),
           updatedAt: now
         },

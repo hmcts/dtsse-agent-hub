@@ -194,6 +194,15 @@ describe("the person's assistant", () => {
     expect(first.assistant).toMatchObject({ needed: ["github", "claude"], onboarded: false, readiness: { percent: 10 } });
   });
 
+  it("should answer not found and create no virtual agent when the Assistant is opened with virtual agents off", async () => {
+    await insertUser(ALICE);
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "false");
+
+    await expect(openAssistant(VIEWER)).rejects.toMatchObject({ digest: expect.stringContaining("404") });
+
+    expect(await prisma.virtualAgent.count({ where: { ownerOid: ALICE.oid } })).toBe(0);
+  });
+
   it("should count the person as onboarded with GitHub and the model key stored and no Azure", async () => {
     await insertUser(ALICE);
     const backend = credentialBackend(prisma);

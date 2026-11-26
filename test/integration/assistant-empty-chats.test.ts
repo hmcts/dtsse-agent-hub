@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { heartbeat, registerAgent } from "../../src/agents/store.ts";
 import { writeArtefact } from "../../src/assistant/artefact-store.ts";
 import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
@@ -44,6 +44,10 @@ beforeEach(async () => {
   await resetDatabase();
   await insertUser(ALICE);
   await ensureAssistant(prisma, { oid: ALICE.oid, modelRoute: "own-licence" });
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 afterAll(async () => {
@@ -176,6 +180,7 @@ describe("a chat on a pod with nothing in it", () => {
   });
 
   it("should list the copy when the person takes a fork of somebody else's chat", async () => {
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
     await insertUser(BOB);
     await ensureAssistant(prisma, { oid: BOB.oid, modelRoute: "own-licence" });
     const source = await createConversation(prisma, BOB.oid, { product: "pcs", title: "Possession letter" });
