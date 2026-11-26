@@ -243,14 +243,16 @@ function textRows(places: Place[], start: number): Place[] {
   return rows;
 }
 
-/** Day, month and year boxes in one row, in that order, are one date. */
+const DAY_LABEL = /^(?:(.*\S)\s+)?(?:day|dd)$/i;
+
+/** Day, month and year boxes in one row, in that order, are one date; the day box's label may lead with the question's words. */
 function dateRun(places: Place[], start: number): Place[] | undefined {
   const run = places.slice(start, start + 3);
   const [d, m, y] = run.map((p) => p.label.toLowerCase());
   const row =
     run.length === 3 &&
     run.every((p) => p.widget.kind === "text" && p.widget.page === run[0]?.widget.page && Math.abs(p.widget.rect[1] - (run[0]?.widget.rect[1] ?? 0)) <= 2);
-  return row && /^(day|dd)$/.test(d ?? "") && /^(month|mm)$/.test(m ?? "") && /^(year|yyyy)$/.test(y ?? "") ? run : undefined;
+  return row && DAY_LABEL.test(d ?? "") && /^(month|mm)$/.test(m ?? "") && /^(year|yyyy)$/.test(y ?? "") ? run : undefined;
 }
 
 /**
@@ -282,13 +284,15 @@ export function draftFields(content: PdfContent): DraftField[] {
       for (const p of [...(date ?? []), ...rows]) {
         consumed.add(p);
       }
+      const dayLead = date ? DAY_LABEL.exec(first.label)?.[1] : undefined;
       const label = date
-        ? stripAnchor(
+        ? (dayLead ??
+          stripAnchor(
             labelAbove(
               first.widget,
               content.lines.filter((l) => !DATE_WORD.test(l.text))
             ) ?? "Date"
-          )
+          ))
         : first.label || first.widget.tooltip || first.widget.name;
       const lengths = rows.map((p) => p.widget.maxLength);
       const maxLength = lengths.every((n) => n !== undefined) ? lengths.reduce((sum: number, n) => sum + (n ?? 0), 0) : undefined;
