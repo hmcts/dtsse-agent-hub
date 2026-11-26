@@ -168,6 +168,8 @@ describe("the small checks", () => {
     const bytes = (text: string) => new TextEncoder().encode(text);
     expect(isTranslationsJson(bytes(JSON.stringify({ Back: "Yn ôl" })))).toBe(true);
     expect(isTranslationsJson(bytes("[]"))).toBe(false);
+    expect(isTranslationsJson(bytes(JSON.stringify({ Back: "Yn ôl", page: { title: "Teitl" } })))).toBe(false);
+    expect(isTranslationsJson(bytes(JSON.stringify({ Count: 3 })))).toBe(false);
     expect(isTranslationsJson(bytes("null"))).toBe(false);
     expect(isTranslationsJson(bytes("{not json"))).toBe(false);
     expect(isTranslationsJson(new Uint8Array([0x7b, 0xff, 0x7d]))).toBe(false);

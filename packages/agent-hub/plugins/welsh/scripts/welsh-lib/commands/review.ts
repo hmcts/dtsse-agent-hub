@@ -14,10 +14,26 @@ import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { cataloguePath, loadCatalogue, type Row } from "../catalogue.ts";
+import { manifestUrl } from "../clones.ts";
 import { branchName, HOME_OVERRIDE, homeRepo, inHome } from "../home.ts";
 import { fail, requireService, say } from "../io.ts";
 import { matchKey } from "../normalise.ts";
 import { REVIEW_FILE, reviewMarkdown } from "../review.ts";
+import { openPrTitled } from "./setup.ts";
+
+/** How every review pull request's title starts, so one still open can be found. */
+export const REVIEW_TITLE = (service: string) => `Welsh catalogue: ${service} approves`;
+
+/**
+ * A review pull request still open in the service's home repo, or null. Until it is merged the catalogue on the
+ * default branch still has those rows waiting, so they are listed again, and approving them again would open a second
+ * pull request that conflicts with the first.
+ */
+export function openReviewPr(service: string): string | null {
+  const home = homeRepo(service);
+  const url = home === null ? null : manifestUrl(home);
+  return url === null ? null : openPrTitled(REVIEW_TITLE(service), [url]);
+}
 
 /** How many English strings a list gives, for the Welsh page to show; the count is always the full one. */
 export const REVIEW_LIST_LIMIT = 300;
@@ -97,13 +113,18 @@ export async function reviewCmd(argv: string[]): Promise<unknown> {
 
   if (ids.length === 0) {
     const groups = reviewGroups(cat.rows);
-    say(`${groups.length} English string(s) in ${service}'s catalogue have Welsh to review.`);
-    return { service, total: groups.length, groups: groups.slice(0, REVIEW_LIST_LIMIT) };
+    const openPr = openReviewPr(service);
+    say(`${groups.length} English string(s) in ${service}'s catalogue have Welsh to review.${openPr ? ` A review is waiting to be merged: ${openPr}` : ""}`);
+    return { service, total: groups.length, groups: groups.slice(0, REVIEW_LIST_LIMIT), openPr };
   }
 
   if (!process.env[HOME_OVERRIDE]) {
     // Checked here first, against the catalogue as it is, so a mistake is said before a worktree is made.
     approve(structuredClone(cat.rows), ids);
+    const open = openReviewPr(service);
+    if (open !== null) {
+      fail(`a review of ${service}'s Welsh is waiting to be merged: ${open}. Approve more once it is merged, or add to that pull request`);
+    }
     return reviewInHome(service, ids, Boolean(values.pr));
   }
   const done = approve(cat.rows, ids);
@@ -132,7 +153,7 @@ function reviewInHome(service: string, ids: string[], pr: boolean): unknown {
     { branch: branchName(`${service}-review`), pr },
     (r) => ({
       message: `Approve ${r.approved.length} Welsh translation(s) in ${service}'s catalogue\n\n${r.superseded} other rendering(s) superseded; ${r.left} still to review.`,
-      title: `Welsh catalogue: ${service} approves ${r.approved.length} translation(s) after review`,
+      title: `${REVIEW_TITLE(service)} ${r.approved.length} translation(s) after review`,
       body:
         "A BA settled these with the Welsh Language Unit on the Welsh page. Each is now the Welsh used for its English, and every other rendering of the same English is `superseded`:\n\n" +
         "| English | Approved Welsh | Row |\n|---|---|---|\n" +

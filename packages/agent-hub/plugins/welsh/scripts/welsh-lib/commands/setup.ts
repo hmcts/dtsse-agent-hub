@@ -32,26 +32,45 @@ export function serviceRepos(service: string): string[] {
 
 /**
  * A setup pull request still open in any of these repos, or null. Until it is merged the default branch has no welsh/
- * folder, so the service still reads as not set up, and setting it up again would open a second one. A repo GitHub
- * cannot be asked about counts as having none: this only saves a duplicate, and the team's review catches one anyway.
+ * folder, so the service still reads as not set up, and setting it up again would open a second one.
  */
 export function openSetupPr(service: string, repos: readonly string[]): string | null {
+  return openPrTitled(
+    SETUP_TITLE(service),
+    repos.map(manifestUrl).filter((url): url is string => url !== null)
+  );
+}
+
+/** GitHub refuses a search query longer than this, so the repos are asked about in as few searches as fit. */
+const MAX_QUERY = 250;
+
+/**
+ * The first open pull request whose title has `title` in it, in any of these `<org>/<repo>`s, or null. One GitHub
+ * search covers as many repos as its query has room for, so a service with twenty repos costs two or three calls rather
+ * than twenty: `info` runs this while the Welsh page waits. A search GitHub cannot answer counts as finding none: this
+ * only saves a duplicate, and the team's review catches one anyway.
+ */
+export function openPrTitled(title: string, urls: readonly string[]): string | null {
   let gh: string;
   try {
     gh = tool("gh");
   } catch {
     return null;
   }
-  for (const repo of repos) {
-    const url = manifestUrl(repo);
-    if (url === null) {
-      continue;
+  const phrase = `"${title.replaceAll('"', "")}" in:title`;
+  const batches: string[][] = [];
+  for (const url of urls) {
+    const last = batches.at(-1);
+    if (last !== undefined && [phrase, ...last, `repo:${url}`].join(" ").length <= MAX_QUERY) {
+      last.push(`repo:${url}`);
+    } else {
+      batches.push([`repo:${url}`]);
     }
-    const asked = spawnSync(
-      gh,
-      ["pr", "list", "--repo", url, "--state", "open", "--search", `"${SETUP_TITLE(service)}" in:title`, "--json", "url", "--jq", '.[0].url // ""'],
-      { encoding: "utf8" }
-    );
+  }
+  for (const repos of batches) {
+    const asked = spawnSync(gh, ["search", "prs", "--state", "open", "--limit", "1", "--json", "url", "--jq", '.[0].url // ""', "--", phrase, ...repos], {
+      encoding: "utf8"
+    });
     const found = asked.status === 0 ? asked.stdout.trim() : "";
     if (found !== "") {
       return found;
@@ -77,6 +96,11 @@ export async function unreadableSources(sources: readonly LegacySource[]): Promi
         const parsed: unknown = JSON.parse(readFileSync(source.path, "utf8"));
         if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
           throw new Error("it is not a JSON object of English to Welsh");
+        }
+        // A frontend's locale file nests its text under page and field names, which is not English to Welsh.
+        const nested = Object.entries(parsed).find(([, welsh]) => typeof welsh !== "string");
+        if (nested !== undefined) {
+          throw new Error(`it is not a flat list of English to Welsh: "${nested[0].slice(0, 60)}" holds more than one piece of text`);
         }
       }
     } catch (e) {

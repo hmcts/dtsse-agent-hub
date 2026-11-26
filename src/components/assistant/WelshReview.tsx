@@ -36,6 +36,12 @@ export function WelshReview({ product, client }: Readonly<{ product: string; cli
       <Step n={2} title="Choose the right Welsh" done={applied !== null} summary={picks.length > 0 ? `${plural(picks.length, "chosen")}` : undefined}>
         <JobStatus state={list.state} working="Reading the translations waiting for review…" />
         {view && view.groups.length === 0 ? <p className="text-[13px]">Nothing in this service&apos;s catalogue is waiting for review.</p> : null}
+        {view?.openPr ? (
+          <p className="text-[13px] text-asst-warn">
+            A review of this service&apos;s Welsh is waiting to be merged: <OutLink url={view.openPr}>{view.openPr}</OutLink>. Once it is merged, what it
+            approved drops off this list, and you can approve more.
+          </p>
+        ) : null}
         {view && view.groups.length > 0 ? (
           <div className="flex flex-col gap-3">
             <p className="text-[13px] text-asst-body">
@@ -52,7 +58,7 @@ export function WelshReview({ product, client }: Readonly<{ product: string; cli
                 key={keyOf(group)}
                 group={group}
                 value={chosen[keyOf(group)] ?? ""}
-                disabled={busy || applied !== null}
+                disabled={busy || applied !== null || view.openPr !== null}
                 onChange={(id) =>
                   setChosen((before) => {
                     const next = { ...before };
@@ -69,7 +75,7 @@ export function WelshReview({ product, client }: Readonly<{ product: string; cli
           </div>
         ) : null}
       </Step>
-      {view && view.groups.length > 0 ? (
+      {view && view.groups.length > 0 && view.openPr === null ? (
         <Step n={3} title="Approve them" done={applied !== null}>
           {applied === null && apply.state.phase === "idle" ? (
             picks.length === 0 ? (

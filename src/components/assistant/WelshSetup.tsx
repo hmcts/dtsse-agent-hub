@@ -39,11 +39,11 @@ export function WelshSetup({
   candidates,
   openPr,
   client
-}: Readonly<{ product: string; candidates: readonly string[]; openPr: string | null; client: WelshClient }>) {
+}: Readonly<{ product: string; candidates: readonly string[] | null; openPr: string | null; client: WelshClient }>) {
   const input = useRef<HTMLInputElement>(null);
   // A service with one repo has only the one place to keep its Welsh. With more, which is right is the team's call, so
   // none is chosen for them.
-  const [repo, setRepo] = useState(candidates.length === 1 ? (candidates[0] ?? "") : "");
+  const [repo, setRepo] = useState(candidates?.length === 1 ? (candidates[0] ?? "") : "");
   const [sources, setSources] = useState<Source[]>([]);
   const [uploading, setUploading] = useState<string | null>(null);
   const [uploadErrors, setUploadErrors] = useState<string[]>([]);
@@ -62,6 +62,13 @@ export function WelshSetup({
         <p className="text-[13px]">
           A pull request setting this service up for Welsh is already open: <OutLink url={openPr}>{openPr}</OutLink>. Once it is merged, the service is ready.
         </p>
+      </Step>
+    );
+  }
+  if (candidates === null) {
+    return (
+      <Step n={2} title="Your assistant needs an update">
+        <p className="text-[13px] text-asst-warn">Your assistant needs an update to set a service up for Welsh. It gets one the next time it restarts.</p>
       </Step>
     );
   }

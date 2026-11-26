@@ -559,7 +559,8 @@ export function fitResult(result: Record<string, unknown>, max = MAX_RESULT_BYTE
   return fitted;
 }
 
-const SCAN_LISTS = ["toWlu", "ambiguous", "fromCatalogue"] as const;
+/** The lists a result may carry too many of to keep: a scan's, a review's, and the phrases a setup check found in conflict. */
+const SCAN_LISTS = ["toWlu", "ambiguous", "fromCatalogue", "groups", "conflictExamples"] as const;
 
 export type WelshRunner = {
   /** Takes a `welsh` frame's data and runs it as soon as there is room. */

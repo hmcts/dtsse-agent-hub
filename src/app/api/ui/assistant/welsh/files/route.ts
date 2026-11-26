@@ -29,7 +29,12 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
     const bytes = await readBytes(request, MAX_WELSH_FILE_BYTES);
     if (/\.json$/i.test(name) ? !isTranslationsJson(bytes) : !isXlsx(bytes)) {
-      return errorResponse(400, /\.json$/i.test(name) ? "that is not a JSON file of English to Welsh" : "that is not an Excel spreadsheet (.xlsx)");
+      return errorResponse(
+        400,
+        /\.json$/i.test(name)
+          ? "that is not a JSON file of English to Welsh, with each Welsh a piece of text rather than more JSON"
+          : "that is not an Excel spreadsheet (.xlsx)"
+      );
     }
     return json({ file_id: await saveUpload(prisma, viewer.oid, name, bytes) }, 201);
   });

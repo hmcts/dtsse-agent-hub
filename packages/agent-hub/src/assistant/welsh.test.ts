@@ -621,6 +621,18 @@ describe("fitResult", () => {
     expect(fitted.summary).toEqual({ toWlu: 300 });
   });
 
+  it("should shorten a review's list and a setup check's conflicts too, keeping the counts", () => {
+    const group = { english: "x".repeat(2000), options: [{ welsh: "y".repeat(2000) }] };
+    const fitted = fitResult(
+      { total: 300, groups: Array.from({ length: 300 }, () => group), conflicts: 300, conflictExamples: Array.from({ length: 300 }, () => group) },
+      200_000
+    );
+    expect(Buffer.byteLength(JSON.stringify(fitted))).toBeLessThanOrEqual(200_000);
+    expect((fitted.groups as unknown[]).length).toBeLessThan(300);
+    expect((fitted.conflictExamples as unknown[]).length).toBeLessThan(300);
+    expect(fitted.total).toBe(300);
+  });
+
   it("should leave a result that fits, or one with no lists to shorten, as it is", () => {
     const small = { toWlu: [entry(1)], message: "m" };
     expect(fitResult(small, 50_000)).toBe(small);

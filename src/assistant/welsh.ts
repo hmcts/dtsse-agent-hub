@@ -281,13 +281,14 @@ export function isXlsx(bytes: Uint8Array): boolean {
 }
 
 /**
- * A JSON copy of earlier translations, as a setup reads one: an object of English to Welsh. Checked as it is uploaded,
- * so a file that is not one is refused then rather than failing the check after it.
+ * A JSON copy of earlier translations, as a setup reads one: one flat object of English to Welsh, each value a piece of
+ * text. Checked as it is uploaded, so a file that is not one, a frontend's nested locale file above all, is refused then
+ * rather than failing the check after it.
  */
 export function isTranslationsJson(bytes: Uint8Array): boolean {
   try {
     const parsed: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed);
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) && Object.values(parsed).every((welsh) => typeof welsh === "string");
   } catch {
     return false;
   }

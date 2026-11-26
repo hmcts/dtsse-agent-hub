@@ -33,7 +33,7 @@ describe("the Welsh page's views", () => {
       approved: 1123,
       needsReview: 94,
       sharedApproved: 2,
-      candidates: [],
+      candidates: null,
       setupPr: null
     });
     expect(infoView({})).toEqual({
@@ -43,7 +43,7 @@ describe("the Welsh page's views", () => {
       approved: 0,
       needsReview: 0,
       sharedApproved: 0,
-      candidates: [],
+      candidates: null,
       setupPr: null
     });
   });
@@ -56,6 +56,7 @@ describe("the Welsh page's views", () => {
     });
     expect(view.candidates).toEqual(["apps/pcs/pcs-api", "apps/pcs/pcs-frontend"]);
     expect(view.setupPr).toBe("https://github.com/hmcts/pcs-api/pull/9");
+    expect(infoView({ initialised: false, candidates: [] }).candidates).toEqual([]);
   });
 
   it("should read what is waiting for review, naming where each rendering came from", () => {
@@ -77,6 +78,7 @@ describe("the Welsh page's views", () => {
       })
     ).toEqual({
       total: 3,
+      openPr: null,
       groups: [
         {
           english: "Back",
@@ -96,6 +98,10 @@ describe("the Welsh page's views", () => {
       left: 1,
       pr: "https://github.com/hmcts/x/pull/1"
     });
+  });
+
+  it("should read a review still waiting to be merged", () => {
+    expect(reviewListView({ total: 0, groups: [], openPr: "https://github.com/hmcts/x/pull/2" }).openPr).toBe("https://github.com/hmcts/x/pull/2");
   });
 
   it("should read a setup's check and its pull request, and show nothing for fields it does not have", () => {

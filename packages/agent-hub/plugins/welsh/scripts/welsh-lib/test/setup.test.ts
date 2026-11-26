@@ -140,4 +140,9 @@ test("a JSON copy that is not an object of English to Welsh is named", async () 
   const list = join(files, "list.json");
   writeFileSync(list, "[]");
   assert.deepEqual(await unreadableSources(legacySources([], [list])), [{ file: "list.json", problem: "it is not a JSON object of English to Welsh" }]);
+  const nested = join(files, "cy.json");
+  writeFileSync(nested, JSON.stringify({ Back: "Yn ôl", page: { title: "Teitl" } }));
+  assert.deepEqual(await unreadableSources(legacySources([], [nested])), [
+    { file: "cy.json", problem: 'it is not a flat list of English to Welsh: "page" holds more than one piece of text' }
+  ]);
 });

@@ -20,8 +20,12 @@ export interface WelshInfo {
   approved: number;
   needsReview: number;
   sharedApproved: number;
-  /** For a service not set up yet: the repos its welsh/ folder could go in, and a setup pull request still open. */
-  candidates: string[];
+  /**
+   * For a service not set up yet: the repos its welsh/ folder could go in, and a setup pull request still open.
+   * `candidates` is null when the assistant's Welsh tools are from before setting up from the page, which say nothing of
+   * the service's repos: an assistant that needs an update, not a service with none.
+   */
+  candidates: string[] | null;
   setupPr: string | null;
 }
 
@@ -36,7 +40,7 @@ export function infoView(result: Json): WelshInfo {
     approved: num(catalogue.approved),
     needsReview: num(catalogue.needsReview),
     sharedApproved: num(rec(result.shared).approved),
-    candidates: (Array.isArray(result.candidates) ? result.candidates : []).map(str).filter(Boolean),
+    candidates: Array.isArray(result.candidates) ? result.candidates.map(str).filter(Boolean) : null,
     setupPr: nullable(result.setupPr)
   };
 }
@@ -69,9 +73,10 @@ export interface ReviewGroup {
 }
 
 /** What a review lists: the English to settle, up to the plugin's limit, and how many there are in all. */
-export function reviewListView(result: Json): { total: number; groups: ReviewGroup[] } {
+export function reviewListView(result: Json): { total: number; groups: ReviewGroup[]; openPr: string | null } {
   return {
     total: num(result.total),
+    openPr: nullable(result.openPr),
     groups: list(result.groups).map((g) => ({
       english: str(g.english),
       context: str(g.context),

@@ -832,6 +832,12 @@ describe("WelshPage, setting a service up", () => {
     expect(screen.getByText(/also saved to the repo, in welsh\/sources, for auditing/)).toBeTruthy();
   });
 
+  it("should say the assistant needs an update, not that the service has no repos, when its tools say nothing of them", async () => {
+    await openSetup({ ...SETUP, info: done("info", { initialised: false, repos: [] }) });
+    expect(screen.getByText(/Your assistant needs an update to set a service up for Welsh/)).toBeTruthy();
+    expect(screen.queryByText(/no repos in the CFT Workspace/)).toBeNull();
+  });
+
   it("should link to a setup already open rather than offer another", async () => {
     await openSetup({ ...SETUP, info: notSetUp({ setupPr: "https://github.com/hmcts/cath-service/pull/70" }) });
     expect(screen.getByRole("link", { name: /cath-service\/pull\/70/ })).toBeTruthy();
@@ -895,6 +901,16 @@ describe("WelshPage, reviewing translations", () => {
     expect(screen.getByRole("button", { name: "Approve 1 translation" })).toBeTruthy();
     fireEvent.click(screen.getAllByRole("radio", { name: "Not settled yet" })[1] as HTMLElement);
     expect(screen.getByText("Choose the Welsh for at least one above.")).toBeTruthy();
+  });
+
+  it("should link to a review waiting to be merged, and offer no approving until it is", async () => {
+    await open("review", {
+      ...REVIEW,
+      review_list: done("review_list", { ...(listed.status === "done" ? listed.result : {}), openPr: "https://github.com/hmcts/cath-service/pull/79" })
+    });
+    expect(await screen.findByRole("link", { name: /cath-service\/pull\/79/ })).toBeTruthy();
+    expect((screen.getAllByRole("radio")[0] as HTMLInputElement).disabled).toBe(true);
+    expect(screen.queryByText("Approve them")).toBeNull();
   });
 
   it("should say when nothing is waiting, and when more are waiting than are shown", async () => {
