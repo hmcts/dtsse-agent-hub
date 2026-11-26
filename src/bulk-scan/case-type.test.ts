@@ -104,6 +104,15 @@ describe("withoutCaseType", () => {
     expect(rows(withoutCaseType(picked))[0]?.ccd).toEqual(["sheetId"]);
   });
 
+  it("should make a new row an existing one with an id that was not among its candidates", () => {
+    const matched = withCaseType(spec(field("Place of birth")), CHOICE, FIELDS);
+
+    const result = rows(chooseCandidate(matched, 0, 0, "applicantFirstName"))[0];
+
+    expect(result?.ccd).toEqual(["applicantFirstName"]);
+    expect(result?.ccdMatch).toEqual({ status: "existing", chosenBy: "person" });
+  });
+
   it("should clear the ids the matcher proposed and keep the ones the person chose when the case type is removed", () => {
     const matched = withCaseType(spec(field("First name"), field("Email address")), CHOICE, FIELDS);
     const chosen = chooseCandidate(matched, 0, 1, "applicantEmailTwo");

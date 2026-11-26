@@ -82,6 +82,7 @@ export function BulkScanDetail({
           <BulkScanCcdStatus
             field={field}
             name={name}
+            ccdFieldIds={spec.form.ccdFieldIds}
             onChooseCandidate={(id) => onSpec(chooseCandidate(spec, s, f, id), false)}
             onChooseNew={() => onSpec(chooseNew(spec, s, f), false)}
             onEditNew={(patch) => onSpec(editNewField(spec, s, f, patch), false)}

@@ -228,6 +228,7 @@ function Row({ initial }: Readonly<{ initial: FormSpec }>) {
     <BulkScanCcdStatus
       field={field}
       name="Email address"
+      ccdFieldIds={current.form.ccdFieldIds}
       onChooseCandidate={(id) => setCurrent(chooseCandidate(current, 0, 0, id))}
       onChooseNew={() => setCurrent(chooseNew(current, 0, 0))}
       onEditNew={(patch) => setCurrent(editNewField(current, 0, 0, patch))}
@@ -441,6 +442,39 @@ describe("the editor's case type", () => {
     await userEvent.selectOptions(select(), "sptribs/CriminalInjuriesCompensation");
 
     expect(await screen.findByText("Existing")).toBeTruthy();
-    expect(screen.getByDisplayValue("cicCaseEmail")).toBeTruthy();
+    expect(screen.getAllByDisplayValue("cicCaseEmail").length).toBeGreaterThan(0);
+  });
+});
+
+describe("choosing any existing field of the case type", () => {
+  const proposed = { ccd: ["cicCaseTitle"], ccdMatch: { status: "new", newField: { id: "cicCaseTitle", type: "Text" } } };
+  const withIds = (over: object): FormSpec => {
+    const base = spec(over);
+    return { ...base, form: { ...base.form, ccdFieldIds: ["applicantTitle", "cicCaseTitle"] } } as FormSpec;
+  };
+
+  it("should make a new row an existing one with the picked id", async () => {
+    render(<Row initial={withIds(proposed)} />);
+
+    await userEvent.type(screen.getByLabelText("Existing case field for Email address"), "applicantTitle{Enter}");
+
+    expect(screen.getByText("Existing")).toBeTruthy();
+    expect((screen.getByLabelText("Existing case field for Email address") as HTMLInputElement).value).toBe("applicantTitle");
+    expect(screen.queryByLabelText("New case field id for Email address")).toBeNull();
+  });
+
+  it("should not commit text that is not an id of the case type", async () => {
+    render(<Row initial={withIds(proposed)} />);
+
+    await userEvent.type(screen.getByLabelText("Existing case field for Email address"), "nonsense{Enter}");
+
+    expect(screen.getByText("New")).toBeTruthy();
+    expect(screen.getByLabelText("New case field id for Email address")).toBeTruthy();
+  });
+
+  it("should offer no picker when the form has no case type fields", () => {
+    render(<Row initial={spec(proposed)} />);
+
+    expect(screen.queryByLabelText("Existing case field for Email address")).toBeNull();
   });
 });
