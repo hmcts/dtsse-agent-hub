@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chooseCandidate, chooseNew, editNewField } from "@/bulk-scan/case-type";
 import { BulkScanCaseTypePicker, NO_CHAT } from "@/components/assistant/BulkScanCaseTypePicker";
 import { BulkScanCcdStatus } from "@/components/assistant/BulkScanCcdStatus";
+import { BulkScanDetail } from "@/components/assistant/BulkScanDetail";
 import { BulkScanEditor } from "@/components/assistant/BulkScanEditor";
 import { BulkScanUpload } from "@/components/assistant/BulkScanUpload";
 
@@ -442,5 +443,45 @@ describe("the editor's case type", () => {
 
     expect(await screen.findByText("Existing")).toBeTruthy();
     expect(screen.getByDisplayValue("cicCaseEmail")).toBeTruthy();
+  });
+});
+
+describe("typing a case type field id into the CCD ids", () => {
+  const proposed = { ccd: ["cicCaseTitle"], ccdMatch: { status: "new", newField: { id: "cicCaseTitle", type: "Text" } } };
+  const withIds = (over: object, ids?: string[]): FormSpec => {
+    const base = spec(over);
+    return { ...base, form: { ...base.form, ...(ids ? { ccdFieldIds: ids } : {}) } } as FormSpec;
+  };
+
+  function Detail({ initial }: Readonly<{ initial: FormSpec }>) {
+    const [current, setCurrent] = useState(initial);
+    return <BulkScanDetail spec={current} ids={[]} selection={{ section: 0, field: 0 }} issues={new Map()} onSpec={setCurrent} />;
+  }
+
+  it("should make a new row an existing one and remove its new field editors when the id is one of the case type's", async () => {
+    render(<Detail initial={withIds(proposed, ["applicantTitle", "cicCaseTitle"])} />);
+
+    const box = screen.getByLabelText("CCD ids");
+    await userEvent.clear(box);
+    await userEvent.type(box, " applicantTitle {Enter}");
+
+    expect(screen.getByText("Existing")).toBeTruthy();
+    expect((screen.getByLabelText("CCD ids") as HTMLInputElement).value).toBe("applicantTitle");
+    expect(screen.queryByLabelText("New case field id for Email address")).toBeNull();
+  });
+
+  it("should offer the case type's ids as suggestions for the CCD ids", () => {
+    const { container } = render(<Detail initial={withIds(proposed, ["applicantTitle", "cicCaseTitle"])} />);
+
+    const list = container.querySelector("datalist");
+    expect(screen.getByLabelText("CCD ids").getAttribute("list")).toBe(list?.id);
+    expect([...(list?.querySelectorAll("option") ?? [])].map((o) => o.getAttribute("value"))).toEqual(["applicantTitle", "cicCaseTitle"]);
+  });
+
+  it("should offer no suggestions when the form has no case type fields", () => {
+    const { container } = render(<Detail initial={withIds(proposed)} />);
+
+    expect(container.querySelector("datalist")).toBeNull();
+    expect(screen.getByLabelText("CCD ids").getAttribute("list")).toBeNull();
   });
 });

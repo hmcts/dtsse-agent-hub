@@ -112,6 +112,7 @@ export function CommitInput({
   placeholder,
   normalise = (text) => text,
   keepValue = false,
+  list,
   onCommit
 }: Readonly<{
   label: string;
@@ -121,6 +122,8 @@ export function CommitInput({
   normalise?: (text: string) => string;
   /** Whether a cleared box goes back to its value rather than being sent as empty. */
   keepValue?: boolean;
+  /** The id of a datalist to suggest values from. */
+  list?: string;
   onCommit: (text: string) => void;
 }>) {
   const [state, setState] = useState({ base: value, text: value });
@@ -142,6 +145,7 @@ export function CommitInput({
     <input
       aria-label={label}
       placeholder={placeholder}
+      list={list}
       value={state.text}
       className={INPUT}
       onChange={(e) => setState({ base: state.base, text: e.target.value })}
