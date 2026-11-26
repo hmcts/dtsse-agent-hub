@@ -41,7 +41,9 @@ export function WelshSetup({
   client
 }: Readonly<{ product: string; candidates: readonly string[]; openPr: string | null; client: WelshClient }>) {
   const input = useRef<HTMLInputElement>(null);
-  const [repo, setRepo] = useState(candidates[0] ?? "");
+  // A service with one repo has only the one place to keep its Welsh. With more, which is right is the team's call, so
+  // none is chosen for them.
+  const [repo, setRepo] = useState(candidates.length === 1 ? (candidates[0] ?? "") : "");
   const [sources, setSources] = useState<Source[]>([]);
   const [uploading, setUploading] = useState<string | null>(null);
   const [uploadErrors, setUploadErrors] = useState<string[]>([]);
@@ -114,7 +116,8 @@ export function WelshSetup({
     <>
       <Step n={2} title="Choose where the Welsh is kept" done={repo !== ""} summary={repo ? repoName(repo) : undefined}>
         <p className="text-[13px] text-asst-body">
-          A service's Welsh is kept in a welsh folder in one of its own repos, so the team reviews every change to it.
+          A service's Welsh is kept in a welsh folder in one of its own repos, so the team reviews every change to it. If you're not sure which repo is best,
+          check with the devs.
         </p>
         {candidates.length > 1 ? (
           <RepoSelect
@@ -125,67 +128,70 @@ export function WelshSetup({
               setRepo(next);
             }}
             label="Which repo keeps the service's Welsh"
+            placeholder="Choose a repo"
           />
         ) : null}
       </Step>
-      <Step n={3} title="Add your documents" done={sourcesDone} summary={sourcesDone ? plural(sources.length, "file") : undefined}>
-        <p className="text-[13px] text-asst-body">
-          Add every document of approved Welsh the team has: spreadsheets the Welsh Language Unit sent back, and JSON files of the service's Welsh. You need at
-          least one. Each spreadsheet needs a column headed English and one headed Welsh or Cymraeg.
-        </p>
-        <Labelled label="Spreadsheets (.xlsx) or JSON files (.json)">
-          {(id) => (
-            <input
-              id={id}
-              ref={input}
-              type="file"
-              multiple
-              accept=".xlsx,.json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/json"
-              disabled={busy}
-              onChange={(event) => void add(event.target.files)}
-              className="text-[13px] text-asst-text"
-            />
-          )}
-        </Labelled>
-        {sources.length > 0 ? (
-          <ul aria-label="Files to set up from" className="flex flex-col gap-1 text-[13px]">
-            {sources.map((s) => (
-              <li key={s.id} className="flex items-center gap-2">
-                <span className="break-all">{s.name}</span>
-                <button
-                  type="button"
-                  aria-label={`Remove ${s.name}`}
-                  className="text-xs text-asst-accent underline hover:text-asst-accent-hover"
-                  disabled={busy}
-                  onClick={() => remove(s.id)}
-                >
-                  Remove
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        {uploadErrors.length > 0 ? (
-          <ul role="alert" className="flex flex-col gap-1 text-[13px] text-asst-error">
-            {uploadErrors.map((e) => (
-              <li key={e}>{e}</li>
-            ))}
-          </ul>
-        ) : null}
-        <output className="block text-[13px] text-asst-muted">{uploading ? `Uploading ${uploading}…` : ""}</output>
-        {check.state.phase === "idle" ? (
-          <div>
-            <button
-              type="button"
-              className={SECONDARY}
-              disabled={busy || sources.length === 0}
-              onClick={() => void check.run({ kind: "setup_check", product, args })}
-            >
-              Check them
-            </button>
-          </div>
-        ) : null}
-      </Step>
+      {repo === "" ? null : (
+        <Step n={3} title="Add your documents" done={sourcesDone} summary={sourcesDone ? plural(sources.length, "file") : undefined}>
+          <p className="text-[13px] text-asst-body">
+            Add every document of approved Welsh the team has: spreadsheets the Welsh Language Unit sent back and/or JSON files of the service's Welsh. You need
+            at least one. Each spreadsheet needs a column headed English and one headed Welsh or Cymraeg.
+          </p>
+          <Labelled label="Spreadsheets (.xlsx) or JSON files (.json)">
+            {(id) => (
+              <input
+                id={id}
+                ref={input}
+                type="file"
+                multiple
+                accept=".xlsx,.json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/json"
+                disabled={busy}
+                onChange={(event) => void add(event.target.files)}
+                className="text-[13px] text-asst-text"
+              />
+            )}
+          </Labelled>
+          {sources.length > 0 ? (
+            <ul aria-label="Files to set up from" className="flex flex-col gap-1 text-[13px]">
+              {sources.map((s) => (
+                <li key={s.id} className="flex items-center gap-2">
+                  <span className="break-all">{s.name}</span>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${s.name}`}
+                    className="text-xs text-asst-accent underline hover:text-asst-accent-hover"
+                    disabled={busy}
+                    onClick={() => remove(s.id)}
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {uploadErrors.length > 0 ? (
+            <ul role="alert" className="flex flex-col gap-1 text-[13px] text-asst-error">
+              {uploadErrors.map((e) => (
+                <li key={e}>{e}</li>
+              ))}
+            </ul>
+          ) : null}
+          <output className="block text-[13px] text-asst-muted">{uploading ? `Uploading ${uploading}…` : ""}</output>
+          {check.state.phase === "idle" ? (
+            <div>
+              <button
+                type="button"
+                className={SECONDARY}
+                disabled={busy || sources.length === 0}
+                onClick={() => void check.run({ kind: "setup_check", product, args })}
+              >
+                Check them
+              </button>
+            </div>
+          ) : null}
+        </Step>
+      )}
       {check.state.phase !== "idle" ? (
         <Step n={4} title="Check them" done={checked !== null}>
           <JobStatus state={check.state} working={`Reading ${plural(sources.length, "file")} into a catalogue, without saving anything…`} />

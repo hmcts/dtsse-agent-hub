@@ -751,6 +751,11 @@ describe("WelshPage, setting a service up", () => {
     return { fake, requests };
   }
 
+  /** Chooses the repo, which nothing is chosen for when the service has more than one. */
+  function chooseRepo(repo = "apps/cath/cath-frontend") {
+    fireEvent.change(screen.getByLabelText("Which repo keeps the service's Welsh"), { target: { value: repo } });
+  }
+
   async function addFiles(fake: WelshClient, names: string[]) {
     for (const id of ids.slice(0, names.length)) {
       vi.mocked(fake.upload).mockResolvedValueOnce({ file_id: id });
@@ -766,6 +771,8 @@ describe("WelshPage, setting a service up", () => {
     expect(screen.getByRole("note").textContent).toMatch(/at least one document of translations the Welsh Language Unit has approved/);
     expect(screen.getByRole("note").textContent).toMatch(/reviewed and merged, you can use the other Welsh tasks/);
     expect(screen.queryByText("What do you need to do?")).toBeNull();
+    expect((screen.getByLabelText("Which repo keeps the service's Welsh") as HTMLSelectElement).value).toBe("");
+    expect(screen.queryByText("Add your documents")).toBeNull();
 
     // Act
     fireEvent.change(screen.getByLabelText("Which repo keeps the service's Welsh"), { target: { value: "apps/cath/cath-service" } });
@@ -787,6 +794,7 @@ describe("WelshPage, setting a service up", () => {
 
   it("should not check anything until at least one document is added", async () => {
     const { fake, requests } = await openSetup(SETUP);
+    chooseRepo();
     expect((screen.getByRole("button", { name: "Check them" }) as HTMLButtonElement).disabled).toBe(true);
     await addFiles(fake, ["old.xlsx"]);
     expect((screen.getByRole("button", { name: "Check them" }) as HTMLButtonElement).disabled).toBe(false);
@@ -800,6 +808,7 @@ describe("WelshPage, setting a service up", () => {
       unreadable: [{ file: "notes.xlsx", problem: "no sheet has both an English and a Welsh header" }]
     });
     const { fake } = await openSetup({ ...SETUP, setup_check: unreadable });
+    chooseRepo();
 
     // Act
     await addFiles(fake, ["notes.xlsx"]);
@@ -813,6 +822,13 @@ describe("WelshPage, setting a service up", () => {
     expect(screen.queryByRole("button", { name: "Set up Welsh for this service" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Remove notes.xlsx" }));
     expect((screen.getByRole("button", { name: "Check them" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("should choose the repo for a service that has only one", async () => {
+    await openSetup({ ...SETUP, info: notSetUp({ candidates: ["apps/cath/cath-service"] }) });
+    expect(screen.queryByLabelText("Which repo keeps the service's Welsh")).toBeNull();
+    expect(screen.getByText("Add your documents")).toBeTruthy();
+    expect(screen.getByText(/check with the devs/)).toBeTruthy();
   });
 
   it("should link to a setup already open rather than offer another", async () => {

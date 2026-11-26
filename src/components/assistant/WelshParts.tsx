@@ -349,12 +349,19 @@ export function RepoSelect({
   repos,
   value,
   onChange,
-  label = "Which part of the service (code repository)"
-}: Readonly<{ repos: readonly string[]; value: string; onChange: (repo: string) => void; label?: string }>) {
+  label = "Which part of the service (code repository)",
+  placeholder
+}: Readonly<{ repos: readonly string[]; value: string; onChange: (repo: string) => void; label?: string; placeholder?: string }>) {
   return (
     <Labelled label={label}>
       {(id) => (
         <select id={id} value={value} onChange={(event) => onChange(event.target.value)} className={`${FIELD} max-w-xs`}>
+          {/* Shown until one is chosen, where no repo is a safe one to assume. */}
+          {placeholder === undefined ? null : (
+            <option value="" disabled>
+              {placeholder}
+            </option>
+          )}
           {repos.map((r) => (
             <option key={r} value={r}>
               {repoName(r)}
