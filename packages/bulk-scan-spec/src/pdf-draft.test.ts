@@ -36,6 +36,27 @@ describe("draftFields", () => {
     expect(date?.reasons[0]?.about).toBe("type");
   });
 
+  it("should read a day box labelled with the question's words as the start of one date labelled by those words", async () => {
+    const fields = await draftOf({
+      texts: [
+        { text: "2. About you", x: 28, y: 740 },
+        { text: "Date of birth Day", x: 57, y: 700 },
+        { text: "Month", x: 200, y: 700 },
+        { text: "Year", x: 300, y: 700 }
+      ],
+      textBoxes: [
+        { name: "d", x: 57, y: 670, width: 40 },
+        { name: "m", x: 200, y: 670, width: 40 },
+        { name: "y", x: 300, y: 670, width: 60 }
+      ]
+    });
+    const dates = fields.filter((d) => d.field.inputType === "date");
+    expect(dates).toHaveLength(1);
+    expect(dates[0]?.field.label).toBe("Date of birth");
+    expect(dates[0]?.field.keys).toHaveLength(3);
+    expect(fields.filter((d) => d.field.inputType === "text")).toHaveLength(0);
+  });
+
   it("should keep the section and question across pages and group a radio group's buttons however they are placed", async () => {
     const fields = await draftOf(...SAMPLE_FORM);
     const pay = fields.find((d) => d.field.id === "2.3");
