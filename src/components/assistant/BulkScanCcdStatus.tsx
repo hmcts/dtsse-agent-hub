@@ -1,7 +1,6 @@
 "use client";
 
 import type { Field } from "@hmcts-cft/bulk-scan-spec";
-import { useId } from "react";
 import { NEW_FIELD_TYPES } from "@/bulk-scan/case-type";
 import { CommitInput } from "@/components/assistant/BulkScanParts";
 import { FIELD } from "@/components/assistant/WelshParts";
@@ -16,13 +15,12 @@ const NEW_OPTION = "\u0000new";
 
 /**
  * Where a row's CCD field stands against the form's case type: a badge, and for an unsure row the choice between its
- * candidates and a new field, and for a new row its proposed id and CCD FieldType to edit. Any row can be set to one of the
- * case type's existing fields. Draws nothing for a row with no case type match.
+ * candidates and a new field, and for a new row its proposed id and CCD FieldType to edit. Draws nothing for a row with
+ * no case type match.
  */
 export function BulkScanCcdStatus({
   field,
   name,
-  ccdFieldIds,
   onChooseCandidate,
   onChooseNew,
   onEditNew
@@ -30,13 +28,10 @@ export function BulkScanCcdStatus({
   field: Field;
   /** What the row is called, for the names of its controls. */
   name: string;
-  /** Every field id of the form's case type, when it has one. */
-  ccdFieldIds?: readonly string[];
   onChooseCandidate: (id: string) => void;
   onChooseNew: () => void;
   onEditNew: (patch: { id?: string; type?: string }) => void;
 }>) {
-  const listId = useId();
   const match = field.ccdMatch;
   if (!match) {
     return null;
@@ -77,22 +72,6 @@ export function BulkScanCcdStatus({
               </option>
             ))}
           </select>
-        </>
-      ) : null}
-      {ccdFieldIds?.length ? (
-        <>
-          <CommitInput
-            label={`Existing case field for ${name}`}
-            value={match.status === "existing" ? (field.ccd[0] ?? "") : ""}
-            placeholder="Pick an existing field"
-            list={listId}
-            onCommit={(id) => (ccdFieldIds.includes(id) ? onChooseCandidate(id) : undefined)}
-          />
-          <datalist id={listId}>
-            {ccdFieldIds.map((id) => (
-              <option key={id} value={id} />
-            ))}
-          </datalist>
         </>
       ) : null}
     </div>

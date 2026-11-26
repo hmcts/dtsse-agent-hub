@@ -78,11 +78,11 @@ export function BulkScanDetail({
         onField={(change) => onSpec(mapField(spec, s, f, change), false)}
         onClearTodo={(index) => onSpec(clearTodo(spec, s, f, index), false)}
         onClearReview={(index) => onSpec(clearReview(spec, s, f, index), false)}
+        ccdFieldIds={spec.form.ccdFieldIds}
         ccdStatus={
           <BulkScanCcdStatus
             field={field}
             name={name}
-            ccdFieldIds={spec.form.ccdFieldIds}
             onChooseCandidate={(id) => onSpec(chooseCandidate(spec, s, f, id), false)}
             onChooseNew={() => onSpec(chooseNew(spec, s, f), false)}
             onEditNew={(patch) => onSpec(editNewField(spec, s, f, patch), false)}

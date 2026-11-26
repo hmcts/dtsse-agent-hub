@@ -1,7 +1,7 @@
 "use client";
 
 import type { Field } from "@hmcts-cft/bulk-scan-spec";
-import type { ReactNode } from "react";
+import { type ReactNode, useId } from "react";
 import { casePathWords, clearLogicText, conditionsOf, type FieldPatch, logicWords, withoutKey, withRequired, wordsOf, writeAsRules } from "@/bulk-scan/edit";
 import { MANDATORY_CHOICES } from "@/bulk-scan/outline";
 import { BulkScanConditions, type KeyChoice } from "@/components/assistant/BulkScanConditions";
@@ -32,6 +32,7 @@ export function BulkScanFieldDetails({
   onField,
   onClearTodo,
   onClearReview,
+  ccdFieldIds,
   ccdStatus
 }: Readonly<{
   field: Field;
@@ -41,10 +42,13 @@ export function BulkScanFieldDetails({
   onField: (change: (field: Field) => Field) => void;
   onClearTodo: (index: number) => void;
   onClearReview: (index: number) => void;
+  /** Every field id of the form's case type, offered as suggestions for the CCD ids. */
+  ccdFieldIds?: readonly string[];
   /** Where the field stands against the form's case type, drawn under the CCD ids. */
   ccdStatus?: ReactNode;
 }>) {
   const review = field.review ?? [];
+  const listId = useId();
   return (
     <div className="flex flex-col gap-4">
       {problems.length > 0 ? (
@@ -116,8 +120,15 @@ export function BulkScanFieldDetails({
 
       <Card title="Where it goes in CCD">
         <Labelled label="CCD ids, separated by spaces">
-          <CcdIds value={field.ccd} onChange={(ccd) => onPatch({ ccd })} />
+          <CcdIds value={field.ccd} list={ccdFieldIds?.length ? listId : undefined} onChange={(ccd) => onPatch({ ccd })} />
         </Labelled>
+        {ccdFieldIds?.length ? (
+          <datalist id={listId}>
+            {ccdFieldIds.map((id) => (
+              <option key={id} value={id} />
+            ))}
+          </datalist>
+        ) : null}
         {ccdStatus}
       </Card>
 
@@ -219,6 +230,14 @@ function SheetWords({ field }: Readonly<{ field: Field }>) {
 }
 
 /** CCD ids typed as words: the text goes up when the person leaves the box or presses Enter. */
-function CcdIds({ value, onChange }: Readonly<{ value: readonly string[]; onChange: (ids: string[]) => void }>) {
-  return <CommitInput label="CCD ids" value={value.join(" ")} normalise={(text) => wordsOf(text).join(" ")} onCommit={(text) => onChange(wordsOf(text))} />;
+function CcdIds({ value, list, onChange }: Readonly<{ value: readonly string[]; list?: string; onChange: (ids: string[]) => void }>) {
+  return (
+    <CommitInput
+      label="CCD ids"
+      list={list}
+      value={value.join(" ")}
+      normalise={(text) => wordsOf(text).join(" ")}
+      onCommit={(text) => onChange(wordsOf(text))}
+    />
+  );
 }
