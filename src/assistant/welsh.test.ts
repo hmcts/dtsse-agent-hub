@@ -44,12 +44,16 @@ describe("welshArgs", () => {
     expect(welshArgs("story_candidates", "cath", { key: "pub 1234" })).toEqual({ error: "that is not a Jira key, like PUB-1234" });
   });
 
-  it("should take a setup's repo and any number of uploads, none included, but no repo of another product or a file twice", () => {
+  it("should take a setup's repo and one or more uploads, but no repo of another product or a file twice", () => {
     const many = Array.from({ length: 50 }, (_, i) => `0f8fad5b-d9cb-469f-a165-${String(i).padStart(12, "0")}`);
-    expect(welshArgs("setup_check", "pcs", { repo: "apps/pcs/pcs-frontend" })).toEqual({ args: { repo: "apps/pcs/pcs-frontend", file_ids: [] } });
+    expect(welshArgs("setup_check", "pcs", { repo: "apps/pcs/pcs-frontend" })).toHaveProperty("error");
+    expect(welshArgs("setup_check", "pcs", { repo: "apps/pcs/pcs-frontend", file_ids: [] })).toHaveProperty("error");
+    expect(welshArgs("setup_check", "pcs", { repo: "apps/pcs/pcs-frontend", file_ids: [FILE] })).toEqual({
+      args: { repo: "apps/pcs/pcs-frontend", file_ids: [FILE] }
+    });
     expect(welshArgs("setup", "pcs", { repo: "apps/pcs/pcs-frontend", file_ids: many })).toEqual({ args: { repo: "apps/pcs/pcs-frontend", file_ids: many } });
     expect(welshArgs("setup", "pcs", { file_ids: [FILE] })).toHaveProperty("error");
-    expect(welshArgs("setup", "pcs", { repo: "apps/cath/cath-service" })).toEqual({ error: "that is not one of pcs's repos" });
+    expect(welshArgs("setup", "pcs", { repo: "apps/cath/cath-service", file_ids: [FILE] })).toEqual({ error: "that is not one of pcs's repos" });
     expect(welshArgs("setup", "pcs", { repo: "apps/pcs/pcs-frontend", file_ids: [FILE, FILE] })).toEqual({ error: "that file is listed twice" });
     expect(welshArgs("setup", "pcs", { repo: "apps/pcs/pcs-frontend", file_ids: ["nope"] })).toEqual({ error: "that is not a file id" });
   });

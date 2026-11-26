@@ -152,16 +152,17 @@ const key = z.string().regex(JIRA_KEY_RE, "that is not a Jira key, like PUB-1234
 const repo = z.string().max(200);
 
 /**
- * A setup's repo, which it needs, and the earlier translations to seed the catalogue from: none, one, or dozens. The
+ * A setup's repo, which it needs, and the approved translations to seed the catalogue from: at least one file, or dozens. The
  * only bound is how many uploads one person may hold, which no setup can name more than.
  */
 const setupArgs = z
   .object({
     repo,
     file_ids: boundedArray(fileId, MAX_WELSH_UPLOADS, {
+      min: 1,
       message: `that is more files than you can have uploaded at once (${MAX_WELSH_UPLOADS})`,
       refine: { check: (ids) => new Set(ids).size === ids.length, message: "that file is listed twice" }
-    }).default([])
+    })
   })
   .strict();
 

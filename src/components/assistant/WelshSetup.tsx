@@ -30,7 +30,7 @@ export const SETUP_STEPS = 5;
 
 /**
  * Setting up a service that has no Welsh catalogue yet, from step 2: choose which of its repos keeps its Welsh, add
- * whatever earlier translations the team has (any number of WLU spreadsheets and JSON copies, or none), see them
+ * the translations the Welsh Language Unit has approved for it (at least one WLU spreadsheet or JSON copy), see them
  * checked, then open one draft pull request adding the `welsh/` folder with the catalogue seeded from them. Nothing is
  * translated: the catalogue holds only Welsh the team already had.
  */
@@ -128,10 +128,10 @@ export function WelshSetup({
           />
         ) : null}
       </Step>
-      <Step n={3} title="Add earlier translations" done={sourcesDone} summary={sourcesDone ? plural(sources.length, "file") : undefined}>
+      <Step n={3} title="Add your documents" done={sourcesDone} summary={sourcesDone ? plural(sources.length, "file") : undefined}>
         <p className="text-[13px] text-asst-body">
-          Add every file of Welsh the team already has: spreadsheets the Welsh Language Unit sent, and JSON copies. Each spreadsheet needs a column headed
-          English and one headed Welsh or Cymraeg. Without any, the service starts with an empty catalogue.
+          Add every document of approved Welsh the team has: spreadsheets the Welsh Language Unit sent back, and JSON files of the service's Welsh. You need at
+          least one. Each spreadsheet needs a column headed English and one headed Welsh or Cymraeg.
         </p>
         <Labelled label="Spreadsheets (.xlsx) or JSON files (.json)">
           {(id) => (
@@ -175,8 +175,13 @@ export function WelshSetup({
         <output className="block text-[13px] text-asst-muted">{uploading ? `Uploading ${uploading}…` : ""}</output>
         {check.state.phase === "idle" ? (
           <div>
-            <button type="button" className={SECONDARY} disabled={busy} onClick={() => void check.run({ kind: "setup_check", product, args })}>
-              {sources.length > 0 ? "Check them" : "Carry on with no earlier translations"}
+            <button
+              type="button"
+              className={SECONDARY}
+              disabled={busy || sources.length === 0}
+              onClick={() => void check.run({ kind: "setup_check", product, args })}
+            >
+              Check them
             </button>
           </div>
         ) : null}

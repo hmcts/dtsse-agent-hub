@@ -198,7 +198,12 @@ describe("welsh jobs", () => {
 
   it("should answer that the assistant needs an update to set a service up when its client does not claim welsh-setup", async () => {
     await assistantOf(ALICE);
-    expect(await jsonOf(await start({ kind: "setup_check", product: "pcs", args: { repo: "apps/pcs/pcs-frontend" } }))).toEqual({ status: "unsupported" });
+    const sheet = await jsonOf<{ file_id: string }>(
+      await browser(uploadRoute.POST, "/api/ui/assistant/welsh/files", { body: XLSX, headers: { "x-file-name": "old.xlsx" } })
+    );
+    expect(await jsonOf(await start({ kind: "setup_check", product: "pcs", args: { repo: "apps/pcs/pcs-frontend", file_ids: [sheet.file_id] } }))).toEqual({
+      status: "unsupported"
+    });
   });
 
   it("should download a spreadsheet whose name has a letter outside the BMP, encoding the whole pair, when the owner reads it", async () => {

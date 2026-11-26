@@ -743,8 +743,8 @@ The page is for people whose assistant has the `welsh` plugin ticked (`WELSH_PLU
 | `story_preview` | `{key, strings, choices?}` | `welsh story <key> --strings <file>` |
 | `story_write` | `{key}` | `welsh story <key> --write --out <file>`; the request for the WLU comes back as a file |
 | `keep_english` | `{strings}` | `welsh keep-english --pr -- <english>...`; a draft PR in the service's own repo adding them to `identical_allowlist`, so a scan stops asking about them |
-| `setup_check` | `{repo, file_ids?}` | `welsh setup --repo <repo> --xlsx <file>... --json <file>... --dry-run`: what a catalogue seeded from the team's earlier translations would hold, and any file it could not read, with nothing committed |
-| `setup` | `{repo, file_ids?}` | `welsh setup ... --pr`; a draft PR in `repo` adding the service's `welsh/` folder, its catalogue seeded from the files. `file_ids` is any number of uploads, none included; refused for a service already set up or with a setup PR open |
+| `setup_check` | `{repo, file_ids}` | `welsh setup --repo <repo> --xlsx <file>... --json <file>... --dry-run`: what a catalogue seeded from the team's earlier translations would hold, and any file it could not read, with nothing committed |
+| `setup` | `{repo, file_ids}` | `welsh setup ... --pr`; a draft PR in `repo` adding the service's `welsh/` folder, its catalogue seeded from the files. `file_ids` is one or more uploads, at most `MAX_WELSH_UPLOADS`; refused for a service already set up or with a setup PR open |
 
 `query` is at most 100 characters; `repo` is `apps/<product>/<name>`; `key` is a Jira key (`^[A-Z][A-Z0-9_]{1,9}-[0-9]{1,7}$`); `strings` is 1 to 200 English strings of at most 2000 characters each, one line each for `keep_english`; `leave_out` is at most 300 refs; `choices` is at most 200 `{ref, row_id}`, `ref` being `^CY-[0-9A-F]{8}$` and `row_id` `^[0-9a-f]{10}$`; `file_id` is a file the person uploaded (below). Anything else is `400`.
 
