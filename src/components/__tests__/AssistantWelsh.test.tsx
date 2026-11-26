@@ -839,6 +839,73 @@ describe("WelshPage, setting a service up", () => {
   });
 });
 
+describe("WelshPage, reviewing translations", () => {
+  const listed = done("review_list", {
+    total: 2,
+    groups: [
+      {
+        english: "Back",
+        context: "",
+        why: ["More than one rendering"],
+        options: [
+          { id: "1111111111", welsh: "Yn ôl", status: "needs-review", source: "legacy:old.xlsx" },
+          { id: "2222222222", welsh: "Nôl", status: "needs-review", source: "legacy:copy.json" }
+        ]
+      },
+      {
+        english: "Sign out",
+        context: "button",
+        why: [],
+        options: [
+          { id: "3333333333", welsh: "Allgofnodi", status: "approved", source: "legacy:old.xlsx" },
+          { id: "4444444444", welsh: "Allgofnodwch", status: "needs-review", source: "legacy:copy.json" }
+        ]
+      }
+    ]
+  });
+  const REVIEW = {
+    ...ANSWERS,
+    review_list: listed,
+    review_apply: done("review_apply", { approved: [{ id: "2222222222" }], superseded: 1, left: 1, pr: "https://github.com/hmcts/cath-service/pull/80" })
+  };
+
+  it("should approve only the Welsh chosen, leave the rest for later, and open the pull request once confirmed", async () => {
+    // Arrange
+    const { requests } = await open("review", REVIEW);
+    await screen.findByText(/“Nôl”/);
+    expect(screen.getByRole("list", { name: "Review translations" }).textContent).toMatch(/Step 1 of 3/);
+    expect(screen.getByText("Choose the Welsh for at least one above.")).toBeTruthy();
+
+    // Act
+    fireEvent.click(screen.getByRole("radio", { name: /“Nôl” from copy.json/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve 1 translation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open the pull request" }));
+
+    // Assert
+    expect(await screen.findByRole("link", { name: /cath-service\/pull\/80/ })).toBeTruthy();
+    expect(requests.find((r) => r.kind === "review_apply")?.args).toEqual({ approve: ["2222222222"] });
+    expect(screen.getByText(/1 translation approved, 1 other version kept as history. 1 English phrase still to review./)).toBeTruthy();
+    expect(screen.getByText(/approved now/)).toBeTruthy();
+  });
+
+  it("should take a choice back when it is set to not settled", async () => {
+    await open("review", REVIEW);
+    await screen.findByText(/“Nôl”/);
+    fireEvent.click(screen.getByRole("radio", { name: /“Allgofnodi”/ }));
+    expect(screen.getByRole("button", { name: "Approve 1 translation" })).toBeTruthy();
+    fireEvent.click(screen.getAllByRole("radio", { name: "Not settled yet" })[1] as HTMLElement);
+    expect(screen.getByText("Choose the Welsh for at least one above.")).toBeTruthy();
+  });
+
+  it("should say when nothing is waiting, and when more are waiting than are shown", async () => {
+    await open("review", { ...REVIEW, review_list: done("review_list", { total: 0, groups: [] }) });
+    expect(await screen.findByText(/Nothing in this service.s catalogue is waiting for review/)).toBeTruthy();
+    cleanup();
+    await open("review", { ...REVIEW, review_list: done("review_list", { ...(listed.status === "done" ? listed.result : {}), total: 9 }) });
+    expect(await screen.findByText(/Showing the first 2 of 9/)).toBeTruthy();
+  });
+});
+
 describe("fileFacts", () => {
   it("should name the kind of file and give its size in the unit that reads best", () => {
     expect(fileFacts({ name: "a.xlsx", bytes: 2048 })).toBe("Excel spreadsheet, 2 KB");

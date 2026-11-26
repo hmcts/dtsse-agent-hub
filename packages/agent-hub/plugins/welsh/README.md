@@ -106,8 +106,18 @@ $WELSH import-legacy --service <product> --xlsx "<catalogue>.xlsx" [--json <copy
 
 Where a spreadsheet and a JSON copy have the same English, the spreadsheet wins. English with more than one Welsh
 rendering is added as `needs-review`, and so is anything else that needs checking. Every `needs-review` row is listed
-with why in `welsh/needs-review.md`, the one list to work through. Settle each with the WLU, then set one row to
-`approved` and the others to `superseded`. A WLU return with the same Welsh approves the row by itself.
+with why in `welsh/needs-review.md`, the one list to work through. Settle each with the WLU, then approve the right
+rendering:
+
+```bash
+$WELSH review --service <product>                          # each English waiting, with its renderings and row ids
+$WELSH review --service <product> --approve <row-id>... --pr
+```
+
+Approving a row supersedes every other rendering of the same English in the same context, the one approved before
+included, and rebuilds `needs-review.md`, all in a draft PR. A row already approved can be named too, when the WLU says
+it is still right. A WLU return with the same Welsh approves the row by itself. The Welsh page's Review translations
+task runs the same command.
 
 ### Search the catalogue
 

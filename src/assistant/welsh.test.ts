@@ -104,6 +104,15 @@ describe("the small checks", () => {
     expect(welshFeature("scan")).toBe("welsh");
   });
 
+  it("should list the rows to review with nothing, and approve at least one row id", () => {
+    expect(welshArgs("review_list", "cath", {})).toEqual({ args: {} });
+    expect(welshArgs("review_apply", "cath", { approve: ["0123456789"] })).toEqual({ args: { approve: ["0123456789"] } });
+    expect(welshArgs("review_apply", "cath", { approve: [] })).toHaveProperty("error");
+    expect(welshArgs("review_apply", "cath", { approve: ["--pr"] })).toEqual({ error: "that is not a catalogue row" });
+    expect(welshFeature("review_list")).toBe("welsh-setup");
+    expect(welshFeature("review_apply")).toBe("welsh-setup");
+  });
+
   it("should need welsh-setup to set a service up, the only kinds that read a JSON copy", () => {
     expect(welshFeature("setup_check")).toBe("welsh-setup");
     expect(welshFeature("setup")).toBe("welsh-setup");

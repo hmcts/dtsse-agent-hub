@@ -207,6 +207,16 @@ describe("welshArgs", () => {
     expect(welshArgs(frame("info", {}), WS, paths)).toEqual(["info", "--service", "cath"]);
   });
 
+  it("should list the rows to review, and approve the ones chosen through a draft pull request", () => {
+    expect(welshArgs(frame("review_list", {}), WS, paths)).toEqual(["review", "--service", "cath"]);
+    const apply = frame("review_apply", { approve: ["0123456789", "abcdef0123", "0123456789"] });
+    expect(apply.approve).toEqual(["0123456789", "abcdef0123"]);
+    expect(welshArgs(apply, WS, paths)).toEqual(["review", "--service", "cath", "--approve", "0123456789", "--approve", "abcdef0123", "--pr"]);
+    expect(parseWelshFrame({ job_id: JOB, kind: "review_apply", product: "cath", args: { approve: [] } })).toBeNull();
+    expect(parseWelshFrame({ job_id: JOB, kind: "review_apply", product: "cath", args: { approve: ["--pr"] } })).toBeNull();
+    expect(parseWelshFrame({ job_id: JOB, kind: "review_list", product: "cath", args: { approve: ["0123456789"] } })).toBeNull();
+  });
+
   it("should set up from each upload, read as a spreadsheet or JSON by its name, with the repo as a workspace path", () => {
     const extra = { file_names: { [FILE]: "Old.xlsx", [FILE_2]: "copy.json" } };
     const check = frame("setup_check", { repo: "apps/cath/cath-service", file_ids: [FILE, FILE_2] }, extra);

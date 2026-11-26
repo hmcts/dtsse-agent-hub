@@ -60,6 +60,40 @@ export interface SetupView {
   pr: string | null;
 }
 
+/** One English with Welsh to review, and each rendering to choose from. */
+export interface ReviewGroup {
+  english: string;
+  context: string;
+  why: string[];
+  options: { id: string; welsh: string; approved: boolean; source: string }[];
+}
+
+/** What a review lists: the English to settle, up to the plugin's limit, and how many there are in all. */
+export function reviewListView(result: Json): { total: number; groups: ReviewGroup[] } {
+  return {
+    total: num(result.total),
+    groups: list(result.groups).map((g) => ({
+      english: str(g.english),
+      context: str(g.context),
+      why: (Array.isArray(g.why) ? g.why : []).map(str).filter(Boolean),
+      options: list(g.options).map((o) => ({ id: str(o.id), welsh: str(o.welsh), approved: o.status === "approved", source: fromSource(str(o.source)) }))
+    }))
+  };
+}
+
+/** What approving did: how many, how many renderings it replaced, how many are left, and the pull request. */
+export function reviewedView(result: Json): { approved: number; superseded: number; left: number; pr: string | null } {
+  return { approved: list(result.approved).length, superseded: num(result.superseded), left: num(result.left), pr: nullable(result.pr) };
+}
+
+/** Where a row came from, in words: an earlier file by its name, or a Welsh Language Unit return. */
+function fromSource(source: string): string {
+  if (source.startsWith("legacy:")) {
+    return source.slice("legacy:".length);
+  }
+  return source.startsWith("WLU:") ? `Welsh Language Unit return ${source.slice(4)}` : source;
+}
+
 export function setupView(result: Json): SetupView {
   return {
     sources: num(result.sources),

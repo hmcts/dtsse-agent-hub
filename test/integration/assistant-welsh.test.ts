@@ -196,6 +196,19 @@ describe("welsh jobs", () => {
     expect(await jsonOf(importJson)).toEqual({ error: "that needs the Excel spreadsheet (.xlsx), not a JSON file" });
   });
 
+  it("should record a review's list and its approvals, and frame each for the pod", async () => {
+    const assistant = await withPlugin(await podFixture(["welsh", "welsh-setup"])(ALICE));
+    const listed = await jsonOf<{ job_id: string }>(await start({ kind: "review_list", product: "cath", args: {} }));
+    const approved = await jsonOf<{ job_id: string }>(await start({ kind: "review_apply", product: "cath", args: { approve: ["0123456789"] } }));
+    expect(await pendingWelsh(prisma, assistant, approved.job_id)).toEqual({
+      job_id: approved.job_id,
+      kind: "review_apply",
+      product: "cath",
+      args: { approve: ["0123456789"] }
+    });
+    expect((await pendingWelsh(prisma, assistant, listed.job_id))?.kind).toBe("review_list");
+  });
+
   it("should answer that the assistant needs an update to set a service up when its client does not claim welsh-setup", async () => {
     await assistantOf(ALICE);
     const sheet = await jsonOf<{ file_id: string }>(

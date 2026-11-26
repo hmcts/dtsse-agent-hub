@@ -18,6 +18,7 @@ import {
   WelshTaskSwitch
 } from "@/components/assistant/WelshParts";
 import { WelshReturn } from "@/components/assistant/WelshReturn";
+import { REVIEW_STEPS, WelshReview } from "@/components/assistant/WelshReview";
 import { WelshScan } from "@/components/assistant/WelshScan";
 import { WelshSearch } from "@/components/assistant/WelshSearch";
 import { SETUP_STEPS, WelshSetup } from "@/components/assistant/WelshSetup";
@@ -36,7 +37,12 @@ const WELSH_TASKS: readonly { id: WelshTask; title: string; description: string 
     title: "The Welsh unit sent translations back",
     description: "Check their spreadsheet, add it to the catalogue, then put the Welsh into the code."
   },
-  { id: "story", title: "Add Welsh to a Jira story", description: "Add a Welsh content table to a story, filled from the catalogue." }
+  { id: "story", title: "Add Welsh to a Jira story", description: "Add a Welsh content table to a story, filled from the catalogue." },
+  {
+    id: "review",
+    title: "Review translations",
+    description: "Choose the right Welsh for translations waiting for review, once the Welsh Language Unit has confirmed it."
+  }
 ];
 
 /** The service last worked on, so the next visit starts there. Only a slug, kept in this browser. */
@@ -213,6 +219,8 @@ export function stepsIn(task: WelshTask): number | null {
       return 2;
     case "story":
       return 5;
+    case "review":
+      return REVIEW_STEPS;
     case "return":
     case "scan":
       return null;
@@ -263,6 +271,8 @@ function TaskSteps({
       return <WelshReturn product={product} repos={repos} client={client} />;
     case "story":
       return <WelshStory product={product} client={client} />;
+    case "review":
+      return <WelshReview product={product} client={client} />;
   }
 }
 

@@ -9,6 +9,7 @@ import { applyCmd } from "./commands/apply.ts";
 import { importLegacyCmd, infoCmd, init, searchCmd } from "./commands/catalogue.ts";
 import { importCmd } from "./commands/import.ts";
 import { keepEnglishCmd } from "./commands/keep.ts";
+import { reviewCmd } from "./commands/review.ts";
 import { scanCmd } from "./commands/scan.ts";
 import { setupCmd } from "./commands/setup.ts";
 import { storyCmd } from "./commands/story.ts";
@@ -22,6 +23,7 @@ const COMMANDS: Record<string, { usage: string; run: (argv: string[]) => Promise
     run: setupCmd
   },
   info: { usage: "info --service <product>", run: infoCmd },
+  review: { usage: "review --service <product> [--approve <row-id>]... [--pr]", run: reviewCmd },
   search: { usage: "search <text> --service <product> [--exact|--fuzzy] [--all]", run: searchCmd },
   "import-legacy": {
     usage: "import-legacy --service <product> [--xlsx <file>]... [--json <file>]... [--received YYYY-MM-DD]",

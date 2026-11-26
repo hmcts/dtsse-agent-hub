@@ -40,17 +40,19 @@ const WELSH_KINDS = [
   "story_write",
   "keep_english",
   "setup_check",
-  "setup"
+  "setup",
+  "review_list",
+  "review_apply"
 ] as const;
 export type WelshKind = (typeof WELSH_KINDS)[number];
 
 /**
- * The client feature a pod must claim to be sent a kind. `request` and `keep_english`, then `setup_check` and `setup`,
+ * The client feature a pod must claim to be sent a kind. `request` and `keep_english`, then the setup and review kinds,
  * came after `welsh`, and a pod on a client from before them ignores their frames, so it is answered `unsupported`
  * (needs an update) rather than left to time out.
  */
 export function welshFeature(kind: WelshKind): "welsh" | "welsh-review" | "welsh-setup" {
-  if (isSetupKind(kind)) {
+  if (isSetupKind(kind) || kind === "review_list" || kind === "review_apply") {
     return "welsh-setup";
   }
   return kind === "request" || kind === "keep_english" ? "welsh-review" : "welsh";
@@ -62,7 +64,7 @@ export function isSetupKind(kind: WelshKind): boolean {
 }
 
 /** The Welsh page's tasks, which `?task=` can open directly. */
-const WELSH_TASK_IDS = ["search", "scan", "return", "story"] as const;
+const WELSH_TASK_IDS = ["search", "scan", "return", "story", "review"] as const;
 export type WelshTask = (typeof WELSH_TASK_IDS)[number];
 
 export function isWelshTask(value: unknown): value is WelshTask {
@@ -95,6 +97,8 @@ export const MAX_WELSH_QUERY = 100;
 export const MAX_WELSH_STRINGS = 200;
 const MAX_WELSH_STRING = 2000;
 const MAX_WELSH_CHOICES = 200;
+/** As many as a review lists: the pod's `MAX_REVIEW_APPROVALS` and the plugin's `REVIEW_LIST_LIMIT`. */
+const MAX_WELSH_APPROVALS = 300;
 /** As many refs as a scan lists, since a BA can only leave out one they were shown: the pod's `SCAN_LIST_LIMIT`. */
 const MAX_WELSH_LEAVE_OUT = 300;
 
@@ -212,7 +216,16 @@ const ARG_SCHEMAS: Record<WelshKind, z.ZodTypeAny> = {
     })
     .strict(),
   setup_check: setupArgs,
-  setup: setupArgs
+  setup: setupArgs,
+  review_list: z.object({}).strict(),
+  review_apply: z
+    .object({
+      approve: boundedArray(z.string().regex(WELSH_ROW_ID_RE, "that is not a catalogue row"), MAX_WELSH_APPROVALS, {
+        min: 1,
+        message: `approve at most ${MAX_WELSH_APPROVALS} at a time`
+      })
+    })
+    .strict()
 };
 
 export type WelshArgs = Record<string, unknown>;

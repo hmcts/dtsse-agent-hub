@@ -6,6 +6,8 @@ import {
   infoView,
   keepView,
   messageOf,
+  reviewedView,
+  reviewListView,
   safeLink,
   scanView,
   searchView,
@@ -54,6 +56,46 @@ describe("the Welsh page's views", () => {
     });
     expect(view.candidates).toEqual(["apps/pcs/pcs-api", "apps/pcs/pcs-frontend"]);
     expect(view.setupPr).toBe("https://github.com/hmcts/pcs-api/pull/9");
+  });
+
+  it("should read what is waiting for review, naming where each rendering came from", () => {
+    expect(
+      reviewListView({
+        total: 3,
+        groups: [
+          {
+            english: "Back",
+            context: "",
+            why: ["More than one rendering", 4],
+            options: [
+              { id: "a", welsh: "Yn ôl", status: "approved", source: "legacy:old.xlsx" },
+              { id: "b", welsh: "Nôl", status: "needs-review", source: "WLU:2026-03.xlsx" },
+              { id: "c", welsh: "Nôl", status: "needs-review", source: "hand" }
+            ]
+          }
+        ]
+      })
+    ).toEqual({
+      total: 3,
+      groups: [
+        {
+          english: "Back",
+          context: "",
+          why: ["More than one rendering"],
+          options: [
+            { id: "a", welsh: "Yn ôl", approved: true, source: "old.xlsx" },
+            { id: "b", welsh: "Nôl", approved: false, source: "Welsh Language Unit return 2026-03.xlsx" },
+            { id: "c", welsh: "Nôl", approved: false, source: "hand" }
+          ]
+        }
+      ]
+    });
+    expect(reviewedView({ approved: [{ id: "a" }], superseded: 2, left: 1, pr: "https://github.com/hmcts/x/pull/1" })).toEqual({
+      approved: 1,
+      superseded: 2,
+      left: 1,
+      pr: "https://github.com/hmcts/x/pull/1"
+    });
   });
 
   it("should read a setup's check and its pull request, and show nothing for fields it does not have", () => {

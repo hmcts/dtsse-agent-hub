@@ -744,6 +744,8 @@ The page is for people whose assistant has the `welsh` plugin ticked (`WELSH_PLU
 | `story_write` | `{key}` | `welsh story <key> --write --out <file>`; the request for the WLU comes back as a file |
 | `keep_english` | `{strings}` | `welsh keep-english --pr -- <english>...`; a draft PR in the service's own repo adding them to `identical_allowlist`, so a scan stops asking about them |
 | `setup_check` | `{repo, file_ids}` | `welsh setup --repo <repo> --xlsx <file>... --json <file>... --dry-run`: what a catalogue seeded from the team's earlier translations would hold, and any file it could not read, with nothing committed |
+| `review_list` | `{}` | `welsh review`: each English with Welsh waiting for review, and every rendering of it not superseded, the approved one included; at most 300 |
+| `review_apply` | `{approve}`, one to 300 row ids | `welsh review --approve <row-id>... --pr`; a draft PR in the service's own repo approving each row and superseding every other rendering of its English, with `needs-review.md` rebuilt |
 | `setup` | `{repo, file_ids}` | `welsh setup ... --pr`; a draft PR in `repo` adding the service's `welsh/` folder, its catalogue seeded from the files and the files themselves in `welsh/sources/`. `file_ids` is one or more uploads, at most `MAX_WELSH_UPLOADS`; refused for a service already set up or with a setup PR open |
 
 `query` is at most 100 characters; `repo` is `apps/<product>/<name>`; `key` is a Jira key (`^[A-Z][A-Z0-9_]{1,9}-[0-9]{1,7}$`); `strings` is 1 to 200 English strings of at most 2000 characters each, one line each for `keep_english`; `leave_out` is at most 300 refs; `choices` is at most 200 `{ref, row_id}`, `ref` being `^CY-[0-9A-F]{8}$` and `row_id` `^[0-9a-f]{10}$`; `file_id` is a file the person uploaded (below). Anything else is `400`.
@@ -758,7 +760,7 @@ The page is for people whose assistant has the `welsh` plugin ticked (`WELSH_PLU
 
 **The answer.** `PUT /api/virtual/{id}/welsh/{job_id}` with `{result}`, the JSON object `scripts/welsh` printed with `message` added (its stderr, at most 4000 characters), or `{error, detail?}`, `error` being `signed_out` or `failed` and `detail` at most 500 characters. `204`. Kept only for a job of that virtual agent's that is still pending; anything else is ignored, still `204`. A file is accepted only for such a job, at most 5 MiB and 4 a job. Jobs and their files are deleted once they are 7 days old, as the next job is recorded.
 
-**An older client.** Gated on the `welsh` client feature, claimed by the pod's own session, as `lookups` is: the hub answers `unsupported` rather than send a frame nobody will read. `request` and `keep_english` came later and are gated on `welsh-review` instead, since a client that claims only `welsh` ignores them; `setup_check` and `setup` came after those and are gated on `welsh-setup`.
+**An older client.** Gated on the `welsh` client feature, claimed by the pod's own session, as `lookups` is: the hub answers `unsupported` rather than send a frame nobody will read. `request` and `keep_english` came later and are gated on `welsh-review` instead, since a client that claims only `welsh` ignores them; `setup_check`, `setup`, `review_list` and `review_apply` came after those and are gated on `welsh-setup`.
 
 ## Pod jobs
 
@@ -1047,7 +1049,8 @@ the same time and a count is a third place to remember. The list is the record.
   client claiming only `welsh` ignores. Read from the pod's claim, as `welsh` is. Gated: the hub answers those two
   kinds for a pod that has not claimed it with `unsupported`, and sends it no frame.
 - `welsh-setup`, because their supervisor also runs the `welsh` frame's `setup_check` and `setup` kinds, reading each
-  upload in `file_ids` under its name in `file_names`. Read and gated as `welsh-review` is, for those two kinds.
+  upload in `file_ids` under its name in `file_names`, and its `review_list` and `review_apply` kinds. Read and gated as
+  `welsh-review` is, for those four kinds.
 - `deck-build`, because their supervisor answers the sessions stream's `deck_build` frame (see Deck builds), building
   a version's `.pptx` with the `slides` plugin. Read from the pod's claim, as `welsh` is. Gated: the hub answers a
   build for a pod that has not claimed it with `unsupported`, and sends it no frame.

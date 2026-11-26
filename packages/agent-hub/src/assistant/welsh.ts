@@ -27,7 +27,9 @@ export const WELSH_KINDS = [
   "story_write",
   "keep_english",
   "setup_check",
-  "setup"
+  "setup",
+  "review_list",
+  "review_apply"
 ] as const;
 export type WelshKind = (typeof WELSH_KINDS)[number];
 
@@ -50,7 +52,9 @@ const TIMEOUT_MS: Record<WelshKind, number> = {
   story_write: 3 * 60_000,
   keep_english: 5 * 60_000,
   setup_check: 5 * 60_000,
-  setup: 10 * 60_000
+  setup: 10 * 60_000,
+  review_list: 2 * 60_000,
+  review_apply: 5 * 60_000
 };
 
 const MAX_DETAIL = 500;
@@ -64,6 +68,8 @@ const MAX_CHOICES = 200;
  * always the full ones.
  */
 const SCAN_LIST_LIMIT = 300;
+/** As many as the plugin's review lists (`REVIEW_LIST_LIMIT`), since a BA can only approve what they were shown. */
+const MAX_REVIEW_APPROVALS = 300;
 
 const UUID_RE = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
 const PRODUCT_RE = /^[a-z][a-z0-9-]{0,39}$/;
@@ -93,6 +99,8 @@ export type WelshFrame = {
   key?: string;
   strings?: string[];
   choices?: WelshChoice[];
+  /** Catalogue rows a BA approved after review. */
+  approve?: string[];
   /** Refs a BA left out of the Welsh Language Unit's spreadsheet. */
   leave_out?: string[];
 };
@@ -202,6 +210,20 @@ const sourcesArg: ArgReader = (args, raw) => {
   return { sources };
 };
 
+/** The rows a review approves: at least one, at most as many as a review lists. */
+const approveArg: ArgReader = (args) => {
+  const ids = args.approve;
+  if (
+    !Array.isArray(ids) ||
+    ids.length === 0 ||
+    ids.length > MAX_REVIEW_APPROVALS ||
+    !ids.every((id): id is string => typeof id === "string" && ROW_ID_RE.test(id))
+  ) {
+    return null;
+  }
+  return { approve: [...new Set(ids)] };
+};
+
 const keyArg: ArgReader = (args) => (typeof args.key === "string" && KEY_RE.test(args.key) ? { key: args.key } : null);
 
 const stringsArg: ArgReader = (args) => {
@@ -249,7 +271,9 @@ const KIND_ARGS: Record<WelshKind, [readonly string[], ArgReader][]> = {
   setup: [
     [["repo"], setupRepoArg],
     [["file_ids"], sourcesArg]
-  ]
+  ],
+  review_list: [],
+  review_apply: [[["approve"], approveArg]]
 };
 
 /**
@@ -348,6 +372,10 @@ export function welshArgs(frame: WelshFrame, workspace: string, paths: WelshPath
       return [...setup(), "--dry-run"];
     case "setup":
       return [...setup(), "--pr"];
+    case "review_list":
+      return ["review", ...service];
+    case "review_apply":
+      return ["review", ...service, ...(frame.approve ?? []).flatMap((id) => ["--approve", id]), "--pr"];
   }
 }
 
