@@ -167,6 +167,58 @@ describe("welsh jobs", () => {
     expect(download.headers.get("cache-control")).toBe("no-store");
   });
 
+  it("should set a service up from spreadsheets and JSON copies, name each in the frame, and take JSON for nothing else", async () => {
+    // Arrange
+    const assistant = await withPlugin(await podFixture(["welsh", "welsh-setup"])(ALICE));
+    const upload = (name: string, body: BodyInit) => browser(uploadRoute.POST, "/api/ui/assistant/welsh/files", { body, headers: { "x-file-name": name } });
+
+    // Act
+    const sheet = await jsonOf<{ file_id: string }>(await upload("Hen gatalog.xlsx", XLSX));
+    const copy = await jsonOf<{ file_id: string }>(await upload("copy.json", JSON.stringify({ Back: "Yn ôl" })));
+    const notAnObject = await upload("list.json", "[]");
+    const notAFile = await upload("notes.txt", "x");
+    const started = await jsonOf<{ job_id: string }>(
+      await start({ kind: "setup", product: "pcs", args: { repo: "apps/pcs/pcs-frontend", file_ids: [sheet.file_id, copy.file_id] } })
+    );
+    const importJson = await start({ kind: "import_check", product: "cath", args: { file_id: copy.file_id } });
+
+    // Assert
+    expect(notAnObject.status).toBe(400);
+    expect(notAFile.status).toBe(400);
+    expect(await pendingWelsh(prisma, assistant, started.job_id)).toEqual({
+      job_id: started.job_id,
+      kind: "setup",
+      product: "pcs",
+      args: { repo: "apps/pcs/pcs-frontend", file_ids: [sheet.file_id, copy.file_id] },
+      file_names: { [sheet.file_id]: "Hen gatalog.xlsx", [copy.file_id]: "copy.json" }
+    });
+    expect(importJson.status).toBe(400);
+    expect(await jsonOf(importJson)).toEqual({ error: "that needs the Excel spreadsheet (.xlsx), not a JSON file" });
+  });
+
+  it("should record a review's list and its approvals, and frame each for the pod", async () => {
+    const assistant = await withPlugin(await podFixture(["welsh", "welsh-setup"])(ALICE));
+    const listed = await jsonOf<{ job_id: string }>(await start({ kind: "review_list", product: "cath", args: {} }));
+    const approved = await jsonOf<{ job_id: string }>(await start({ kind: "review_apply", product: "cath", args: { approve: ["0123456789"] } }));
+    expect(await pendingWelsh(prisma, assistant, approved.job_id)).toEqual({
+      job_id: approved.job_id,
+      kind: "review_apply",
+      product: "cath",
+      args: { approve: ["0123456789"] }
+    });
+    expect((await pendingWelsh(prisma, assistant, listed.job_id))?.kind).toBe("review_list");
+  });
+
+  it("should answer that the assistant needs an update to set a service up when its client does not claim welsh-setup", async () => {
+    await assistantOf(ALICE);
+    const sheet = await jsonOf<{ file_id: string }>(
+      await browser(uploadRoute.POST, "/api/ui/assistant/welsh/files", { body: XLSX, headers: { "x-file-name": "old.xlsx" } })
+    );
+    expect(await jsonOf(await start({ kind: "setup_check", product: "pcs", args: { repo: "apps/pcs/pcs-frontend", file_ids: [sheet.file_id] } }))).toEqual({
+      status: "unsupported"
+    });
+  });
+
   it("should download a spreadsheet whose name has a letter outside the BMP, encoding the whole pair, when the owner reads it", async () => {
     // Arrange
     await assistantOf(ALICE);

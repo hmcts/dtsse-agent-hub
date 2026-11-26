@@ -34,7 +34,7 @@ each one appears in the source word for word.
 | put approved Welsh into a repo | `welsh apply --service <p> --from catalogue\|<return.xlsx> --dry-run`, then without `--dry-run`, `--test --pr` |
 | add Welsh content to a Jira story | `welsh story <KEY> --service <p>` (see below) |
 | prove a branch's Welsh came from the WLU | `welsh verify --service <p> --repo <clone>` |
-| set up a service for the first time | `welsh init --service <p> --repo apps/<p>/<repo> --pr`, which opens a draft PR adding `welsh/` to that repo; once it's merged, fill `repos:` in its `welsh/config.yaml` |
+| set up a service for the first time | `welsh setup --service <p> --repo apps/<p>/<repo> [--xlsx <f>]... [--json <f>]... --dry-run` to check the team's earlier translations, then the same with `--pr`, which opens one draft PR adding `welsh/` to that repo with the catalogue seeded from them; once it's merged, fill `repos:` in its `welsh/config.yaml` |
 
 `--service` is the product directory under `apps/` (`cath`, `pcs`, `nfdiv`, …). Results are JSON
 on stdout and the human summary is on stderr. Relay the summary and the table, not the JSON.

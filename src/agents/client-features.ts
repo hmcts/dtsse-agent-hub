@@ -36,7 +36,8 @@ export type ClientFeature =
   | "slides-always-on"
   | "stop"
   | "welsh"
-  | "welsh-review";
+  | "welsh-review"
+  | "welsh-setup";
 
 /**
  * A pod job's claim, `pod-job:<kind>`: one per kind the pod has a handler for, so a kind needs no name added to the

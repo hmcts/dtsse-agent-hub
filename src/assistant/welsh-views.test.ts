@@ -6,9 +6,12 @@ import {
   infoView,
   keepView,
   messageOf,
+  reviewedView,
+  reviewListView,
   safeLink,
   scanView,
   searchView,
+  setupView,
   storyCandidatesView,
   storyPreviewView,
   storyWriteView
@@ -23,8 +26,120 @@ describe("the Welsh page's views", () => {
         catalogue: { approved: 1123, needsReview: 94 },
         shared: { approved: 2 }
       })
-    ).toEqual({ initialised: true, repos: ["apps/cath/cath-service"], skipsStaffPages: true, approved: 1123, needsReview: 94, sharedApproved: 2 });
-    expect(infoView({})).toEqual({ initialised: false, repos: [], skipsStaffPages: false, approved: 0, needsReview: 0, sharedApproved: 0 });
+    ).toEqual({
+      initialised: true,
+      repos: ["apps/cath/cath-service"],
+      skipsStaffPages: true,
+      approved: 1123,
+      needsReview: 94,
+      sharedApproved: 2,
+      candidates: null,
+      setupPr: null
+    });
+    expect(infoView({})).toEqual({
+      initialised: false,
+      repos: [],
+      skipsStaffPages: false,
+      approved: 0,
+      needsReview: 0,
+      sharedApproved: 0,
+      candidates: null,
+      setupPr: null
+    });
+  });
+
+  it("should read where a service not yet set up could keep its Welsh, and a setup already open", () => {
+    const view = infoView({
+      initialised: false,
+      candidates: ["apps/pcs/pcs-api", 4, "apps/pcs/pcs-frontend"],
+      setupPr: "https://github.com/hmcts/pcs-api/pull/9"
+    });
+    expect(view.candidates).toEqual(["apps/pcs/pcs-api", "apps/pcs/pcs-frontend"]);
+    expect(view.setupPr).toBe("https://github.com/hmcts/pcs-api/pull/9");
+    expect(infoView({ initialised: false, candidates: [] }).candidates).toEqual([]);
+  });
+
+  it("should read what is waiting for review, naming where each rendering came from", () => {
+    expect(
+      reviewListView({
+        total: 3,
+        groups: [
+          {
+            english: "Back",
+            context: "",
+            why: ["More than one rendering", 4],
+            options: [
+              { id: "a", welsh: "Yn ôl", status: "approved", source: "legacy:old.xlsx" },
+              { id: "b", welsh: "Nôl", status: "needs-review", source: "WLU:2026-03.xlsx" },
+              { id: "c", welsh: "Nôl", status: "needs-review", source: "hand" }
+            ]
+          }
+        ]
+      })
+    ).toEqual({
+      total: 3,
+      openPr: null,
+      groups: [
+        {
+          english: "Back",
+          context: "",
+          why: ["More than one rendering"],
+          options: [
+            { id: "a", welsh: "Yn ôl", approved: true, source: "old.xlsx" },
+            { id: "b", welsh: "Nôl", approved: false, source: "Welsh Language Unit return 2026-03.xlsx" },
+            { id: "c", welsh: "Nôl", approved: false, source: "hand" }
+          ]
+        }
+      ]
+    });
+    expect(reviewedView({ approved: [{ id: "a" }], superseded: 2, left: 1, pr: "https://github.com/hmcts/x/pull/1" })).toEqual({
+      approved: 1,
+      superseded: 2,
+      left: 1,
+      pr: "https://github.com/hmcts/x/pull/1"
+    });
+  });
+
+  it("should read a review still waiting to be merged", () => {
+    expect(reviewListView({ total: 0, groups: [], openPr: "https://github.com/hmcts/x/pull/2" }).openPr).toBe("https://github.com/hmcts/x/pull/2");
+  });
+
+  it("should read a setup's check and its pull request, and show nothing for fields it does not have", () => {
+    expect(
+      setupView({
+        sources: 3,
+        read: 120,
+        added: 110,
+        needsReview: 4,
+        overriddenCopies: 2,
+        conflicts: 1,
+        conflictExamples: [{ english: "Back", context: "", options: [{ welsh: "Yn ôl", where: "legacy:a.xlsx row 3" }, { welsh: "Nôl" }] }],
+        unreadable: [{ file: "notes.xlsx", problem: "no sheet has both" }],
+        repo: "apps/pcs/pcs-frontend",
+        pr: "https://github.com/hmcts/pcs-frontend/pull/1"
+      })
+    ).toEqual({
+      sources: 3,
+      read: 120,
+      added: 110,
+      needsReview: 4,
+      copiesDropped: 2,
+      conflicts: 1,
+      conflictExamples: [
+        {
+          english: "Back",
+          context: "",
+          options: [
+            { welsh: "Yn ôl", where: "a.xlsx row 3" },
+            { welsh: "Nôl", where: "" }
+          ]
+        }
+      ],
+      unreadable: [{ file: "notes.xlsx", problem: "no sheet has both" }],
+      repo: "apps/pcs/pcs-frontend",
+      pr: "https://github.com/hmcts/pcs-frontend/pull/1"
+    });
+    expect(setupView({}).pr).toBeNull();
   });
 
   it("should read search hits with their Welsh exactly as the catalogue has it", () => {

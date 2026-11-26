@@ -9,6 +9,7 @@ import { branchName, HOME_OVERRIDE, homeRepo, inHome, noHome } from "../home.ts"
 import { fail, requireService, say } from "../io.ts";
 import { importLegacy, type LegacySource } from "../legacy.ts";
 import { REVIEW_FILE, reviewMarkdown } from "../review.ts";
+import { openSetupPr, serviceRepos } from "./setup.ts";
 
 /** Sets a service up: a welsh/ folder in its home repo, committed on a branch, and a draft PR there with --pr. */
 export async function init(argv: string[]): Promise<unknown> {
@@ -33,6 +34,13 @@ export async function init(argv: string[]): Promise<unknown> {
     say(done.pr ? `Draft PR: ${done.pr}` : done.branch ? `Committed on ${done.branch} in ${repo ?? homeRepo(service)}.` : `${service} is already set up.`);
     return { service, ...done.result, branch: done.branch, pr: done.pr };
   }
+  const created = scaffold(service);
+  say(created.length ? `Created:\n  ${created.join("\n  ")}` : "welsh/ is already set up.");
+  return { service, created };
+}
+
+/** Makes what a welsh/ folder must have, in the folder being worked on, and says which files it made. */
+export function scaffold(service: string): string[] {
   const created: string[] = [];
   const cat = loadCatalogue(service);
   if (!existsSync(cat.path)) {
@@ -54,8 +62,7 @@ export async function init(argv: string[]): Promise<unknown> {
     writeFileSync(config, CONFIG_TEMPLATE(service));
     created.push(config);
   }
-  say(created.length ? `Created:\n  ${created.join("\n  ")}` : "welsh/ is already set up.");
-  return { service, created };
+  return created;
 }
 
 export async function searchCmd(argv: string[]): Promise<unknown> {
@@ -102,25 +109,35 @@ export async function importLegacyCmd(argv: string[]): Promise<unknown> {
       Boolean(values.pr)
     );
   }
-  const sources: LegacySource[] = [
-    ...(values.xlsx ?? []).map((p) => ({ kind: "xlsx" as const, path: resolve(p), label: `legacy:${basename(p)}` })),
-    ...(values.json ?? []).map((p) => ({ kind: "json" as const, path: resolve(p), label: `legacy:${basename(p)}` }))
-  ];
+  const sources = legacySources(values.xlsx, values.json);
   if (!sources.length) {
     fail("give at least one --xlsx or --json source");
   }
+  return await seedLegacy(service, sources, values.received, values["review-out"]);
+}
+
+/** The earlier translations named by --xlsx and --json, each of which must exist. */
+export function legacySources(xlsx: readonly string[] = [], json: readonly string[] = []): LegacySource[] {
+  const sources: LegacySource[] = [
+    ...xlsx.map((p) => ({ kind: "xlsx" as const, path: resolve(p), label: `legacy:${basename(p)}` })),
+    ...json.map((p) => ({ kind: "json" as const, path: resolve(p), label: `legacy:${basename(p)}` }))
+  ];
   for (const s of sources) {
     if (!existsSync(s.path)) {
       fail(`${s.path} does not exist`);
     }
   }
+  return sources;
+}
 
+/** Adds earlier translations to the catalogue being worked on, and lists what needs review beside it. */
+export async function seedLegacy(service: string, sources: LegacySource[], received?: string, reviewPath?: string) {
   const cat = loadCatalogue(service);
   mkdirSync(dirname(cat.path), { recursive: true });
-  const report = await importLegacy(cat, sources, values.received ?? new Date().toISOString().slice(0, 10));
+  const report = await importLegacy(cat, sources, received ?? new Date().toISOString().slice(0, 10));
   cat.save();
 
-  const reviewOut = values["review-out"] ?? join(dirname(cataloguePath(service)), REVIEW_FILE);
+  const reviewOut = reviewPath ?? join(dirname(cataloguePath(service)), REVIEW_FILE);
   writeFileSync(reviewOut, reviewMarkdown(cat));
   say(
     `Read ${report.read} legacy entries → ${report.added} catalogue rows added, ${report.unchanged} already present` +
@@ -130,8 +147,18 @@ export async function importLegacyCmd(argv: string[]): Promise<unknown> {
         ? `${report.conflicts.length} English strings have more than one Welsh rendering. Every needs-review row is listed in ${reviewOut}.`
         : "No conflicting renderings.")
   );
-  return { service, catalogue: cat.path, ...report, review: reviewOut, conflicts: report.conflicts.length };
+  return {
+    service,
+    catalogue: cat.path,
+    ...report,
+    review: reviewOut,
+    conflicts: report.conflicts.length,
+    conflictExamples: report.conflicts.slice(0, CONFLICT_EXAMPLES)
+  };
 }
+
+/** How many conflicting English strings a result lists, for the Welsh page to show: the review list has them all. */
+const CONFLICT_EXAMPLES = 50;
 
 /** The seeding, run again in a worktree of the home repo with the sources' absolute paths, committed there. */
 function legacyInHome(service: string, argv: string[], pr: boolean): unknown {
@@ -186,7 +213,17 @@ export async function infoCmd(argv: string[]): Promise<unknown> {
   const home = homeRepo(service);
   if (home === null) {
     say(noHome(service));
-    return { service, home: null, initialised: false, repos: [], catalogue: { exists: false, rows: 0, approved: 0, needsReview: 0, superseded: 0 } };
+    // What setting it up from the Welsh page needs: the repos the welsh/ folder could go in, and any setup already open.
+    const candidates = serviceRepos(service);
+    return {
+      service,
+      home: null,
+      initialised: false,
+      repos: [],
+      candidates,
+      setupPr: openSetupPr(service, candidates),
+      catalogue: { exists: false, rows: 0, approved: 0, needsReview: 0, superseded: 0 }
+    };
   }
   const count = (svc: string) => {
     const cat = loadCatalogue(svc);

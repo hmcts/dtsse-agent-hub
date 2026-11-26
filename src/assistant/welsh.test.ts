@@ -3,6 +3,8 @@ import {
   fileIdsOf,
   hasWelshPlugin,
   isRepoOf,
+  isSetupKind,
+  isTranslationsJson,
   isWelshKind,
   isWelshProduct,
   isXlsx,
@@ -17,6 +19,7 @@ import {
 } from "./welsh.ts";
 
 const FILE = "0f8fad5b-d9cb-469f-a165-70867728950e";
+const FILE_2 = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
 
 describe("welshArgs", () => {
   it("should take a search with its mode defaulted when only the query is given", () => {
@@ -39,6 +42,20 @@ describe("welshArgs", () => {
     expect(welshArgs("import", "cath", { file_id: "../x" })).toHaveProperty("error");
     expect(welshArgs("story_candidates", "cath", { key: "PUB-1234" })).toEqual({ args: { key: "PUB-1234" } });
     expect(welshArgs("story_candidates", "cath", { key: "pub 1234" })).toEqual({ error: "that is not a Jira key, like PUB-1234" });
+  });
+
+  it("should take a setup's repo and one or more uploads, but no repo of another product or a file twice", () => {
+    const many = Array.from({ length: 50 }, (_, i) => `0f8fad5b-d9cb-469f-a165-${String(i).padStart(12, "0")}`);
+    expect(welshArgs("setup_check", "pcs", { repo: "apps/pcs/pcs-frontend" })).toHaveProperty("error");
+    expect(welshArgs("setup_check", "pcs", { repo: "apps/pcs/pcs-frontend", file_ids: [] })).toHaveProperty("error");
+    expect(welshArgs("setup_check", "pcs", { repo: "apps/pcs/pcs-frontend", file_ids: [FILE] })).toEqual({
+      args: { repo: "apps/pcs/pcs-frontend", file_ids: [FILE] }
+    });
+    expect(welshArgs("setup", "pcs", { repo: "apps/pcs/pcs-frontend", file_ids: many })).toEqual({ args: { repo: "apps/pcs/pcs-frontend", file_ids: many } });
+    expect(welshArgs("setup", "pcs", { file_ids: [FILE] })).toHaveProperty("error");
+    expect(welshArgs("setup", "pcs", { repo: "apps/cath/cath-service", file_ids: [FILE] })).toEqual({ error: "that is not one of pcs's repos" });
+    expect(welshArgs("setup", "pcs", { repo: "apps/pcs/pcs-frontend", file_ids: [FILE, FILE] })).toEqual({ error: "that file is listed twice" });
+    expect(welshArgs("setup", "pcs", { repo: "apps/pcs/pcs-frontend", file_ids: ["nope"] })).toEqual({ error: "that is not a file id" });
   });
 
   it("should refuse a Jira key when its number has more digits than the pod accepts", () => {
@@ -87,6 +104,22 @@ describe("the small checks", () => {
     expect(welshFeature("scan")).toBe("welsh");
   });
 
+  it("should list the rows to review with nothing, and approve at least one row id", () => {
+    expect(welshArgs("review_list", "cath", {})).toEqual({ args: {} });
+    expect(welshArgs("review_apply", "cath", { approve: ["0123456789"] })).toEqual({ args: { approve: ["0123456789"] } });
+    expect(welshArgs("review_apply", "cath", { approve: [] })).toHaveProperty("error");
+    expect(welshArgs("review_apply", "cath", { approve: ["--pr"] })).toEqual({ error: "that is not a catalogue row" });
+    expect(welshFeature("review_list")).toBe("welsh-setup");
+    expect(welshFeature("review_apply")).toBe("welsh-setup");
+  });
+
+  it("should need welsh-setup to set a service up, the only kinds that read a JSON copy", () => {
+    expect(welshFeature("setup_check")).toBe("welsh-setup");
+    expect(welshFeature("setup")).toBe("welsh-setup");
+    expect(isSetupKind("setup")).toBe(true);
+    expect(isSetupKind("import")).toBe(false);
+  });
+
   it("should know its kinds and nothing else", () => {
     expect(isWelshKind("story_write")).toBe(true);
     expect(isWelshKind("request")).toBe(true);
@@ -104,6 +137,7 @@ describe("the small checks", () => {
   it("should name the files a job reads", () => {
     expect(fileIdsOf({ file_id: FILE })).toEqual([FILE]);
     expect(fileIdsOf({})).toEqual([]);
+    expect(fileIdsOf({ file_ids: [FILE, FILE_2, 3] })).toEqual([FILE, FILE_2]);
   });
 
   it("should know an xlsx by its zip header and the entries a spreadsheet has, and refuse any other zip", () => {
@@ -121,6 +155,24 @@ describe("the small checks", () => {
     expect(welshFileName("return.csv")).toBeNull();
     expect(welshFileName("%E0%A4%A")).toBeNull();
     expect(welshFileName(undefined)).toBeNull();
+  });
+
+  it("should keep a JSON file's name only when JSON is allowed", () => {
+    expect(welshFileName("copy.json")).toBeNull();
+    expect(welshFileName("copy.json", { json: true })).toBe("copy.json");
+    expect(welshFileName("Hen gatalog.xlsx", { json: true })).toBe("Hen gatalog.xlsx");
+    expect(welshFileName("copy.txt", { json: true })).toBeNull();
+  });
+
+  it("should know a JSON copy of translations by its being an object, and refuse anything else", () => {
+    const bytes = (text: string) => new TextEncoder().encode(text);
+    expect(isTranslationsJson(bytes(JSON.stringify({ Back: "Yn ôl" })))).toBe(true);
+    expect(isTranslationsJson(bytes("[]"))).toBe(false);
+    expect(isTranslationsJson(bytes(JSON.stringify({ Back: "Yn ôl", page: { title: "Teitl" } })))).toBe(false);
+    expect(isTranslationsJson(bytes(JSON.stringify({ Count: 3 })))).toBe(false);
+    expect(isTranslationsJson(bytes("null"))).toBe(false);
+    expect(isTranslationsJson(bytes("{not json"))).toBe(false);
+    expect(isTranslationsJson(new Uint8Array([0x7b, 0xff, 0x7d]))).toBe(false);
   });
 
   it("should refuse a result over the cap", () => {

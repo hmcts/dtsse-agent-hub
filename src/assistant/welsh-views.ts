@@ -20,6 +20,13 @@ export interface WelshInfo {
   approved: number;
   needsReview: number;
   sharedApproved: number;
+  /**
+   * For a service not set up yet: the repos its welsh/ folder could go in, and a setup pull request still open.
+   * `candidates` is null when the assistant's Welsh tools are from before setting up from the page, which say nothing of
+   * the service's repos: an assistant that needs an update, not a service with none.
+   */
+  candidates: string[] | null;
+  setupPr: string | null;
 }
 
 export function infoView(result: Json): WelshInfo {
@@ -32,7 +39,83 @@ export function infoView(result: Json): WelshInfo {
     skipsStaffPages: list(result.repos).some((r) => Array.isArray(r.staffOnly) && r.staffOnly.length > 0),
     approved: num(catalogue.approved),
     needsReview: num(catalogue.needsReview),
-    sharedApproved: num(rec(result.shared).approved)
+    sharedApproved: num(rec(result.shared).approved),
+    candidates: Array.isArray(result.candidates) ? result.candidates.map(str).filter(Boolean) : null,
+    setupPr: nullable(result.setupPr)
+  };
+}
+
+/** What setting a service up found, or did: the check (`setup_check`) and the pull request (`setup`) read alike. */
+export interface SetupView {
+  /** Files read into the catalogue. */
+  sources: number;
+  /** Entries read from them, and catalogue rows they make. */
+  read: number;
+  added: number;
+  needsReview: number;
+  /** JSON entries dropped because a spreadsheet had the same English. */
+  copiesDropped: number;
+  /** English with more than one Welsh, up to the first 50: every one is in `welsh/needs-review.md`. */
+  conflicts: number;
+  conflictExamples: { english: string; context: string; options: { welsh: string; where: string }[] }[];
+  /** Files that could not be read, which the check leaves out and the setup refuses. */
+  unreadable: { file: string; problem: string }[];
+  repo: string;
+  pr: string | null;
+}
+
+/** One English with Welsh to review, and each rendering to choose from. */
+export interface ReviewGroup {
+  english: string;
+  context: string;
+  why: string[];
+  options: { id: string; welsh: string; approved: boolean; source: string }[];
+}
+
+/** What a review lists: the English to settle, up to the plugin's limit, and how many there are in all. */
+export function reviewListView(result: Json): { total: number; groups: ReviewGroup[]; openPr: string | null } {
+  return {
+    total: num(result.total),
+    openPr: nullable(result.openPr),
+    groups: list(result.groups).map((g) => ({
+      english: str(g.english),
+      context: str(g.context),
+      why: (Array.isArray(g.why) ? g.why : []).map(str).filter(Boolean),
+      options: list(g.options).map((o) => ({ id: str(o.id), welsh: str(o.welsh), approved: o.status === "approved", source: fromSource(str(o.source)) }))
+    }))
+  };
+}
+
+/** What approving did: how many, how many renderings it replaced, how many are left, and the pull request. */
+export function reviewedView(result: Json): { approved: number; superseded: number; left: number; pr: string | null } {
+  return { approved: list(result.approved).length, superseded: num(result.superseded), left: num(result.left), pr: nullable(result.pr) };
+}
+
+/** Where a row came from, in words: an earlier file by its name, or a Welsh Language Unit return. */
+function fromSource(source: string): string {
+  if (source.startsWith("legacy:")) {
+    return source.slice("legacy:".length);
+  }
+  return source.startsWith("WLU:") ? `Welsh Language Unit return ${source.slice(4)}` : source;
+}
+
+export function setupView(result: Json): SetupView {
+  return {
+    sources: num(result.sources),
+    read: num(result.read),
+    added: num(result.added),
+    needsReview: num(result.needsReview),
+    copiesDropped: num(result.overriddenCopies),
+    conflicts: num(result.conflicts),
+    conflictExamples: list(result.conflictExamples).map((c) => ({
+      english: str(c.english),
+      context: str(c.context),
+      // Where each came from, by file and row: the plugin's `legacy:` prefix says only that it is an earlier file.
+      options: list(c.options).map((o) => ({ welsh: str(o.welsh), where: str(o.where).replace(/^legacy:/, "") }))
+    })),
+    unreadable: list(result.unreadable).map((u) => ({ file: str(u.file), problem: str(u.problem) })),
+    repo: str(result.repo),
+    pr: nullable(result.pr)
   };
 }
 

@@ -33,8 +33,8 @@ export interface JobState {
   unsure?: boolean;
 }
 
-/** The kinds that write somewhere outside the page: a pull request, a Jira story, or the service's catalogue. */
-const WRITING_KINDS: readonly WelshKind[] = ["apply", "story_write", "import", "keep_english"];
+/** The kinds that write somewhere outside the page: a pull request, a Jira story, or the service's catalogue, or set it up. */
+const WRITING_KINDS: readonly WelshKind[] = ["apply", "story_write", "import", "keep_english", "setup", "review_apply"];
 
 /** One job at a time per section: starting another abandons the one before, whose answer then changes nothing. */
 export function useWelshJob(client: WelshClient) {
@@ -349,12 +349,19 @@ export function RepoSelect({
   repos,
   value,
   onChange,
-  label = "Which part of the service (code repository)"
-}: Readonly<{ repos: readonly string[]; value: string; onChange: (repo: string) => void; label?: string }>) {
+  label = "Which part of the service (code repository)",
+  placeholder
+}: Readonly<{ repos: readonly string[]; value: string; onChange: (repo: string) => void; label?: string; placeholder?: string }>) {
   return (
     <Labelled label={label}>
       {(id) => (
         <select id={id} value={value} onChange={(event) => onChange(event.target.value)} className={`${FIELD} max-w-xs`}>
+          {/* Shown until one is chosen, where no repo is a safe one to assume. */}
+          {placeholder === undefined ? null : (
+            <option value="" disabled>
+              {placeholder}
+            </option>
+          )}
           {repos.map((r) => (
             <option key={r} value={r}>
               {repoName(r)}

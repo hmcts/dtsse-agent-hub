@@ -33,7 +33,8 @@ export type ClientFeature =
   | "slides-always-on"
   | "stop"
   | "welsh"
-  | "welsh-review";
+  | "welsh-review"
+  | "welsh-setup";
 
 /**
  * What this build claims. A name belongs here only once this client reads the field it names, and in the same change
@@ -83,6 +84,11 @@ export type ClientFeature =
  * request keeping what they left out in English. A build that claims only `welsh` ignores those two, so the hub gates
  * them on this name and answers `unsupported`, which the page reads as "needs an update", rather than a job that
  * times out.
+ *
+ * `welsh-setup` is claimed because the assistant supervisor also runs the `welsh` frame's `setup_check` and `setup`
+ * kinds, which read every upload named in `file_ids`, under the names in `file_names`, and set a service up for Welsh
+ * from them, and its `review_list` and `review_apply` kinds, which list and settle the catalogue's rows awaiting review.
+ * The hub gates all four on this name, as it does `welsh-review`'s.
  *
  * `deck-build` is claimed because the assistant supervisor answers the sessions stream's `deck_build` frame, building
  * one version of a conversation's deck with the slides plugin's `scripts/slides build` and uploading the .pptx. The hub
@@ -136,7 +142,8 @@ export const CLIENT_FEATURES: readonly ClientFeature[] = [
   "slides-always-on",
   "stop",
   "welsh",
-  "welsh-review"
+  "welsh-review",
+  "welsh-setup"
 ];
 
 /** Whether `claim`, as untrusted as any stored or answered value, names exactly `names`, in any order. */

@@ -38,21 +38,33 @@ const WELSH_KINDS = [
   "story_candidates",
   "story_preview",
   "story_write",
-  "keep_english"
+  "keep_english",
+  "setup_check",
+  "setup",
+  "review_list",
+  "review_apply"
 ] as const;
 export type WelshKind = (typeof WELSH_KINDS)[number];
 
 /**
- * The client feature a pod must claim to be sent a kind. `request` and `keep_english` came after `welsh`, and a pod on
- * a client from before them ignores their frames, so it is answered `unsupported` (needs an update) rather than left to
- * time out.
+ * The client feature a pod must claim to be sent a kind. `request` and `keep_english`, then the setup and review kinds,
+ * came after `welsh`, and a pod on a client from before them ignores their frames, so it is answered `unsupported`
+ * (needs an update) rather than left to time out.
  */
-export function welshFeature(kind: WelshKind): "welsh" | "welsh-review" {
+export function welshFeature(kind: WelshKind): "welsh" | "welsh-review" | "welsh-setup" {
+  if (isSetupKind(kind) || kind === "review_list" || kind === "review_apply") {
+    return "welsh-setup";
+  }
   return kind === "request" || kind === "keep_english" ? "welsh-review" : "welsh";
 }
 
+/** The kinds that set a service up for Welsh, the only ones that read a JSON copy. */
+export function isSetupKind(kind: WelshKind): boolean {
+  return kind === "setup_check" || kind === "setup";
+}
+
 /** The Welsh page's tasks, which `?task=` can open directly. */
-const WELSH_TASK_IDS = ["search", "scan", "return", "story"] as const;
+const WELSH_TASK_IDS = ["search", "scan", "return", "story", "review"] as const;
 export type WelshTask = (typeof WELSH_TASK_IDS)[number];
 
 export function isWelshTask(value: unknown): value is WelshTask {
@@ -73,12 +85,20 @@ export const WELSH_RATE_LIMIT = 30;
 
 export const MAX_WELSH_FILE_BYTES = 5 * 1024 * 1024;
 export const MAX_WELSH_FILES_PER_JOB = 4;
+/**
+ * How many uploaded files one assistant may hold at once, within the week they are kept: a return a week is the Welsh
+ * Language Unit's pace, so this is generous, and it bounds the 5 MB rows one person can leave in Postgres. It is also
+ * the most a setup can read, so a setup has no limit of its own.
+ */
+export const MAX_WELSH_UPLOADS = 50;
 export const MAX_WELSH_RESULT_BYTES = 512 * 1024;
 const MAX_WELSH_DETAIL = 500;
 export const MAX_WELSH_QUERY = 100;
 export const MAX_WELSH_STRINGS = 200;
 const MAX_WELSH_STRING = 2000;
 const MAX_WELSH_CHOICES = 200;
+/** As many as a review lists: the pod's `MAX_REVIEW_APPROVALS` and the plugin's `REVIEW_LIST_LIMIT`. */
+const MAX_WELSH_APPROVALS = 300;
 /** As many refs as a scan lists, since a BA can only leave out one they were shown: the pod's `SCAN_LIST_LIMIT`. */
 const MAX_WELSH_LEAVE_OUT = 300;
 
@@ -135,6 +155,21 @@ const key = z.string().regex(JIRA_KEY_RE, "that is not a Jira key, like PUB-1234
 /** A repo is one of the product's own: `apps/<product>/<name>`, checked against the product separately. */
 const repo = z.string().max(200);
 
+/**
+ * A setup's repo, which it needs, and the approved translations to seed the catalogue from: at least one file, or dozens. The
+ * only bound is how many uploads one person may hold, which no setup can name more than.
+ */
+const setupArgs = z
+  .object({
+    repo,
+    file_ids: boundedArray(fileId, MAX_WELSH_UPLOADS, {
+      min: 1,
+      message: `that is more files than you can have uploaded at once (${MAX_WELSH_UPLOADS})`,
+      refine: { check: (ids) => new Set(ids).size === ids.length, message: "that file is listed twice" }
+    })
+  })
+  .strict();
+
 const applyArgs = z.object({ repo: repo.optional(), file_id: fileId.optional(), choices: choices.optional() }).strict();
 
 const ARG_SCHEMAS: Record<WelshKind, z.ZodTypeAny> = {
@@ -179,6 +214,17 @@ const ARG_SCHEMAS: Record<WelshKind, z.ZodTypeAny> = {
         }
       ).refine((strings) => strings.length > 0, "choose at least one")
     })
+    .strict(),
+  setup_check: setupArgs,
+  setup: setupArgs,
+  review_list: z.object({}).strict(),
+  review_apply: z
+    .object({
+      approve: boundedArray(z.string().regex(WELSH_ROW_ID_RE, "that is not a catalogue row"), MAX_WELSH_APPROVALS, {
+        min: 1,
+        message: `approve at most ${MAX_WELSH_APPROVALS} at a time`
+      })
+    })
     .strict()
 };
 
@@ -205,7 +251,8 @@ export function isRepoOf(product: string, path: string): boolean {
 
 /** The file ids a job's arguments name, which the store checks are the person's own. */
 export function fileIdsOf(args: WelshArgs): string[] {
-  return typeof args.file_id === "string" ? [args.file_id] : [];
+  const listed = Array.isArray(args.file_ids) ? args.file_ids.filter((id): id is string => typeof id === "string") : [];
+  return typeof args.file_id === "string" ? [args.file_id, ...listed] : listed;
 }
 
 /** The pod's answer to one job: what scripts/welsh printed, or why it did not run. */
@@ -233,8 +280,22 @@ export function isXlsx(bytes: Uint8Array): boolean {
   return names.includes("[Content_Types].xml") && names.includes("xl/");
 }
 
-/** A file name as stored and offered back: the last path part, safe characters only, ending `.xlsx`. */
-export function welshFileName(raw: unknown): string | null {
+/**
+ * A JSON copy of earlier translations, as a setup reads one: one flat object of English to Welsh, each value a piece of
+ * text. Checked as it is uploaded, so a file that is not one, a frontend's nested locale file above all, is refused then
+ * rather than failing the check after it.
+ */
+export function isTranslationsJson(bytes: Uint8Array): boolean {
+  try {
+    const parsed: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) && Object.values(parsed).every((welsh) => typeof welsh === "string");
+  } catch {
+    return false;
+  }
+}
+
+/** A file name as stored and offered back: the last path part, safe characters only, ending `.xlsx`, or `.json` when allowed. */
+export function welshFileName(raw: unknown, { json = false }: { json?: boolean } = {}): string | null {
   if (typeof raw !== "string") {
     return null;
   }
@@ -250,7 +311,8 @@ export function welshFileName(raw: unknown): string | null {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 200);
-  return /\.xlsx$/i.test(clean) && clean.length > 5 ? clean : null;
+  const ending = json ? /\.(xlsx|json)$/i : /\.xlsx$/i;
+  return ending.test(clean) && clean.length > 5 ? clean : null;
 }
 
 export interface WelshFileView {

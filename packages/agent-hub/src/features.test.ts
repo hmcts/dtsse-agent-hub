@@ -19,7 +19,7 @@ describe("CLIENT_FEATURES", () => {
   // an assertion below, which the per-name list cannot, and which is how this file came to claim a standard it did
   // not meet.
   it("should hold every feature this build claims, so a name dropped in a merge fails here", () => {
-    expect(CLIENT_FEATURES).toHaveLength(16);
+    expect(CLIENT_FEATURES).toHaveLength(17);
   });
 
   /**
@@ -63,7 +63,8 @@ describe("CLIENT_FEATURES", () => {
     "slides-always-on",
     "stop",
     "welsh",
-    "welsh-review"
+    "welsh-review",
+    "welsh-setup"
   ])("should claim %s", (feature) => {
     expect(CLIENT_FEATURES).toContain(feature);
   });
