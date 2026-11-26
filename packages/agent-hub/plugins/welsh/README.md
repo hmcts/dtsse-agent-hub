@@ -91,8 +91,8 @@ $WELSH setup --service <product> --repo apps/<product>/<repo> [--xlsx <file>]...
 ```
 
 This opens one draft PR in that repo adding `welsh/`: a `catalogue.csv` seeded from the team's earlier translations, as
-many WLU spreadsheets and JSON copies as they have, or empty with none, plus `needs-review.md`, a `config.yaml` and a
-`returns/` folder. `--dry-run` reads the same files and reports what the catalogue would hold, naming any file it cannot
+many WLU spreadsheets and JSON copies as they have, or empty with none, plus `needs-review.md`, a `config.yaml`, a
+`returns/` folder and `sources/`, a copy of every document the catalogue was made from, for auditing. `--dry-run` reads the same files and reports what the catalogue would hold, naming any file it cannot
 read, and commits nothing. Setup refuses a service already set up, and one with a setup PR still open. In `config.yaml`,
 list the repos to scan and the adapter for each; `.` is the home repo itself. The service is ready once the PR is
 merged. This is what the CFT Workspace's Welsh page runs when a service has no catalogue yet.

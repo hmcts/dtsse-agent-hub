@@ -6,10 +6,11 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { cataloguePath } from "../catalogue.ts";
 import { manifestEntries, manifestUrl } from "../clones.ts";
 import { branchName, HOME_OVERRIDE, homeRepo, inHome } from "../home.ts";
 import { fail, requireService, say } from "../io.ts";
@@ -119,8 +120,9 @@ export async function setupCmd(argv: string[]): Promise<unknown> {
   if (process.env[HOME_OVERRIDE]) {
     const created = scaffold(service);
     const seeded = sources.length > 0 ? await seedLegacy(service, sources, values.received) : null;
+    const saved = saveSources(dirname(cataloguePath(service)), sources);
     const { catalogue: _catalogue, review: _review, service: _service, ...report } = seeded ?? EMPTY_SEED;
-    return { service, created, sources: sources.length, ...report };
+    return { service, created, sources: sources.length, saved, ...report };
   }
 
   const repo = values.repo?.replace(/\/+$/, "");
@@ -167,6 +169,30 @@ export async function setupCmd(argv: string[]): Promise<unknown> {
   return { ...done.result, repo, branch: done.branch, pr: done.pr };
 }
 
+/** Where a setup keeps the documents its catalogue was made from, beside it, so a reviewer can trace every row. */
+export const SOURCES_DIR = "sources";
+
+/**
+ * Copies each document into welsh/sources/ under its own name, which is what its rows' `source` names. Two with one
+ * name, from different folders on the person's computer, are kept apart with a number. Answers the names kept.
+ */
+export function saveSources(welsh: string, sources: readonly LegacySource[]): string[] {
+  const dir = join(welsh, SOURCES_DIR);
+  const saved: string[] = [];
+  for (const source of sources) {
+    mkdirSync(dir, { recursive: true });
+    const name = basename(source.path);
+    const ext = extname(name);
+    let kept = name;
+    for (let n = 2; existsSync(join(dir, kept)); n++) {
+      kept = `${name.slice(0, name.length - ext.length)} (${n})${ext}`;
+    }
+    copyFileSync(source.path, join(dir, kept));
+    saved.push(kept);
+  }
+  return saved;
+}
+
 function setupBody(r: { sources: number; added: number; needsReview: number; conflicts: number }): string {
   const seeded = r.sources
     ? `Seeds \`welsh/catalogue.csv\` from ${r.sources} earlier translation file(s): ${r.added} rows, ${r.needsReview} of them \`needs-review\`, which are not used until a BA approves them. ` +
@@ -176,6 +202,7 @@ function setupBody(r: { sources: number; added: number; needsReview: number; con
     : "Adds an empty `welsh/catalogue.csv`.";
   return (
     `Sets this service up for Welsh translations. ${seeded}\n\n` +
+    (r.sources ? "The documents it was made from are in `welsh/sources/`, for auditing. " : "") +
     "Also adds `welsh/config.yaml` and `welsh/returns/` for the Welsh Language Unit's returns. Before the Welsh page can check the code, list the repos to scan in `config.yaml`, with the adapter for each."
   );
 }

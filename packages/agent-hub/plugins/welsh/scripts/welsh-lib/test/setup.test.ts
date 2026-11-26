@@ -99,7 +99,16 @@ test("setting up commits welsh/ with the seeded catalogue on a branch of the cho
   const branch = String(result.branch);
   assert.match(branch, /^welsh\/pcs-setup-/);
   const tree = sh(clone, "ls-tree", "-r", "--name-only", branch, "welsh");
-  assert.deepEqual(tree.split("\n").sort(), ["welsh/catalogue.csv", "welsh/config.yaml", "welsh/needs-review.md", "welsh/returns/.gitkeep"]);
+  assert.deepEqual(tree.split("\n").sort(), [
+    "welsh/catalogue.csv",
+    "welsh/config.yaml",
+    "welsh/needs-review.md",
+    "welsh/returns/.gitkeep",
+    "welsh/sources/copy.json",
+    "welsh/sources/first.xlsx"
+  ]);
+  assert.deepEqual(result.saved, ["first.xlsx", "copy.json"]);
+  assert.equal(sh(clone, "show", `${branch}:welsh/sources/copy.json`), JSON.stringify({ Continue: "Parhau", Cancel: "Canslo" }));
   const catalogue = sh(clone, "show", `${branch}:welsh/catalogue.csv`);
   assert.match(catalogue, /Continue,Parhau/);
   assert.match(catalogue, /Cancel,Canslo/);
@@ -117,6 +126,14 @@ test("setting up refuses a file it cannot read, a repo that is not the service's
   await assert.rejects(setupCmd(["--service", "pcs", "--repo", "apps/cath/cath-service"]), /must be one of pcs's repos/);
   await assert.rejects(setupCmd(["--service", "pcs"]), /--repo is required/);
   await assert.rejects(setupCmd(["--service", "cath", "--repo", "apps/cath/cath-service"]), /already set up for Welsh, in apps\/cath\/cath-service/);
+});
+
+test("two documents with one name are both kept, the second with a number", async () => {
+  const { saveSources } = await import("../commands/setup.ts");
+  const other = mkdtempSync(join(tmpdir(), "welsh-setup-other-"));
+  writeFileSync(join(other, "copy.json"), "{}");
+  const welsh = mkdtempSync(join(tmpdir(), "welsh-setup-kept-"));
+  assert.deepEqual(saveSources(welsh, legacySources([], [copy, join(other, "copy.json")])), ["copy.json", "copy (2).json"]);
 });
 
 test("a JSON copy that is not an object of English to Welsh is named", async () => {

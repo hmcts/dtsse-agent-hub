@@ -138,6 +138,7 @@ export function WelshSetup({
             Add every document of approved Welsh the team has: spreadsheets the Welsh Language Unit sent back and/or JSON files of the service's Welsh. You need
             at least one. Each spreadsheet needs a column headed English and one headed Welsh or Cymraeg.
           </p>
+          <p className="text-[13px] text-asst-body">The documents you upload here are also saved to the repo, in welsh/sources, for auditing.</p>
           <Labelled label="Spreadsheets (.xlsx) or JSON files (.json)">
             {(id) => (
               <input

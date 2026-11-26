@@ -829,6 +829,7 @@ describe("WelshPage, setting a service up", () => {
     expect(screen.queryByLabelText("Which repo keeps the service's Welsh")).toBeNull();
     expect(screen.getByText("Add your documents")).toBeTruthy();
     expect(screen.getByText(/check with the devs/)).toBeTruthy();
+    expect(screen.getByText(/also saved to the repo, in welsh\/sources, for auditing/)).toBeTruthy();
   });
 
   it("should link to a setup already open rather than offer another", async () => {
