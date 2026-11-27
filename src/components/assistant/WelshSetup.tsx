@@ -7,8 +7,8 @@ import {
   doneResult,
   isBusy,
   JobStatus,
-  Labelled,
   OutLink,
+  PRIMARY,
   plural,
   RepoSelect,
   repoName,
@@ -46,6 +46,7 @@ export function WelshSetup({
   const [repo, setRepo] = useState(candidates?.length === 1 ? (candidates[0] ?? "") : "");
   const [sources, setSources] = useState<Source[]>([]);
   const [uploading, setUploading] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
   const [uploadErrors, setUploadErrors] = useState<string[]>([]);
   const check = useWelshJob(client);
   const setup = useWelshJob(client);
@@ -146,20 +147,45 @@ export function WelshSetup({
             at least one. Each spreadsheet needs a column headed English and one headed Welsh or Cymraeg.
           </p>
           <p className="text-[13px] text-asst-body">The documents you upload here are also saved to the repo, in welsh/sources, for auditing.</p>
-          <Labelled label="Spreadsheets (.xlsx) or JSON files (.json)">
-            {(id) => (
-              <input
-                id={id}
-                ref={input}
-                type="file"
-                multiple
-                accept=".xlsx,.json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/json"
-                disabled={busy}
-                onChange={(event) => void add(event.target.files)}
-                className="text-[13px] text-asst-text"
-              />
-            )}
-          </Labelled>
+          {/* The browser's own file input is hard to see on this page's colours, so a plain button opens it, and the files can be dropped too. */}
+          <div
+            role="group"
+            aria-label="Upload your documents"
+            onDragOver={(event) => {
+              event.preventDefault();
+              if (!busy) {
+                setDragging(true);
+              }
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(event) => {
+              event.preventDefault();
+              setDragging(false);
+              if (!busy) {
+                void add(event.dataTransfer.files);
+              }
+            }}
+            className={`flex flex-col items-start gap-2 rounded-xl border border-dashed px-4 py-4 ${dragging ? "border-asst-accent bg-asst-hover" : "border-asst-line"}`}
+          >
+            <div className="flex flex-wrap items-center gap-3">
+              <button type="button" className={PRIMARY} disabled={busy} onClick={() => input.current?.click()}>
+                {sources.length > 0 ? "Add more files" : "Choose files to upload"}
+              </button>
+              <span className="text-[13px] text-asst-muted">or drag them here</span>
+            </div>
+            <p className="text-xs text-asst-muted">Spreadsheets (.xlsx) or JSON files (.json)</p>
+            <input
+              ref={input}
+              type="file"
+              multiple
+              tabIndex={-1}
+              aria-label="Spreadsheets (.xlsx) or JSON files (.json)"
+              accept=".xlsx,.json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/json"
+              disabled={busy}
+              onChange={(event) => void add(event.target.files)}
+              className="sr-only"
+            />
+          </div>
           {sources.length > 0 ? (
             <ul aria-label="Files to set up from" className="flex flex-col gap-1 text-[13px]">
               {sources.map((s) => (
