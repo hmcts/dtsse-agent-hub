@@ -792,6 +792,32 @@ describe("WelshPage, setting a service up", () => {
     expect(screen.getByText(/“Back”: “Yn ôl” in old.xlsx row 3; “Nôl” in copy.json/)).toBeTruthy();
   });
 
+  it("should open the file picker from a visible button, and take files dropped on the area", async () => {
+    // Arrange
+    const { fake } = await openSetup(SETUP);
+    chooseRepo();
+    const picker = screen.getByLabelText(/Spreadsheets \(.xlsx\) or JSON files/) as HTMLInputElement;
+    const opened = vi.spyOn(picker, "click").mockImplementation(() => undefined);
+    const area = screen.getByRole("group", { name: "Upload your documents" });
+
+    // Act
+    fireEvent.click(screen.getByRole("button", { name: "Choose files to upload" }));
+    fireEvent.dragOver(area);
+    const highlighted = area.className;
+    fireEvent.dragLeave(area);
+    vi.mocked(fake.upload).mockResolvedValueOnce({ file_id: ids[0] as string });
+    fireEvent.dragOver(area);
+    fireEvent.drop(area, { dataTransfer: { files: [new File(["PK"], "dropped.xlsx")] } });
+
+    // Assert
+    expect(opened).toHaveBeenCalledTimes(1);
+    expect(highlighted).toMatch(/border-asst-accent/);
+    expect(await screen.findByText("dropped.xlsx", { selector: ".break-all" })).toBeTruthy();
+    expect(area.className).not.toMatch(/border-asst-accent/);
+    expect(screen.getByRole("button", { name: "Add more files" })).toBeTruthy();
+    expect(picker.tabIndex).toBe(-1);
+  });
+
   it("should not check anything until at least one document is added", async () => {
     const { fake, requests } = await openSetup(SETUP);
     chooseRepo();
