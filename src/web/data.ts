@@ -1,4 +1,5 @@
 import "server-only";
+import { notFound } from "next/navigation";
 import {
   type ConversationAccess,
   canConnectMicrosoft,
@@ -86,7 +87,7 @@ import type { Identity } from "../users/identity.ts";
 import type { ModelRoute, Viewer } from "../viewer/identity.ts";
 import { availablePlugins, PluginConfigurationError, type PluginOffer, type PluginOption } from "../virtual-agents/plugins.ts";
 import { autoStartTimes, idleOffers, idleSelected, NO_AUTO_START } from "../virtual-agents/schedule.ts";
-import { eveningStop, idleMinutes } from "../virtual-agents/settings.ts";
+import { eveningStop, idleMinutes, virtualAgentsEnabled } from "../virtual-agents/settings.ts";
 import { liveModelRoutes, type VirtualAgentRow } from "../virtual-agents/store.ts";
 import { claudeTokenUsable, neededCredentials, type PortLink, portLinks } from "../virtual-agents/views.ts";
 import { type AgentAddress, NO_AGENT } from "./home.ts";
@@ -347,8 +348,14 @@ function pluginSettings(assistant: { plugins: string[] }): AssistantHome["plugin
 /**
  * Opening the Assistant: the viewer's assistant, created on their first visit and otherwise as it is, stopped or not,
  * since reading a page starts nothing; what it still needs from them; and their conversations.
+ *
+ * Not found while virtual agents are off. The layout says so too, but Next renders it alongside the page, so without
+ * this check the page's read would still create the agent the layout is turning away.
  */
 export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
+  if (!virtualAgentsEnabled()) {
+    notFound();
+  }
   const { assistant, claims } = await ensureAssistantWithClaims(prisma, viewer);
   const [credentials, conversations, folders, skills, mentions] = await Promise.all([
     credentialSettings(viewer),
