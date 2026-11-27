@@ -331,6 +331,16 @@ describe("the launch token across stop and start", () => {
     expect((await status(id, restarting!.launch_token!, { phase: "provisioning" })).status).toBe(204);
     expect(await row(id)).toMatchObject({ status: "provisioning", stopReason: null, diskExpiresAt: null });
   });
+
+  it("should clear the disk's expiry when a stopped agent is started again", async () => {
+    const { id } = await started(ALICE, "pcs-api");
+    await setDesired(prisma, ALICE.oid, id, "stopped");
+    await prisma.virtualAgent.update({ where: { id }, data: { diskExpiresAt: new Date(Date.now() + 24 * 60 * 60_000) } });
+
+    await setDesired(prisma, ALICE.oid, id, "running");
+
+    expect((await row(id)).diskExpiresAt).toBeNull();
+  });
 });
 
 describe("POST /api/orchestrator/virtual-agents/{id}/observed", () => {
@@ -382,16 +392,6 @@ describe("POST /api/orchestrator/virtual-agents/{id}/observed", () => {
     await observe(id, { generation: claimed!.generation, replicas_ready: 0 });
 
     expect((await row(id)).diskExpiresAt!.getTime()).toBeGreaterThanOrEqual(before + TTL_MS);
-  });
-
-  it("should clear the disk's expiry when a stopped agent is started again", async () => {
-    const { id } = await started(ALICE, "pcs-api");
-    await setDesired(prisma, ALICE.oid, id, "stopped");
-    await prisma.virtualAgent.update({ where: { id }, data: { diskExpiresAt: new Date(Date.now() + TTL_MS) } });
-
-    await setDesired(prisma, ALICE.oid, id, "running");
-
-    expect((await row(id)).diskExpiresAt).toBeNull();
   });
 
   it("should hand an expired disk to the orchestrator for deletion until it reports the disk gone", async () => {

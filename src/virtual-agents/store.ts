@@ -796,9 +796,9 @@ export type ObserveResult = { removed: true } | { removed: false; row: VirtualAg
 
 /**
  * The orchestrator's report on a claimed agent: which generation it applied, and what it saw. It releases the claim,
- * moves `observed_generation` forward (never back), and maps what was seen onto the status. An agent that has just
- * stopped starts its disk's expiry; a deleted agent whose StatefulSet and disk are both gone is removed. It ends any
- * run of apply errors.
+ * moves `observed_generation` forward (never back), and maps what was seen onto the status. A stopped agent with no
+ * expiry and a disk not yet deleted gets one; a deleted agent whose StatefulSet and disk are both gone is removed. It
+ * ends any run of apply errors.
  */
 export async function observeVirtualAgent(prisma: PrismaClient, id: string, report: ObservedReport, now: Date = new Date()): Promise<ObserveResult> {
   return await prisma.$transaction(async (tx) => {
