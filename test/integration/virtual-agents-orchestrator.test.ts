@@ -4,7 +4,6 @@ import * as liveRoute from "../../src/app/api/orchestrator/live/route.ts";
 import * as applyFailedRoute from "../../src/app/api/orchestrator/virtual-agents/[id]/apply-failed/route.ts";
 import { byCodePoint } from "../../src/topics/slug.ts";
 import { APPLY_FAILURES_BEFORE_FAILED } from "../../src/virtual-agents/lifecycle.ts";
-import { stopVirtualAgents } from "../../src/virtual-agents/stop.ts";
 import {
   type ClaimedVirtualAgent,
   changeVirtualAgentPod,
@@ -357,26 +356,27 @@ describe("POST /api/orchestrator/virtual-agents/{id}/observed", () => {
 
   const TTL_MS = 14 * 24 * 60 * 60_000;
 
-  it("should start a stopped agent's disk expiry when the owner stops it, and keep it when the orchestrator observes the stop", async () => {
+  it("should start a stopped agent's disk expiry when it observes the agent stopped", async () => {
     const { id } = await started(ALICE, "pcs-api");
-    const before = Date.now();
     await setDesired(prisma, ALICE.oid, id, "stopped");
+    expect((await row(id)).diskExpiresAt).toBeNull();
+    const [claimed] = await claim();
+
+    const before = Date.now();
+    await observe(id, { generation: claimed!.generation, replicas_ready: 0 });
     const after = Date.now();
+
     const expires = (await row(id)).diskExpiresAt!.getTime();
     expect(expires).toBeGreaterThanOrEqual(before + TTL_MS);
     expect(expires).toBeLessThanOrEqual(after + TTL_MS);
-
-    const [claimed] = await claim();
-    await observe(id, { generation: claimed!.generation, replicas_ready: 0 });
-
-    expect((await row(id)).diskExpiresAt!.getTime()).toBe(expires);
   });
 
-  it("should start the disk's expiry on observing a stopped agent that has none", async () => {
+  it("should start the disk's expiry when it observes a stopped agent that has none", async () => {
     const { id } = await started(ALICE, "pcs-api");
     await setDesired(prisma, ALICE.oid, id, "stopped");
-    await prisma.virtualAgent.update({ where: { id }, data: { diskExpiresAt: null } });
     const [claimed] = await claim();
+    await observe(id, { generation: claimed!.generation, replicas_ready: 0 });
+    await prisma.virtualAgent.update({ where: { id }, data: { diskExpiresAt: null } });
 
     const before = Date.now();
     await observe(id, { generation: claimed!.generation, replicas_ready: 0 });
@@ -384,31 +384,10 @@ describe("POST /api/orchestrator/virtual-agents/{id}/observed", () => {
     expect((await row(id)).diskExpiresAt!.getTime()).toBeGreaterThanOrEqual(before + TTL_MS);
   });
 
-  it("should not give an expiry to a stopped agent whose disk is already deleted", async () => {
-    const { id } = await started(ALICE, "pcs-api");
-    await prisma.virtualAgent.update({ where: { id }, data: { diskDeletedAt: new Date() } });
-
-    await setDesired(prisma, ALICE.oid, id, "stopped");
-
-    expect((await row(id)).diskExpiresAt).toBeNull();
-  });
-
-  it("should give an expiry to an agent the sweep stops, and leave one it already has", async () => {
-    const fresh = await started(ALICE, "pcs-api");
-    const kept = await started(BOB, "pcs-api");
-    const earlier = new Date("2026-12-01T00:00:00Z");
-    await prisma.virtualAgent.update({ where: { id: kept.id }, data: { diskExpiresAt: earlier } });
-    const now = new Date("2026-11-26T12:00:00Z");
-
-    await stopVirtualAgents(prisma, [fresh.id, kept.id], "idle", now);
-
-    expect((await row(fresh.id)).diskExpiresAt).toEqual(new Date(now.getTime() + TTL_MS));
-    expect((await row(kept.id)).diskExpiresAt).toEqual(earlier);
-  });
-
   it("should clear the disk's expiry when a stopped agent is started again", async () => {
     const { id } = await started(ALICE, "pcs-api");
     await setDesired(prisma, ALICE.oid, id, "stopped");
+    await prisma.virtualAgent.update({ where: { id }, data: { diskExpiresAt: new Date(Date.now() + TTL_MS) } });
 
     await setDesired(prisma, ALICE.oid, id, "running");
 

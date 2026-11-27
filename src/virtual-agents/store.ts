@@ -260,8 +260,7 @@ export async function setDesired(
     }
     const settled = desired === "stopped" && row.status === "stopped";
     const stop = desired === "stopped" ? { stopReason: "user" as const } : {};
-    const expiry = desired === "stopped" && row.diskDeletedAt === null ? { diskExpiresAt: row.diskExpiresAt ?? diskExpiresAt(now, diskTtlDays()) } : {};
-    const data = { ...NO_TOKEN, ...NO_PORTS, ...noClientClaim(), ...stop, ...expiry, ...(settled ? {} : statusChange("stopping", now)) };
+    const data = { ...NO_TOKEN, ...NO_PORTS, ...noClientClaim(), ...stop, ...(settled ? {} : statusChange("stopping", now)) };
     const updated = toRow(
       await tx.virtualAgent.update({
         where: { id },
